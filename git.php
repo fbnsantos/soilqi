@@ -52,7 +52,7 @@ if (!empty($dbParams)) {
     $configFile = 'config.php';
     
     if (file_exists($templateFile)) {
-            if (unlink($templateFile)) {
+            if (unlink($configFile)) {
                  echo "✅ Ficheiro eliminado com sucesso!";
             } else {
                 echo "❌ Erro ao eliminar o ficheiro!";
