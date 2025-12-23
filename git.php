@@ -24,11 +24,14 @@ echo "<hr>";
 // 1. GERAR CONFIG.PHP A PARTIR DO TEMPLATE
 // ==================================================
 
+$method = $_SERVER['REQUEST_METHOD'];
+$params = ($method === 'POST') ? $_POST : $_GET;
+
 $dbParams = [
-    'dbhost' => $_GET['dbhost'] ?? null,
-    'dbuser' => $_GET['dbuser'] ?? null, 
-    'dbpass' => $_GET['dbpass'] ?? null,
-    'dbname' => $_GET['dbname'] ?? null
+    'dbhost' => $params['dbhost'] ?? null,
+    'dbuser' => $params['dbuser'] ?? null, 
+    'dbpass' => $params['dbpass'] ?? null,
+    'dbname' => $params['dbname'] ?? null
 ];
 
 // Filtrar apenas parâmetros que foram passados

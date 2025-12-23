@@ -1,7 +1,7 @@
 <?php
 session_start();
 
-//version 1.1
+//version 1.2
 
 // Configurações da Base de Dados
 define('DB_HOST', '{{DB_HOST}}');

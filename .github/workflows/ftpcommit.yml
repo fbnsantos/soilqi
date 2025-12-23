@@ -16,5 +16,11 @@ jobs:
 
     - name: Trigger PHP Script via cURL
       run: 
-       curl -X GET "https://soilqi.com/soilqi/git.php?dbhost=${{ secrets.DB_HOST }}&dbuser=${{ secrets.DB_USER }}&dbpass=${{ secrets.DB_PASS }}&dbname=${{ secrets.DB_NAME }}"
-  
+       curl -X GET "https://soilqi.com/soilqi/" \
+          --data-urlencode "dbhost=${{ secrets.DB_HOST }}" \
+          --data-urlencode "dbuser=${{ secrets.DB_USER }}" \
+          --data-urlencode "dbpass=${{ secrets.DB_PASS }}" \
+          --data-urlencode "dbname=${{ secrets.DB_NAME }}" \
+          -G
+
+           echo "✅ Deploy completed!"
