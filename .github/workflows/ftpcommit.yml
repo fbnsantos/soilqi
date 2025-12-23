@@ -1,0 +1,20 @@
+name: FTP Deploy
+
+on:
+  push:
+    branches:
+      - main  # Ou a branch que você deseja monitorar para o deploy
+
+jobs:
+  deploy:
+    name: Deploy via FTP
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3  # Faz o checkout do código do repositório
+
+    - name: Trigger PHP Script via cURL
+      run: 
+       curl -X GET "http://criis-projects.inesctec.pt/pikachu/pikachuPM/git.php?dbhost=${{ secrets.DB_HOST }}"
+  
