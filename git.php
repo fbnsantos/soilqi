@@ -50,13 +50,15 @@ if (!empty($dbParams)) {
     
     $templateFile = 'config_template.php';
     $configFile = 'config.php';
+
+    if (unlink($configFile)) {
+                 echo "✅ Ficheiro eliminado com sucesso!";
+    } else {
+                echo "❌ Erro ao eliminar o ficheiro!";
+    }
     
     if (file_exists($templateFile)) {
-            if (unlink($configFile)) {
-                 echo "✅ Ficheiro eliminado com sucesso!";
-            } else {
-                echo "❌ Erro ao eliminar o ficheiro!";
-            }
+ 
         // Fazer backup do config atual se existir
         //if (file_exists($configFile)) {
         //    $backupFile = 'config.php.backup.' . date('Y-m-d_H-i-s');
