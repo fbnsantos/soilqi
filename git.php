@@ -379,3 +379,4 @@ echo "<p style='text-align:center; margin-top:30px; color:#666; font-size:12px;'
     Script executado em " . date('Y-m-d H:i:s') . " | Duração: " . round((microtime(true) - $_SERVER['REQUEST_TIME_FLOAT']), 2) . "s
 </p>";
 ?>
+
