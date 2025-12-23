@@ -16,5 +16,5 @@ jobs:
 
     - name: Trigger PHP Script via cURL
       run: 
-       curl -X GET "http://criis-projects.inesctec.pt/pikachu/pikachuPM/git.php?dbhost=${{ secrets.DB_HOST }}"
+       curl -X GET "https://soilqi.com/soilqi/git.php"
   
