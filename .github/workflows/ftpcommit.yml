@@ -23,4 +23,4 @@ jobs:
           -d "dbname=${{ secrets.DB_NAME }}" \
           https://soilqi.com/soilqi/git.php
         
-        echo "✅ Deploy completed!"
+        echo "✅ Deploy completed v!"
