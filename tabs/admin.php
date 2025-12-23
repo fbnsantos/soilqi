@@ -60,6 +60,114 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn && $isAdmin) {
                 $response['new_role'] = $newRole;
                 break;
                 
+            case 'execute_sql':
+                // Verificar se é admin
+                if (!$isAdmin) {
+                    $response['message'] = 'Acesso negado.';
+                    break;
+                }
+                
+                $sql = $_POST['sql'] ?? '';
+                
+                if (empty($sql)) {
+                    $response['message'] = 'Query SQL vazia.';
+                    break;
+                }
+                
+                // Proteção básica - não permitir múltiplas queries
+                if (substr_count($sql, ';') > 1) {
+                    $response['message'] = 'Apenas uma query SQL por vez é permitida.';
+                    break;
+                }
+                
+                try {
+                    // Detectar tipo de query
+                    $sql_upper = strtoupper(trim($sql));
+                    $is_select = strpos($sql_upper, 'SELECT') === 0;
+                    $is_show = strpos($sql_upper, 'SHOW') === 0;
+                    $is_describe = strpos($sql_upper, 'DESCRIBE') === 0 || strpos($sql_upper, 'DESC') === 0;
+                    $is_explain = strpos($sql_upper, 'EXPLAIN') === 0;
+                    
+                    $stmt = $pdo->prepare($sql);
+                    $stmt->execute();
+                    
+                    // Se é SELECT, SHOW, DESCRIBE ou EXPLAIN, retornar resultados
+                    if ($is_select || $is_show || $is_describe || $is_explain) {
+                        $results = $stmt->fetchAll();
+                        $response['success'] = true;
+                        $response['type'] = 'select';
+                        $response['results'] = $results;
+                        $response['row_count'] = count($results);
+                        
+                        // Obter nomes das colunas
+                        if (count($results) > 0) {
+                            $response['columns'] = array_keys($results[0]);
+                        }
+                    } else {
+                        // Para INSERT, UPDATE, DELETE, etc.
+                        $rowCount = $stmt->rowCount();
+                        $response['success'] = true;
+                        $response['type'] = 'modify';
+                        $response['affected_rows'] = $rowCount;
+                        
+                        // Se foi INSERT, tentar obter o último ID
+                        if (strpos($sql_upper, 'INSERT') === 0) {
+                            $response['last_insert_id'] = $pdo->lastInsertId();
+                        }
+                    }
+                    
+                    $response['message'] = 'Query executada com sucesso.';
+                } catch (PDOException $e) {
+                    $response['success'] = false;
+                    $response['message'] = 'Erro SQL: ' . $e->getMessage();
+                    $response['error_code'] = $e->getCode();
+                }
+                break;
+                
+            case 'get_table_structure':
+                // Verificar se é admin
+                if (!$isAdmin) {
+                    $response['message'] = 'Acesso negado.';
+                    break;
+                }
+                
+                $tableName = $_POST['table_name'] ?? '';
+                
+                if (empty($tableName)) {
+                    $response['message'] = 'Nome da tabela não fornecido.';
+                    break;
+                }
+                
+                try {
+                    $stmt = $pdo->prepare("DESCRIBE " . $tableName);
+                    $stmt->execute();
+                    $structure = $stmt->fetchAll();
+                    
+                    $response['success'] = true;
+                    $response['structure'] = $structure;
+                } catch (PDOException $e) {
+                    $response['message'] = 'Erro ao obter estrutura: ' . $e->getMessage();
+                }
+                break;
+                
+            case 'get_tables_list':
+                // Verificar se é admin
+                if (!$isAdmin) {
+                    $response['message'] = 'Acesso negado.';
+                    break;
+                }
+                
+                try {
+                    $stmt = $pdo->query("SHOW TABLES");
+                    $tables = $stmt->fetchAll(PDO::FETCH_COLUMN);
+                    
+                    $response['success'] = true;
+                    $response['tables'] = $tables;
+                } catch (PDOException $e) {
+                    $response['message'] = 'Erro ao listar tabelas: ' . $e->getMessage();
+                }
+                break;
+                
             case 'delete_user':
                 $userId = intval($_POST['user_id']);
                 
@@ -254,6 +362,66 @@ try {
             Use com cuidado.
         </div>
     </div>
+
+    <!-- Console SQL -->
+    <div class="section">
+        <h3>💻 Console SQL</h3>
+        <p style="color: #6b7280; margin-bottom: 15px;">Execute queries SQL diretamente na base de dados. <strong>Use com extremo cuidado!</strong></p>
+        
+        <!-- Tabelas disponíveis -->
+        <div style="margin-bottom: 15px;">
+            <button class="btn btn-secondary btn-sm" onclick="loadTablesList()">
+                📋 Listar Tabelas
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="showTableStructure()">
+                🔍 Ver Estrutura
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="insertPresetQuery('SELECT * FROM users LIMIT 10')">
+                👥 Ver Utilizadores
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="insertPresetQuery('SELECT * FROM terrains LIMIT 10')">
+                🗺️ Ver Terrenos
+            </button>
+        </div>
+
+        <!-- Área do SQL -->
+        <div class="sql-editor">
+            <label for="sql-query" style="display: block; margin-bottom: 8px; font-weight: 600;">
+                Query SQL:
+            </label>
+            <textarea 
+                id="sql-query" 
+                placeholder="Digite sua query SQL aqui... (ex: SELECT * FROM users)"
+                style="width: 100%; min-height: 120px; font-family: 'Courier New', monospace; font-size: 14px; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; resize: vertical;"
+            ></textarea>
+            
+            <div style="display: flex; gap: 10px; margin-top: 10px;">
+                <button class="btn btn-primary" onclick="executeSQL()">
+                    ▶️ Executar Query
+                </button>
+                <button class="btn btn-secondary" onclick="clearSQLEditor()">
+                    🗑️ Limpar
+                </button>
+            </div>
+        </div>
+
+        <!-- Resultados -->
+        <div id="sql-results" style="margin-top: 20px; display: none;">
+            <h4 style="margin-bottom: 12px; color: #1f2937;">Resultados:</h4>
+            <div id="sql-results-content"></div>
+        </div>
+
+        <!-- Avisos de segurança -->
+        <div class="danger-box" style="margin-top: 15px;">
+            <strong>🚨 AVISO DE SEGURANÇA:</strong>
+            <ul style="margin: 8px 0 0 20px; padding: 0;">
+                <li>Queries executadas aqui afetam diretamente a base de dados</li>
+                <li>DROP, TRUNCATE e DELETE sem WHERE podem perder todos os dados</li>
+                <li>Faça backup antes de executar queries de modificação</li>
+                <li>Esta funcionalidade deve ser usada apenas por administradores experientes</li>
+            </ul>
+        </div>
+    </div>
 </div>
 
 <style>
@@ -376,5 +544,98 @@ try {
 .badge-user {
     background: #e5e7eb;
     color: #4b5563;
+}
+
+/* SQL Console */
+.sql-editor {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+}
+
+.sql-results-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+    font-size: 13px;
+    background: white;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.sql-results-table th {
+    background: #667eea;
+    color: white;
+    padding: 10px;
+    text-align: left;
+    font-weight: 600;
+    border: 1px solid #5568d3;
+}
+
+.sql-results-table td {
+    padding: 8px 10px;
+    border: 1px solid #e5e7eb;
+}
+
+.sql-results-table tbody tr:nth-child(even) {
+    background: #f8f9fa;
+}
+
+.sql-results-table tbody tr:hover {
+    background: #e5e7eb;
+}
+
+.sql-info {
+    padding: 12px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
+    color: #1e40af;
+    margin-top: 15px;
+    font-size: 14px;
+}
+
+.sql-success {
+    padding: 12px;
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: 8px;
+    color: #166534;
+    margin-top: 15px;
+    font-size: 14px;
+}
+
+.sql-error {
+    padding: 12px;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    color: #991b1b;
+    margin-top: 15px;
+    font-size: 14px;
+}
+
+.danger-box {
+    padding: 15px;
+    background: #fef2f2;
+    border: 2px solid #dc2626;
+    border-radius: 8px;
+    color: #991b1b;
+    font-size: 14px;
+}
+
+.danger-box strong {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 15px;
+}
+
+.danger-box ul {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.danger-box li {
+    margin: 4px 0;
 }
 </style>
