@@ -1,4 +1,4 @@
- <?php
+<?php
 /**
  * Debug Script - Verificação do Sistema
  * REMOVA ESTE FICHEIRO EM PRODUÇÃO!
@@ -80,9 +80,6 @@ try {
         echo "<h3>Estrutura da tabela 'users':</h3>";
         $stmt = $pdo->query("DESCRIBE users");
         $structure = $stmt->fetchAll();
-        echo "<pre>";
-        print_r($structure);
-        echo "</pre>";
         
         // Verificar se coluna 'role' existe
         $hasRole = false;
@@ -96,8 +93,31 @@ try {
         if ($hasRole) {
             echo "<p class='success'>✅ Coluna 'role' existe</p>";
         } else {
-            echo "<p class='error'>❌ Coluna 'role' não existe - Execute o script SQL!</p>";
+            echo "<p class='error'>❌ Coluna 'role' NÃO existe</p>";
+            echo "<div class='warning' style='padding: 15px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 5px; margin: 10px 0;'>";
+            echo "<strong>🔧 AÇÃO NECESSÁRIA:</strong><br>";
+            echo "A coluna 'role' precisa ser adicionada à tabela users.<br><br>";
+            echo "<strong>Opção 1 - Usar Script de Migração Automática:</strong><br>";
+            echo "Acesse: <a href='migrate.php' style='color: #667eea; font-weight: bold;'>migrate.php</a> para adicionar automaticamente<br><br>";
+            echo "<strong>Opção 2 - SQL Manual:</strong><br>";
+            echo "<pre style='background: #f0f0f0; padding: 10px; border-radius: 4px;'>ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'user' AFTER password;\nCREATE INDEX idx_role ON users(role);\nUPDATE users SET role = 'admin' WHERE id = (SELECT MIN(id) FROM (SELECT id FROM users) AS temp) LIMIT 1;</pre>";
+            echo "</div>";
         }
+        
+        echo "<p><strong>Colunas disponíveis:</strong></p>";
+        echo "<table border='1' cellpadding='5' style='border-collapse: collapse;'>";
+        echo "<tr><th>Campo</th><th>Tipo</th><th>Null</th><th>Key</th><th>Default</th></tr>";
+        foreach ($structure as $col) {
+            $rowStyle = ($col['Field'] === 'role') ? "background: #d4edda;" : "";
+            echo "<tr style='$rowStyle'>";
+            echo "<td><strong>{$col['Field']}</strong></td>";
+            echo "<td>{$col['Type']}</td>";
+            echo "<td>{$col['Null']}</td>";
+            echo "<td>{$col['Key']}</td>";
+            echo "<td>{$col['Default']}</td>";
+            echo "</tr>";
+        }
+        echo "</table>";
     }
     
 } catch (Exception $e) {
@@ -156,24 +176,57 @@ echo "</div>";
 echo "<div class='section'>";
 echo "<h2>7. Utilizadores no Sistema</h2>";
 try {
-    $stmt = $pdo->query("SELECT id, username, email, role FROM users");
-    $users = $stmt->fetchAll();
+    // Tentar com role
+    try {
+        $stmt = $pdo->query("SELECT id, username, email, role FROM users");
+        $users = $stmt->fetchAll();
+        $hasRoleColumn = true;
+    } catch (PDOException $e) {
+        // Se falhar, tentar sem role
+        $stmt = $pdo->query("SELECT id, username, email FROM users");
+        $users = $stmt->fetchAll();
+        $hasRoleColumn = false;
+        
+        echo "<p class='warning'>⚠️ Coluna 'role' não encontrada. Mostrando dados básicos.</p>";
+    }
     
     if (count($users) > 0) {
         echo "<p class='success'>✅ Utilizadores encontrados: " . count($users) . "</p>";
         echo "<table border='1' cellpadding='5' style='border-collapse: collapse; width: 100%;'>";
-        echo "<tr><th>ID</th><th>Username</th><th>Email</th><th>Role</th></tr>";
-        foreach ($users as $user) {
-            echo "<tr>";
-            echo "<td>" . $user['id'] . "</td>";
-            echo "<td>" . $user['username'] . "</td>";
-            echo "<td>" . $user['email'] . "</td>";
-            echo "<td><strong>" . $user['role'] . "</strong></td>";
-            echo "</tr>";
+        
+        if ($hasRoleColumn) {
+            echo "<tr><th>ID</th><th>Username</th><th>Email</th><th>Role</th></tr>";
+            foreach ($users as $user) {
+                $roleStyle = $user['role'] === 'admin' ? "background: #fff3cd; font-weight: bold;" : "";
+                echo "<tr>";
+                echo "<td>" . $user['id'] . "</td>";
+                echo "<td>" . $user['username'] . "</td>";
+                echo "<td>" . $user['email'] . "</td>";
+                echo "<td style='$roleStyle'>" . $user['role'] . "</td>";
+                echo "</tr>";
+            }
+        } else {
+            echo "<tr><th>ID</th><th>Username</th><th>Email</th></tr>";
+            foreach ($users as $user) {
+                echo "<tr>";
+                echo "<td>" . $user['id'] . "</td>";
+                echo "<td>" . $user['username'] . "</td>";
+                echo "<td>" . $user['email'] . "</td>";
+                echo "</tr>";
+            }
         }
+        
         echo "</table>";
+        
+        if (!$hasRoleColumn) {
+            echo "<div class='warning' style='margin-top: 15px; padding: 15px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 5px;'>";
+            echo "<strong>🔧 Para adicionar a coluna 'role':</strong><br>";
+            echo "Acesse: <a href='migrate.php' style='color: #667eea; font-weight: bold;'>migrate.php</a>";
+            echo "</div>";
+        }
     } else {
         echo "<p class='warning'>⚠️ Nenhum utilizador registado</p>";
+        echo "<p>Registe-se em: <a href='login.php'>login.php</a></p>";
     }
 } catch (Exception $e) {
     echo "<p class='error'>❌ Erro ao carregar utilizadores: " . $e->getMessage() . "</p>";
