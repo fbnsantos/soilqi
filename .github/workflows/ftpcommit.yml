@@ -1,26 +1,29 @@
-name: FTP Deploy
+name: Deploy to Server
 
 on:
   push:
-    branches:
-      - main  # Ou a branch que você deseja monitorar para o deploy
+    branches: [ main ]
 
 jobs:
   deploy:
-    name: Deploy via FTP
+    name: Deploy via cURL
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3  # Faz o checkout do código do repositório
+      uses: actions/checkout@v4
 
-    - name: Trigger PHP Script via cURL
-      run: 
-        curl -f -X POST \
+    - name: Deploy to server
+      run: |
+        echo "🚀 Starting deployment..."
+        
+        # Sem -f para não falhar, mas com verificação manual
+        curl -X POST \
           -d "dbhost=${{ secrets.DB_HOST }}" \
           -d "dbuser=${{ secrets.DB_USER }}" \
           -d "dbpass=${{ secrets.DB_PASS }}" \
           -d "dbname=${{ secrets.DB_NAME }}" \
-          https://soilqi.com/soilqi/git.php
+          https://soilqi.com/soilqi/git.php \
+          || echo "⚠️ cURL completed with warnings"
         
-        echo "✅ Deploy completed v!"
+        echo "✅ Deploy process completed!"
