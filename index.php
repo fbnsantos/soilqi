@@ -423,7 +423,7 @@ try {
         <div class="header-content">
             <div class="header-left">
                 <h1><?php echo SITE_NAME; ?></h1>
-                <p>Gerencie os seus terrenos com facilidade</p>
+                <p>Manage your terrains easily</p>
             </div>
             <div class="header-right">
                 <div class="user-info">
