@@ -2,10 +2,10 @@
 session_start();
 
 // Configurações da Base de Dados
-define('DB_HOST', 'localhost');
-define('DB_USER', 'root');
-define('DB_PASS', '');
-define('DB_NAME', 'terrain_mapper');
+define('DB_HOST', '{{DB_HOST}}');
+define('DB_USER', '{{DB_USER}}');
+define('DB_PASS', '{{DB_PASS}}');
+define('DB_NAME', '{{DB_NAME}}');
 
 // Configurações da Aplicação
 define('SITE_NAME', 'Sistema de Registo de Terrenos');
