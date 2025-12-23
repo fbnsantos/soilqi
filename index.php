@@ -164,7 +164,8 @@ if (!file_exists($tabFile)) {
         $tab_data = [
             'isLoggedIn' => $isLoggedIn,
             'currentUser' => $currentUser,
-            'activeTab' => $activeTab
+            'activeTab' => $activeTab,
+            'isAdmin' => $isAdmin
         ];
         
         // Incluir o conteúdo do tab
