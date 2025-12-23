@@ -1,7 +1,7 @@
 <?php
 /**
  * Configurações do Sistema
- * Version 1.3 - Com sistema de roles
+ * Version 1.3a - Com sistema de roles
  */
 
 // Iniciar sessão
