@@ -1,6 +1,8 @@
 <?php
 session_start();
 
+//version 1.0 
+
 // Configurações da Base de Dados
 define('DB_HOST', '{{DB_HOST}}');
 define('DB_USER', '{{DB_USER}}');
