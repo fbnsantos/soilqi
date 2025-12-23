@@ -2,9 +2,9 @@
 -- Execute este script no phpMyAdmin ou cliente MySQL
 
 -- Criar base de dados
-CREATE DATABASE IF NOT EXISTS terrain_mapper CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS wkfzkqte_soiqi CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-USE terrain_mapper;
+USE wkfzkqte_soiqi;
 
 -- Tabela de utilizadores
 CREATE TABLE users (
