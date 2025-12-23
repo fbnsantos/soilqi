@@ -10,6 +10,15 @@ require_once 'config.php';
 $isLoggedIn = isLoggedIn();
 $currentUser = $isLoggedIn ? getCurrentUser() : null;
 $flashMessage = showFlashMessage();
+$isAdmin = isAdmin();
+$canClaimAdmin = canClaimAdmin();
+
+// Processar reclamação de admin (se aplicável)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['claim_admin']) && $canClaimAdmin) {
+    if (claimAdminRole()) {
+        redirect('index.php?tab=admin');
+    }
+}
 
 // Obter tab ativo (default: map)
 $activeTab = $_GET['tab'] ?? 'map';
@@ -20,13 +29,15 @@ $availableTabs = [
         'title' => 'Mapa',
         'icon' => '🗺️',
         'file' => 'tabs/map.php',
-        'requiresAuth' => false
+        'requiresAuth' => false,
+        'requiresAdmin' => false
     ],
     'admin' => [
         'title' => 'Administração',
         'icon' => '⚙️',
         'file' => 'tabs/admin.php',
-        'requiresAuth' => true
+        'requiresAuth' => true,
+        'requiresAdmin' => true
     ]
 ];
 
@@ -39,6 +50,12 @@ if (!isset($availableTabs[$activeTab])) {
 if ($availableTabs[$activeTab]['requiresAuth'] && !$isLoggedIn) {
     setFlashMessage('Precisa fazer login para aceder a esta área.', 'error');
     redirect('login.php');
+}
+
+// Verificar se o tab requer permissões de admin
+if ($availableTabs[$activeTab]['requiresAdmin'] && !$isAdmin) {
+    setFlashMessage('Acesso negado. Requer permissões de administrador.', 'error');
+    $activeTab = 'map'; // Redireciona para o mapa
 }
 
 // Verificar se o ficheiro do tab existe
@@ -90,7 +107,16 @@ if (!file_exists($tabFile)) {
     <div class="nav-menu">
         <div class="nav-content">
             <?php foreach ($availableTabs as $tabKey => $tabInfo): ?>
-                <?php if (!$tabInfo['requiresAuth'] || $isLoggedIn): ?>
+                <?php 
+                // Mostrar tab se:
+                // 1. Não requer auth, OU
+                // 2. User está logado e não requer admin, OU
+                // 3. User está logado e é admin
+                $showTab = !$tabInfo['requiresAuth'] || 
+                          ($isLoggedIn && !$tabInfo['requiresAdmin']) || 
+                          ($isLoggedIn && $tabInfo['requiresAdmin'] && $isAdmin);
+                ?>
+                <?php if ($showTab): ?>
                     <a href="?tab=<?php echo $tabKey; ?>" 
                        class="nav-item <?php echo $activeTab === $tabKey ? 'active' : ''; ?>">
                         <span class="nav-icon"><?php echo $tabInfo['icon']; ?></span>
@@ -112,6 +138,24 @@ if (!file_exists($tabFile)) {
                     showAlert('<?php echo addslashes($flashMessage['message']); ?>', '<?php echo $flashMessage['type']; ?>');
                 });
             </script>
+        <?php endif; ?>
+
+        <!-- Notificação para reclamar admin (apenas para primeiro utilizador) -->
+        <?php if ($canClaimAdmin): ?>
+            <div class="admin-claim-banner">
+                <div class="admin-claim-content">
+                    <div class="admin-claim-icon">👑</div>
+                    <div class="admin-claim-text">
+                        <h3>Bem-vindo ao Sistema!</h3>
+                        <p>Parece que é o primeiro utilizador. Deseja tornar-se administrador do sistema?</p>
+                    </div>
+                    <form method="POST" style="display: inline;">
+                        <button type="submit" name="claim_admin" class="btn btn-primary">
+                            👑 Tornar-me Administrador
+                        </button>
+                    </form>
+                </div>
+            </div>
         <?php endif; ?>
 
         <!-- Load Tab Content -->

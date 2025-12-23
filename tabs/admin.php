@@ -12,7 +12,7 @@
 // Por agora, qualquer utilizador logado pode aceder
 
 // API endpoints para operações de administração
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn && $isAdmin) {
     header('Content-Type: application/json');
     
     $action = $_POST['action'] ?? '';
@@ -23,17 +23,67 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
         
         switch ($action) {
             case 'get_users':
-                $stmt = $pdo->query("SELECT id, username, email, created_at FROM users ORDER BY created_at DESC");
+                $stmt = $pdo->query("SELECT id, username, email, role, created_at FROM users ORDER BY created_at DESC");
                 $users = $stmt->fetchAll();
                 
                 $response['success'] = true;
                 $response['users'] = $users;
                 break;
                 
+            case 'toggle_admin':
+                $userId = intval($_POST['user_id']);
+                
+                // Não permitir que o utilizador mude o próprio role
+                if ($userId == $currentUser['id']) {
+                    $response['message'] = 'Não pode alterar as suas próprias permissões.';
+                    break;
+                }
+                
+                // Obter role atual
+                $stmt = $pdo->prepare("SELECT role FROM users WHERE id = ?");
+                $stmt->execute([$userId]);
+                $user = $stmt->fetch();
+                
+                if (!$user) {
+                    $response['message'] = 'Utilizador não encontrado.';
+                    break;
+                }
+                
+                // Toggle role
+                $newRole = $user['role'] === ROLE_ADMIN ? ROLE_USER : ROLE_ADMIN;
+                
+                $stmt = $pdo->prepare("UPDATE users SET role = ? WHERE id = ?");
+                $stmt->execute([$newRole, $userId]);
+                
+                $response['success'] = true;
+                $response['message'] = 'Permissões atualizadas com sucesso.';
+                $response['new_role'] = $newRole;
+                break;
+                
+            case 'delete_user':
+                $userId = intval($_POST['user_id']);
+                
+                // Não permitir que o utilizador se elimine a si próprio
+                if ($userId == $currentUser['id']) {
+                    $response['message'] = 'Não pode eliminar a sua própria conta.';
+                    break;
+                }
+                
+                $stmt = $pdo->prepare("DELETE FROM users WHERE id = ?");
+                $stmt->execute([$userId]);
+                
+                $response['success'] = true;
+                $response['message'] = 'Utilizador eliminado com sucesso.';
+                break;
+                
             case 'get_system_stats':
                 // Total de utilizadores
                 $stmt = $pdo->query("SELECT COUNT(*) as total FROM users");
                 $totalUsers = $stmt->fetch()['total'];
+                
+                // Total de admins
+                $stmt = $pdo->query("SELECT COUNT(*) as total FROM users WHERE role = '" . ROLE_ADMIN . "'");
+                $totalAdmins = $stmt->fetch()['total'];
                 
                 // Total de terrenos
                 $stmt = $pdo->query("SELECT COUNT(*) as total FROM terrains");
@@ -46,6 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 $response['success'] = true;
                 $response['stats'] = [
                     'users' => $totalUsers,
+                    'admins' => $totalAdmins,
                     'terrains' => $totalTerrains,
                     'area' => $totalArea
                 ];
@@ -62,6 +113,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
 // Obter estatísticas do sistema
 $systemStats = [
     'users' => 0,
+    'admins' => 0,
     'terrains' => 0,
     'area' => 0
 ];
@@ -72,6 +124,10 @@ try {
     // Total de utilizadores
     $stmt = $pdo->query("SELECT COUNT(*) as total FROM users");
     $systemStats['users'] = $stmt->fetch()['total'];
+    
+    // Total de admins
+    $stmt = $pdo->query("SELECT COUNT(*) as total FROM users WHERE role = '" . ROLE_ADMIN . "'");
+    $systemStats['admins'] = $stmt->fetch()['total'];
     
     // Total de terrenos
     $stmt = $pdo->query("SELECT COUNT(*) as total FROM terrains");
@@ -99,6 +155,10 @@ try {
         <div class="stat-label">👥 Utilizadores Registados</div>
     </div>
     <div class="stat-card">
+        <div class="stat-number"><?php echo $systemStats['admins']; ?></div>
+        <div class="stat-label">👑 Administradores</div>
+    </div>
+    <div class="stat-card">
         <div class="stat-number"><?php echo $systemStats['terrains']; ?></div>
         <div class="stat-label">🗺️ Terrenos no Sistema</div>
     </div>
@@ -124,13 +184,14 @@ try {
                         <th>ID</th>
                         <th>Utilizador</th>
                         <th>Email</th>
+                        <th>Role</th>
                         <th>Data de Registo</th>
                         <th>Ações</th>
                     </tr>
                 </thead>
                 <tbody id="users-tbody">
                     <tr>
-                        <td colspan="5" class="text-center">A carregar...</td>
+                        <td colspan="6" class="text-center">A carregar...</td>
                     </tr>
                 </tbody>
             </table>
@@ -296,5 +357,24 @@ try {
     border-radius: 8px;
     color: #92400e;
     font-size: 14px;
+}
+
+/* Role Badges */
+.badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.badge-admin {
+    background: linear-gradient(135deg, #fbbf24, #f59e0b);
+    color: #78350f;
+}
+
+.badge-user {
+    background: #e5e7eb;
+    color: #4b5563;
 }
 </style>

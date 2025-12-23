@@ -69,12 +69,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
                 if ($stmt->fetch()) {
                     $error = 'Email já registado.';
                 } else {
+                    // Verificar se é o primeiro utilizador
+                    $isFirstUser = isFirstUser();
+                    $role = $isFirstUser ? ROLE_ADMIN : ROLE_USER;
+                    
                     // Criar utilizador
                     $hashedPassword = hashPassword($password);
-                    $stmt = $pdo->prepare("INSERT INTO users (username, email, password) VALUES (?, ?, ?)");
-                    $stmt->execute([$username, $email, $hashedPassword]);
+                    $stmt = $pdo->prepare("INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)");
+                    $stmt->execute([$username, $email, $hashedPassword, $role]);
                     
-                    $success = 'Conta criada com sucesso! Pode agora fazer login.';
+                    if ($isFirstUser) {
+                        $success = 'Conta criada com sucesso! És o primeiro utilizador e foste definido como administrador. Pode agora fazer login.';
+                    } else {
+                        $success = 'Conta criada com sucesso! Pode agora fazer login.';
+                    }
                 }
             }
         } catch (PDOException $e) {

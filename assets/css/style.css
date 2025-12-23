@@ -499,6 +499,55 @@ body {
     text-decoration: underline;
 }
 
+/* Admin Claim Banner */
+.admin-claim-banner {
+    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+    color: #78350f;
+    padding: 30px;
+    border-radius: 12px;
+    margin-bottom: 30px;
+    box-shadow: 0 4px 20px rgba(251, 191, 36, 0.3);
+}
+
+.admin-claim-content {
+    display: flex;
+    align-items: center;
+    gap: 25px;
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.admin-claim-icon {
+    font-size: 64px;
+    line-height: 1;
+}
+
+.admin-claim-text {
+    flex: 1;
+}
+
+.admin-claim-text h3 {
+    font-size: 24px;
+    margin-bottom: 8px;
+    color: #78350f;
+}
+
+.admin-claim-text p {
+    font-size: 16px;
+    color: #92400e;
+    margin: 0;
+}
+
+.admin-claim-banner .btn {
+    white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.admin-claim-banner .btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+}
+
 /* Limited Info Overlay */
 .limited-info {
     position: relative;
