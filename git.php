@@ -52,13 +52,18 @@ if (!empty($dbParams)) {
     $configFile = 'config.php';
     
     if (file_exists($templateFile)) {
-        // Fazer backup do config atual se existir
-        if (file_exists($configFile)) {
-            $backupFile = 'config.php.backup.' . date('Y-m-d_H-i-s');
-            if (copy($configFile, $backupFile)) {
-                echo "<p>✅ Backup do config atual criado: <code>$backupFile</code></p>";
+            if (unlink($templateFile)) {
+                 echo "✅ Ficheiro eliminado com sucesso!";
+            } else {
+                echo "❌ Erro ao eliminar o ficheiro!";
             }
-        }
+        // Fazer backup do config atual se existir
+        //if (file_exists($configFile)) {
+        //    $backupFile = 'config.php.backup.' . date('Y-m-d_H-i-s');
+        //    if (copy($configFile, $backupFile)) {
+         //       echo "<p>✅ Backup do config atual criado: <code>$backupFile</code></p>";
+         //   }
+       /// }
         
         // Ler conteúdo do template
         $templateContent = file_get_contents($templateFile);
