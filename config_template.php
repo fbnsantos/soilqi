@@ -26,6 +26,7 @@ date_default_timezone_set(TIMEZONE);
 // Roles do sistema
 define('ROLE_ADMIN', 'admin');
 define('ROLE_USER', 'user');
+define('DB_TYPE', 'mysql');
 
 /**
  * Função para conectar à base de dados
