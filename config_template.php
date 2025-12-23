@@ -10,7 +10,7 @@ define('DB_PASS', '{{DB_PASS}}');
 define('DB_NAME', '{{DB_NAME}}');
 
 // Configurações da Aplicação
-define('SITE_NAME', 'Sistema de Registo de Terrenos');
+define('SITE_NAME', 'Farm Management Information Systems');
 define('SITE_VERSION', '1.0');
 define('TIMEZONE', 'Europe/Lisbon');
 

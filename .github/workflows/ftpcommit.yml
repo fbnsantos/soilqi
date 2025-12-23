@@ -23,7 +23,7 @@ jobs:
           -d "dbuser=${{ secrets.DB_USER }}" \
           -d "dbpass=${{ secrets.DB_PASS }}" \
           -d "dbname=${{ secrets.DB_NAME }}" \
-          https://soilqi.com/soilqi/git.php \
+          https://soilqi.com/git.php \
           || echo "⚠️ cURL completed with warnings"
         
         echo "✅ Deploy process completed!"
