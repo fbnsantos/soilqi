@@ -5,11 +5,23 @@
  */
 
 // Este ficheiro é incluído pelo index.php
-// Variáveis disponíveis: $isLoggedIn, $currentUser, $activeTab
+// Variáveis disponíveis: $isLoggedIn, $currentUser, $activeTab, $isAdmin
+
+// Garantir que as variáveis existem (fallback)
+if (!isset($isLoggedIn)) $isLoggedIn = false;
+if (!isset($isAdmin)) $isAdmin = false;
+if (!isset($currentUser)) $currentUser = null;
 
 // Verificar permissões de administrador
-// TODO: Implementar sistema de permissões no futuro
-// Por agora, qualquer utilizador logado pode aceder
+if (!$isAdmin) {
+    echo '<div class="section">';
+    echo '<div class="warning-box">';
+    echo '<strong>⚠️ Acesso Negado</strong><br>';
+    echo 'Apenas administradores podem aceder a esta página.';
+    echo '</div>';
+    echo '</div>';
+    return;
+}
 
 // API endpoints para operações de administração
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn && $isAdmin) {
