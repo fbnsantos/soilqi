@@ -1,4 +1,9 @@
 <?php
+/**
+ * Index.php - Controller Principal
+ * Sistema de gestão modular com tabs
+ */
+
 require_once 'config.php';
 
 // Verificar se está logado
@@ -6,100 +11,49 @@ $isLoggedIn = isLoggedIn();
 $currentUser = $isLoggedIn ? getCurrentUser() : null;
 $flashMessage = showFlashMessage();
 
-// API endpoints para operações AJAX (apenas para utilizadores logados)
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
-    header('Content-Type: application/json');
-    
-    $action = $_POST['action'] ?? '';
-    $response = ['success' => false, 'message' => ''];
-    
-    try {
-        $pdo = getDBConnection();
-        
-        switch ($action) {
-            case 'save_terrain':
-                $name = sanitizeInput($_POST['name']);
-                $description = sanitizeInput($_POST['description'] ?? '');
-                $coordinates = $_POST['coordinates']; // JSON string
-                $area = floatval($_POST['area']);
-                
-                if (empty($name) || empty($coordinates)) {
-                    $response['message'] = 'Dados obrigatórios em falta.';
-                } else {
-                    $stmt = $pdo->prepare("INSERT INTO terrains (user_id, name, description, coordinates, area) VALUES (?, ?, ?, ?, ?)");
-                    $stmt->execute([$currentUser['id'], $name, $description, $coordinates, $area]);
-                    
-                    $response['success'] = true;
-                    $response['message'] = 'Terreno guardado com sucesso!';
-                    $response['terrain_id'] = $pdo->lastInsertId();
-                }
-                break;
-                
-            case 'delete_terrain':
-                $terrain_id = intval($_POST['terrain_id']);
-                
-                $stmt = $pdo->prepare("DELETE FROM terrains WHERE id = ? AND user_id = ?");
-                $stmt->execute([$terrain_id, $currentUser['id']]);
-                
-                if ($stmt->rowCount() > 0) {
-                    $response['success'] = true;
-                    $response['message'] = 'Terreno eliminado com sucesso!';
-                } else {
-                    $response['message'] = 'Terreno não encontrado.';
-                }
-                break;
-                
-            case 'get_terrains':
-                $stmt = $pdo->prepare("SELECT * FROM terrains WHERE user_id = ? ORDER BY created_at DESC");
-                $stmt->execute([$currentUser['id']]);
-                $terrains = $stmt->fetchAll();
-                
-                $response['success'] = true;
-                $response['terrains'] = $terrains;
-                break;
-                
-            case 'get_terrain':
-                $terrain_id = intval($_POST['terrain_id']);
-                
-                $stmt = $pdo->prepare("SELECT * FROM terrains WHERE id = ? AND user_id = ?");
-                $stmt->execute([$terrain_id, $currentUser['id']]);
-                $terrain = $stmt->fetch();
-                
-                if ($terrain) {
-                    $response['success'] = true;
-                    $response['terrain'] = $terrain;
-                } else {
-                    $response['message'] = 'Terreno não encontrado.';
-                }
-                break;
-        }
-    } catch (PDOException $e) {
-        $response['message'] = 'Erro no sistema: ' . $e->getMessage();
-    }
-    
-    echo json_encode($response);
-    exit;
+// Obter tab ativo (default: map)
+$activeTab = $_GET['tab'] ?? 'map';
+
+// Tabs disponíveis
+$availableTabs = [
+    'map' => [
+        'title' => 'Mapa',
+        'icon' => '🗺️',
+        'file' => 'tabs/map.php',
+        'requiresAuth' => false
+    ],
+    'admin' => [
+        'title' => 'Administração',
+        'icon' => '⚙️',
+        'file' => 'tabs/admin.php',
+        'requiresAuth' => true
+    ]
+];
+
+// Validar tab
+if (!isset($availableTabs[$activeTab])) {
+    $activeTab = 'map';
 }
 
-// Obter estatísticas do utilizador (apenas se logado)
-$stats = ['total_terrains' => 0, 'total_area' => 0];
-if ($isLoggedIn) {
-    try {
-        $pdo = getDBConnection();
-        $stmt = $pdo->prepare("SELECT COUNT(*) as total_terrains, COALESCE(SUM(area), 0) as total_area FROM terrains WHERE user_id = ?");
-        $stmt->execute([$currentUser['id']]);
-        $stats = $stmt->fetch();
-    } catch (PDOException $e) {
-        $stats = ['total_terrains' => 0, 'total_area' => 0];
-    }
+// Verificar se o tab requer autenticação
+if ($availableTabs[$activeTab]['requiresAuth'] && !$isLoggedIn) {
+    setFlashMessage('Precisa fazer login para aceder a esta área.', 'error');
+    redirect('login.php');
 }
+
+// Verificar se o ficheiro do tab existe
+$tabFile = $availableTabs[$activeTab]['file'];
+if (!file_exists($tabFile)) {
+    die("Erro: Ficheiro do tab não encontrado: {$tabFile}");
+}
+
 ?>
 <!DOCTYPE html>
 <html lang="pt">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?php echo SITE_NAME; ?></title>
+    <title><?php echo $availableTabs[$activeTab]['title']; ?> - <?php echo SITE_NAME; ?></title>
     
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
@@ -132,7 +86,22 @@ if ($isLoggedIn) {
         </div>
     </div>
 
-    <!-- Container -->
+    <!-- Navigation Menu -->
+    <div class="nav-menu">
+        <div class="nav-content">
+            <?php foreach ($availableTabs as $tabKey => $tabInfo): ?>
+                <?php if (!$tabInfo['requiresAuth'] || $isLoggedIn): ?>
+                    <a href="?tab=<?php echo $tabKey; ?>" 
+                       class="nav-item <?php echo $activeTab === $tabKey ? 'active' : ''; ?>">
+                        <span class="nav-icon"><?php echo $tabInfo['icon']; ?></span>
+                        <span class="nav-text"><?php echo $tabInfo['title']; ?></span>
+                    </a>
+                <?php endif; ?>
+            <?php endforeach; ?>
+        </div>
+    </div>
+
+    <!-- Main Content Container -->
     <div class="container">
         <!-- Alert Container -->
         <div id="alert-container" class="alert-container"></div>
@@ -145,72 +114,25 @@ if ($isLoggedIn) {
             </script>
         <?php endif; ?>
 
-        <!-- Banner para visitantes -->
-        <?php if (!$isLoggedIn): ?>
-            <div class="guest-banner">
-                👋 Está a visualizar o mapa como visitante. 
-                <a href="login.php">Faça login</a> para desenhar e guardar os seus próprios terrenos.
-            </div>
-        <?php endif; ?>
+        <!-- Load Tab Content -->
+        <?php 
+        // Passar variáveis importantes para o tab
+        $tab_data = [
+            'isLoggedIn' => $isLoggedIn,
+            'currentUser' => $currentUser,
+            'activeTab' => $activeTab
+        ];
+        
+        // Incluir o conteúdo do tab
+        include $tabFile; 
+        ?>
+    </div>
 
-        <!-- Stats Grid (apenas para utilizadores logados) -->
-        <?php if ($isLoggedIn): ?>
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-number" id="total-terrains"><?php echo $stats['total_terrains']; ?></div>
-                    <div class="stat-label">Terrenos Registados</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number" id="total-area"><?php echo number_format($stats['total_area'], 1); ?></div>
-                    <div class="stat-label">Área Total (ha)</div>
-                </div>
-            </div>
-        <?php endif; ?>
-
-        <!-- Main Grid -->
-        <div class="main-grid <?php echo !$isLoggedIn ? 'full-width' : ''; ?>">
-            <!-- Map Section -->
-            <div class="map-section">
-                <?php if ($isLoggedIn): ?>
-                    <div class="controls">
-                        <button class="btn btn-primary" onclick="startDrawing()">✏️ Desenhar Terreno</button>
-                        <button class="btn btn-secondary" onclick="clearMap()">🗑️ Limpar Mapa</button>
-                    </div>
-                <?php endif; ?>
-                <div id="map"></div>
-            </div>
-
-            <!-- Sidebar (apenas para utilizadores logados) -->
-            <?php if ($isLoggedIn): ?>
-                <div class="sidebar">
-                    <!-- Formulário de guardar -->
-                    <div id="save-form" class="section" style="display: none;">
-                        <h3>Guardar Terreno</h3>
-                        <div class="form-group">
-                            <label for="terrain-name">Nome *</label>
-                            <input type="text" id="terrain-name" placeholder="Ex: Campo Norte">
-                        </div>
-                        <div class="form-group">
-                            <label for="terrain-description">Descrição</label>
-                            <textarea id="terrain-description" placeholder="Descrição opcional..."></textarea>
-                        </div>
-                        <div style="display: flex; gap: 10px;">
-                            <button class="btn btn-primary" onclick="saveTerrain()">💾 Guardar</button>
-                            <button class="btn btn-secondary" onclick="stopDrawing()">✖️ Cancelar</button>
-                        </div>
-                    </div>
-
-                    <!-- Lista de terrenos -->
-                    <div class="section">
-                        <h3>Meus Terrenos</h3>
-                        <div id="terrain-list" class="terrain-list">
-                            <div class="empty-state">
-                                <h4>A carregar...</h4>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            <?php endif; ?>
+    <!-- Footer -->
+    <div class="footer">
+        <div class="footer-content">
+            <p>&copy; <?php echo date('Y'); ?> <?php echo SITE_NAME; ?> v<?php echo SITE_VERSION; ?></p>
+            <p>Sistema de Gestão de Terrenos</p>
         </div>
     </div>
 
@@ -221,12 +143,20 @@ if ($isLoggedIn) {
     <!-- Leaflet GeometryUtil -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-geometryutil/0.10.1/leaflet.geometryutil.min.js"></script>
     
-    <!-- Passar variável de estado de login para JavaScript -->
+    <!-- Passar variáveis globais para JavaScript -->
     <script>
         const userLoggedIn = <?php echo $isLoggedIn ? 'true' : 'false'; ?>;
+        const activeTab = '<?php echo $activeTab; ?>';
     </script>
     
-    <!-- Custom JS -->
+    <!-- Load tab-specific JavaScript if exists -->
+    <?php
+    $tabJsFile = 'assets/js/tabs/' . $activeTab . '.js';
+    if (file_exists($tabJsFile)): ?>
+        <script src="<?php echo $tabJsFile; ?>"></script>
+    <?php endif; ?>
+    
+    <!-- Main JS -->
     <script src="assets/js/app.js"></script>
 </body>
 </html>
