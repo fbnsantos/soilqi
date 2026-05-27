@@ -77,33 +77,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
             // ── Interpolações de campo guardadas ───────────────────────────────
 
             case 'get_terrain_interpolations':
+                // Mostra TODAS as interpolações do utilizador.
+                // Se terrain_id for fornecido, as do terreno selecionado aparecem primeiro.
                 $terrain_id = intval($_POST['terrain_id'] ?? 0);
-                if ($terrain_id <= 0) {
-                    $response['success']        = true;
-                    $response['interpolations'] = [];
-                    break;
-                }
-                // Verify terrain belongs to user
-                $chk = $pdo->prepare("SELECT id FROM terrains WHERE id = ? AND user_id = ?");
-                $chk->execute([$terrain_id, $currentUser['id']]);
-                if (!$chk->fetch()) {
-                    $response['message'] = 'Terreno não encontrado.';
-                    break;
-                }
                 try {
-                    $stmt = $pdo->prepare("
-                        SELECT id, name, param, colormap, resolution,
-                               min_lat, max_lat, min_lng, max_lng,
-                               min_val, max_val, created_at
-                        FROM field_interpolations
-                        WHERE terrain_id = ? AND user_id = ?
-                        ORDER BY created_at DESC
-                    ");
-                    $stmt->execute([$terrain_id, $currentUser['id']]);
+                    if ($terrain_id > 0) {
+                        $stmt = $pdo->prepare("
+                            SELECT id, name, param, colormap, resolution,
+                                   min_lat, max_lat, min_lng, max_lng,
+                                   min_val, max_val, created_at, terrain_id
+                            FROM field_interpolations
+                            WHERE user_id = ?
+                            ORDER BY (terrain_id = ?) DESC, created_at DESC
+                        ");
+                        $stmt->execute([$currentUser['id'], $terrain_id]);
+                    } else {
+                        $stmt = $pdo->prepare("
+                            SELECT id, name, param, colormap, resolution,
+                                   min_lat, max_lat, min_lng, max_lng,
+                                   min_val, max_val, created_at, terrain_id
+                            FROM field_interpolations
+                            WHERE user_id = ?
+                            ORDER BY created_at DESC
+                        ");
+                        $stmt->execute([$currentUser['id']]);
+                    }
                     $response['success']        = true;
                     $response['interpolations'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 } catch (PDOException $tableErr) {
-                    // Tabela ainda não existe (migração 002 não aplicada) — devolver lista vazia
+                    // Tabela ainda não existe (migração 002 não aplicada)
                     $response['success']        = true;
                     $response['interpolations'] = [];
                 }

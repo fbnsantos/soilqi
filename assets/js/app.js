@@ -47,7 +47,7 @@ function initMap() {
           '🛰️ Satélite': satLayer,
           '🏔️ Relevo':   topoLayer },
         { '🏷️ Etiquetas (satélite)': labelsLayer },
-        { position: 'topright', collapsed: false }
+        { position: 'topright', collapsed: true }
     ).addTo(map);
 
     // Criar layer group para terrenos desenhados
@@ -59,8 +59,10 @@ function initMap() {
         addDrawControls();
     }
 
-    // Carregar terrenos existentes
+    // Carregar dados na sidebar (após o mapa estar inicializado)
     loadTerrains();
+    loadMapGeoJSONLayers();
+    loadMapInterpolations(''); // carregar todas as interpolações do utilizador
 }
 
 // Adicionar controles de desenho (apenas para utilizadores logados)
@@ -410,12 +412,6 @@ function loadMapInterpolations(terrainId) {
     mapInterpOverlays = {};
     mapInterpData     = [];
 
-    if (!terrainId) {
-        if (listEl) listEl.innerHTML =
-            '<span style="color:#9ca3af;font-size:13px">Selecione um terreno para ver as interpolações guardadas.</span>';
-        return;
-    }
-
     if (listEl) listEl.innerHTML =
         '<span style="color:#9ca3af;font-size:13px">A carregar…</span>';
 
@@ -448,7 +444,7 @@ function renderMapInterpolations(items) {
     if (!items.length) {
         listEl.innerHTML =
             '<div style="padding:10px 0; color:#9ca3af; font-size:13px; text-align:center;">' +
-            '🎨 Sem interpolações guardadas para este terreno.<br>' +
+            '🎨 Sem interpolações guardadas.<br>' +
             '<small>Gere e guarde em <strong>Medições de Campo → IDW</strong>.</small></div>';
         return;
     }
@@ -458,14 +454,19 @@ function renderMapInterpolations(items) {
         temperature:  '🌡️ Temp (°C)',  moisture: '💧 Hum (%)'
     };
 
+    // terrain_id do select — para destacar as do terreno seleccionado
+    const selTerrainId = String(document.getElementById('map-interp-terrain')?.value || '');
+
     listEl.innerHTML = items.map(function(item) {
-        const dt      = new Date(item.created_at).toLocaleDateString('pt-PT');
-        const param   = PARAM[item.param] || item.param;
-        const loaded  = !!mapInterpOverlays[item.id];
-        const minV    = item.min_val !== null ? parseFloat(item.min_val).toFixed(2) : '?';
-        const maxV    = item.max_val !== null ? parseFloat(item.max_val).toFixed(2) : '?';
+        const dt       = new Date(item.created_at).toLocaleDateString('pt-PT');
+        const param    = PARAM[item.param] || item.param;
+        const loaded   = !!mapInterpOverlays[item.id];
+        const minV     = item.min_val !== null ? parseFloat(item.min_val).toFixed(2) : '?';
+        const maxV     = item.max_val !== null ? parseFloat(item.max_val).toFixed(2) : '?';
+        const isCurTerrain = selTerrainId && String(item.terrain_id) === selTerrainId;
+        const borderLeft   = isCurTerrain ? 'border-left:3px solid #667eea; padding-left:6px;' : '';
         return '<div style="padding:8px 0; border-bottom:1px solid #f3f4f6; display:flex;' +
-                           'align-items:center; justify-content:space-between; gap:8px;">' +
+                           'align-items:center; justify-content:space-between; gap:8px;' + borderLeft + '">' +
             '<div style="min-width:0; flex:1;">' +
                 '<div style="font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' +
                     escMapHtml(item.name) + '</div>' +
@@ -693,8 +694,8 @@ function escMapHtml(s) {
         .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// Inicializar quando o documento estiver pronto
+// Inicializar quando o documento estiver pronto (apenas no tab Mapa)
 document.addEventListener('DOMContentLoaded', function() {
-    initMap();
-    loadMapGeoJSONLayers();
+    if (typeof activeTab === 'undefined' || activeTab !== 'map') return;
+    initMap(); // loadMapGeoJSONLayers() é chamado dentro de initMap()
 });
