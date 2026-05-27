@@ -3,7 +3,7 @@
 // ── VERSÃO ────────────────────────────────────────────────────────────────────
 // Muda este número sempre que houver uma nova versão para forçar a actualização
 // nos telemóveis dos utilizadores.
-const CACHE_VERSION = 'v14'; // 2026-05-27 — interactive version badge + manual update check
+const CACHE_VERSION = 'v15'; // 2026-05-28 — fix photo display: htaccess repair + reload after save
 const CACHE = `soilqi-field-${CACHE_VERSION}`;
 
 const STATIC = [

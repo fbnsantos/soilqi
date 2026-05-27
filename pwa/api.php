@@ -8,6 +8,20 @@ require_once '../config.php';
 header('Content-Type: application/json');
 header('X-Content-Type-Options: nosniff');
 
+// ── Auto-reparar .htaccess de uploads/photos ──────────────────────────────────
+// Garante que o directório de fotos nunca fica bloqueado por um .htaccess errado.
+// Corre em cada pedido à API — custo negligenciável (só escreve se necessário).
+(function () {
+    $photosDir = __DIR__ . '/uploads/photos/';
+    $htacc     = $photosDir . '.htaccess';
+    $correct   = "Options -Indexes\n";
+    if (is_dir($photosDir)) {
+        if (!file_exists($htacc) || file_get_contents($htacc) !== $correct) {
+            @file_put_contents($htacc, $correct);
+        }
+    }
+})();
+
 // ── Autenticação ──────────────────────────────────────────────────────────────
 // 1. Tentar token Bearer (Authorization: Bearer <token>)
 $currentUser = null;

@@ -5,7 +5,7 @@ const API        = 'api.php';
 const IDB_NAME   = 'soilqi_field';
 const IDB_VER    = 1;
 const TOKEN_KEY  = 'soilqi_api_token';   // localStorage key for persistent session
-const APP_VERSION = 'v14';               // deve coincidir com CACHE_VERSION no sw.js
+const APP_VERSION = 'v15';               // deve coincidir com CACHE_VERSION no sw.js
 
 // ── State ────────────────────────────────────────────────────────────────────
 let idb           = null;
@@ -265,7 +265,7 @@ async function postToServer(payload) {
     try {
         const data = await callApi(payload);
         if (data._needsLogin) return { ok: false, msg: 'Sessão expirada — faça login novamente.', needsLogin: true };
-        return { ok: data.success === true, msg: data.message || 'Erro desconhecido' };
+        return { ok: data.success === true, msg: data.message || 'Erro desconhecido', data };
     } catch (err) {
         console.error('[SoilQI] postToServer:', err);
         return { ok: false, msg: 'Servidor inacessível' };
@@ -422,6 +422,8 @@ async function handleSubmit(e) {
         if (result.ok) {
             toast('Medição guardada! ✓', 'success');
             resetForm();
+            // Recarregar histórico para mostrar foto correcta (photo_path vem do servidor)
+            loadMeasurements();
         } else {
             if (result.needsLogin) { showLogin(); return; }
             // Guardar localmente (sem foto para poupar espaço se a foto for grande)
@@ -467,7 +469,10 @@ async function syncPending() {
         if (result.ok)          { await idbDelete('pending', localId); n++; }
         else if (result.needsLogin) { showLogin(); break; }
     }
-    if (n) toast(`${n} medição(ões) sincronizadas ✓`, 'success');
+    if (n) {
+        toast(`${n} medição(ões) sincronizadas ✓`, 'success');
+        loadMeasurements(); // Recarregar para mostrar photo_path do servidor
+    }
     await refreshPendingUI();
 }
 
@@ -566,7 +571,7 @@ function renderCard(m) {
                 data-src="${photoSrc}" role="button" tabindex="0"
                 title="Ver fotografia em tamanho completo">
                <img src="${photoSrc}" alt="Fotografia da medição"
-                    onerror="this.parentElement.style.display='none'">
+                    onerror="this.src='';this.alt='❌';this.style.cssText='font-size:32px;line-height:80px;width:100%;text-align:center;'">
                <span class="m-photo-label">📷 Ver foto</span>
            </div>`
         : '';
