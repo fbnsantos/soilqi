@@ -8,6 +8,7 @@ const TOKEN_KEY = 'soilqi_api_token';   // localStorage key for persistent sessi
 
 // ── State ────────────────────────────────────────────────────────────────────
 let idb         = null;
+let swReg       = null;        // ServiceWorkerRegistration (para updates)
 let watchId     = null;
 let gpsLat      = null;
 let gpsLng      = null;
@@ -27,7 +28,41 @@ function updateTokenBadge() {
 // ── Boot ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('sw.js').catch(() => {});
+        try {
+            swReg = await navigator.serviceWorker.register('sw.js');
+
+            // Detectar controller já existente antes de qualquer mudança
+            const hadController = !!navigator.serviceWorker.controller;
+
+            // Verificar actualizações sempre que a app volta ao primeiro plano
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible' && swReg) swReg.update();
+            });
+
+            // Novo SW a instalar — escutar mudanças de estado
+            swReg.addEventListener('updatefound', () => {
+                const newWorker = swReg.installing;
+                if (!newWorker) return;
+                newWorker.addEventListener('statechange', () => {
+                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                        showUpdateBanner();
+                    }
+                });
+            });
+
+            // SW já estava à espera (ex: utilizador fechou sem clicar em Atualizar)
+            if (swReg.waiting && navigator.serviceWorker.controller) {
+                showUpdateBanner();
+            }
+
+            // Quando o controller mudar (após skipWaiting) → recarregar para servir novos ficheiros
+            let _swReloading = false;
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                if (!_swReloading && hadController) { _swReloading = true; window.location.reload(); }
+            });
+        } catch (err) {
+            console.warn('[SW] Registo falhou:', err);
+        }
     }
 
     idb = await openIDB();
@@ -472,6 +507,38 @@ function onOffline() { isOnline = false; updateOnlineUI(); }
 
 function updateOnlineUI() {
     document.getElementById('status-dot').classList.toggle('online', isOnline);
+}
+
+// ── SW Update Banner ──────────────────────────────────────────────────────────
+function showUpdateBanner() {
+    if (document.getElementById('sw-update-banner')) return; // já visível
+    const banner = document.createElement('div');
+    banner.id = 'sw-update-banner';
+    banner.style.cssText = [
+        'position:fixed', 'top:0', 'left:0', 'right:0', 'z-index:9999',
+        'background:#166534', 'color:#fff', 'display:flex', 'align-items:center',
+        'justify-content:space-between', 'padding:10px 16px', 'font-size:14px',
+        'font-weight:600', 'box-shadow:0 2px 8px rgba(0,0,0,.3)',
+        'gap:12px'
+    ].join(';');
+    banner.innerHTML = `
+        <span>🔄 Nova versão disponível!</span>
+        <button onclick="applyUpdate()"
+                style="background:#fff;color:#166534;border:none;border-radius:8px;
+                       padding:6px 14px;font-weight:700;cursor:pointer;font-size:13px;
+                       flex-shrink:0;">
+            Atualizar
+        </button>`;
+    document.body.prepend(banner);
+}
+
+function applyUpdate() {
+    if (swReg && swReg.waiting) {
+        swReg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        // controllerchange vai disparar e recarregar automaticamente
+    } else {
+        window.location.reload(true);
+    }
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
