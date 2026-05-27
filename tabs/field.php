@@ -144,12 +144,129 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                     $response['message'] = 'Medição não encontrada ou sem permissão.';
                 }
                 break;
+
+            // ── Interpolações guardadas ────────────────────────────────────────
+
+            case 'save_interpolation':
+                $name       = trim($_POST['name'] ?? '');
+                $terrain_id = !empty($_POST['terrain_id']) ? intval($_POST['terrain_id']) : null;
+                $param      = $_POST['param']     ?? '';
+                $colormap   = $_POST['colormap']  ?? '';
+                $resolution = intval($_POST['resolution'] ?? 256);
+                $power      = floatval($_POST['power']    ?? 2);
+                $min_lat    = floatval($_POST['min_lat']  ?? 0);
+                $max_lat    = floatval($_POST['max_lat']  ?? 0);
+                $min_lng    = floatval($_POST['min_lng']  ?? 0);
+                $max_lng    = floatval($_POST['max_lng']  ?? 0);
+                $min_val    = isset($_POST['min_val']) && $_POST['min_val'] !== '' ? floatval($_POST['min_val']) : null;
+                $max_val    = isset($_POST['max_val']) && $_POST['max_val'] !== '' ? floatval($_POST['max_val']) : null;
+                $png_b64    = $_POST['png_data'] ?? '';
+
+                if (!$name)    { $response['message'] = 'Nome obrigatório.'; break; }
+                if (!$png_b64) { $response['message'] = 'Dados PNG em falta.'; break; }
+
+                // Strip data URL prefix and decode
+                $png_b64    = preg_replace('#^data:image/\w+;base64,#', '', $png_b64);
+                $png_binary = base64_decode($png_b64, true);
+                if ($png_binary === false) { $response['message'] = 'PNG inválido (base64 corrompido).'; break; }
+
+                $stmt = $pdo->prepare("
+                    INSERT INTO field_interpolations
+                        (user_id, terrain_id, name, param, colormap, resolution, power,
+                         min_lat, max_lat, min_lng, max_lng, min_val, max_val, png_data)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ");
+                $stmt->execute([
+                    $currentUser['id'], $terrain_id, $name, $param, $colormap,
+                    $resolution, $power,
+                    $min_lat, $max_lat, $min_lng, $max_lng,
+                    $min_val, $max_val,
+                    $png_binary
+                ]);
+                $response['success'] = true;
+                $response['id']      = (int)$pdo->lastInsertId();
+                $response['message'] = 'Interpolação guardada com sucesso.';
+                break;
+
+            case 'get_interpolations':
+                $where  = [];
+                $params = [];
+                if (!$isAdmin) {
+                    $where[]  = 'fi.user_id = ?';
+                    $params[] = $currentUser['id'];
+                }
+                $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+                $stmt = $pdo->prepare("
+                    SELECT fi.id, fi.name, fi.param, fi.colormap, fi.resolution, fi.power,
+                           fi.min_lat, fi.max_lat, fi.min_lng, fi.max_lng,
+                           fi.min_val, fi.max_val, fi.created_at,
+                           t.name AS terrain_name,
+                           u.username
+                    FROM field_interpolations fi
+                    LEFT JOIN terrains t ON t.id = fi.terrain_id
+                    LEFT JOIN users    u ON u.id = fi.user_id
+                    $wc
+                    ORDER BY fi.created_at DESC
+                ");
+                $stmt->execute($params);
+                $response['success']        = true;
+                $response['interpolations'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                break;
+
+            case 'get_interpolation_png':
+                $id = intval($_POST['id'] ?? 0);
+                if ($id <= 0) { $response['message'] = 'ID inválido.'; break; }
+
+                if ($isAdmin) {
+                    $stmt = $pdo->prepare("
+                        SELECT png_data, min_lat, max_lat, min_lng, max_lng, name
+                        FROM field_interpolations WHERE id = ?");
+                    $stmt->execute([$id]);
+                } else {
+                    $stmt = $pdo->prepare("
+                        SELECT png_data, min_lat, max_lat, min_lng, max_lng, name
+                        FROM field_interpolations WHERE id = ? AND user_id = ?");
+                    $stmt->execute([$id, $currentUser['id']]);
+                }
+                $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                if (!$row) { $response['message'] = 'Interpolação não encontrada ou sem permissão.'; break; }
+
+                $response['success'] = true;
+                $response['png']     = 'data:image/png;base64,' . base64_encode($row['png_data']);
+                $response['min_lat'] = (float)$row['min_lat'];
+                $response['max_lat'] = (float)$row['max_lat'];
+                $response['min_lng'] = (float)$row['min_lng'];
+                $response['max_lng'] = (float)$row['max_lng'];
+                $response['name']    = $row['name'];
+                break;
+
+            case 'delete_interpolation':
+                $id = intval($_POST['id'] ?? 0);
+                if ($id <= 0) { $response['message'] = 'ID inválido.'; break; }
+
+                if ($isAdmin) {
+                    $stmt = $pdo->prepare("DELETE FROM field_interpolations WHERE id = ?");
+                    $stmt->execute([$id]);
+                } else {
+                    $stmt = $pdo->prepare("DELETE FROM field_interpolations WHERE id = ? AND user_id = ?");
+                    $stmt->execute([$id, $currentUser['id']]);
+                }
+                if ($stmt->rowCount() > 0) {
+                    $response['success'] = true;
+                    $response['message'] = 'Interpolação eliminada.';
+                } else {
+                    $response['message'] = 'Não encontrada ou sem permissão.';
+                }
+                break;
         }
 
     } catch (PDOException $e) {
         $msg = $e->getMessage();
         if (strpos($msg, "doesn't exist") !== false || $e->getCode() === '42S02') {
-            $response['message'] = 'A tabela field_measurements não existe. Vá ao Admin → Migrações e aplique a migração 001_field_measurements.';
+            // Extract table name from error for a helpful message
+            preg_match("/Table '.*?\.(.*?)' doesn't exist/i", $msg, $m);
+            $tbl = isset($m[1]) ? $m[1] : 'necessária';
+            $response['message'] = "A tabela \"{$tbl}\" não existe. Vá ao Admin → Migrações e aplique as migrações em falta.";
         } else {
             $response['message'] = 'Erro na base de dados: ' . $msg;
         }
@@ -426,6 +543,25 @@ try {
 
         <div id="interp-status" style="margin-top:12px; font-size:13px; color:#6b7280; min-height:20px;"></div>
 
+        <!-- Guardar interpolação -->
+        <div id="interp-save-box" style="display:none; margin-top:14px; background:#f0fdf4;
+             border:1px solid #86efac; border-radius:10px; padding:14px;">
+            <div style="font-size:12px; font-weight:700; color:#166534; margin-bottom:8px;">
+                💾 Guardar esta interpolação na base de dados
+            </div>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <input id="interp-save-name" type="text"
+                       placeholder="Nome (ex: EC Campo Norte — Jan 2026)"
+                       style="flex:1; min-width:200px; padding:8px 10px;
+                              border:1.5px solid #86efac; border-radius:7px; font-size:13px;">
+                <button class="btn btn-primary btn-sm" onclick="saveInterpolation()"
+                        style="white-space:nowrap; padding:8px 14px;">
+                    💾 Guardar
+                </button>
+            </div>
+            <div id="interp-save-status" style="font-size:12px; color:#6b7280; margin-top:6px; min-height:16px;"></div>
+        </div>
+
         <!-- Legenda de cores -->
         <div id="interp-legend" style="display:none; margin-top:14px;">
             <div style="font-size:12px; font-weight:600; color:#374151; margin-bottom:4px;" id="interp-legend-title"></div>
@@ -435,6 +571,23 @@ try {
                 <span id="legend-mid"></span>
                 <span id="legend-max"></span>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Interpolações Guardadas -->
+<div class="section interp-section">
+    <div class="section-title" style="cursor:pointer; user-select:none;" onclick="toggleSavedInterpPanel()">
+        <h3>🗂️ Interpolações Guardadas</h3>
+        <span id="saved-interp-toggle" class="btn btn-secondary btn-sm">▼ Expandir</span>
+    </div>
+    <div id="saved-interp-panel" style="display:none; margin-top:16px;">
+        <p style="color:#6b7280; font-size:13px; margin-bottom:12px;">
+            Interpolações guardadas podem ser adicionadas como layer ao mapa e descarregadas
+            em PNG com ficheiro de georreferenciação (.pgw) compatível com QGIS e outros SIG.
+        </p>
+        <div id="saved-interp-list">
+            <div style="text-align:center; padding:20px; color:#9ca3af;">A carregar…</div>
         </div>
     </div>
 </div>

@@ -9,6 +9,17 @@ let interpolationOverlay = null;
 let addModeActive       = false;
 let tempMarker          = null;
 
+// Layers control reference (needed to add/remove saved interpolation overlays)
+let fieldLayersControl  = null;
+// Saved interpolations: id -> Leaflet imageOverlay currently on map
+let savedOverlayLayers  = {};
+// Cache of saved interpolation metadata (populated by loadSavedInterpolations)
+let savedInterpData     = [];
+// Last generated IDW result (for saving to DB)
+let lastInterpDataUrl   = null;
+let lastInterpBounds    = null; // { minLat, maxLat, minLng, maxLng }
+let lastInterpMeta      = null; // { minV, maxV, param, colormap, terrainId, resolution, power }
+
 // ── Boot ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function () {
     if (activeTab !== 'field') return;
@@ -37,7 +48,7 @@ function initFieldMap() {
     });
 
     osmBase.addTo(fieldMap);
-    L.control.layers(
+    fieldLayersControl = L.control.layers(
         { '🗺️ Mapa': osmBase, '🛰️ Satélite': satBase, '🏔️ Relevo': topoBase },
         { '🏷️ Etiquetas': labelsOv },
         { position: 'topright', collapsed: true }
@@ -380,6 +391,11 @@ function removeInterpolation() {
     if (interpolationOverlay) { fieldMap.removeLayer(interpolationOverlay); interpolationOverlay = null; }
     const leg = document.getElementById('interp-legend');
     if (leg) leg.style.display = 'none';
+    const saveBox = document.getElementById('interp-save-box');
+    if (saveBox) saveBox.style.display = 'none';
+    lastInterpDataUrl = null;
+    lastInterpBounds  = null;
+    lastInterpMeta    = null;
     setInterpStatus('Overlay removido.');
 }
 
@@ -467,6 +483,19 @@ async function generateInterpolation() {
     drawInterpLegend(minV, maxV, colormap, paramLabels[param] || param);
 
     setInterpStatus(`✅ Interpolação concluída — ${pts.length} pontos · ${resPx}×${resPx} px · IDW (p=${power})`);
+
+    // ── Guardar resultado para posterior salvamento ────────────────────────────
+    lastInterpDataUrl = canvas.toDataURL('image/png');
+    lastInterpBounds  = { minLat, maxLat, minLng, maxLng };
+    lastInterpMeta    = { minV, maxV, param, colormap,
+                          terrainId: terrainId,
+                          resolution: resPx, power };
+
+    // Mostrar caixa de guardar
+    const saveBox = document.getElementById('interp-save-box');
+    if (saveBox) saveBox.style.display = 'block';
+    const saveStatus = document.getElementById('interp-save-status');
+    if (saveStatus) saveStatus.textContent = '';
 }
 
 // ── Legenda ───────────────────────────────────────────────────────────────────
@@ -485,6 +514,305 @@ function drawInterpLegend(minV, maxV, colormap, label) {
     document.getElementById('legend-max').textContent = maxV.toFixed(2);
     document.getElementById('interp-legend-title').textContent = `Legenda: ${label}`;
     document.getElementById('interp-legend').style.display = 'block';
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INTERPOLAÇÕES GUARDADAS
+// ══════════════════════════════════════════════════════════════════════════════
+
+function toggleSavedInterpPanel() {
+    const panel = document.getElementById('saved-interp-panel');
+    const btn   = document.getElementById('saved-interp-toggle');
+    const open  = panel.style.display === 'none';
+    panel.style.display = open ? 'block' : 'none';
+    if (btn) btn.textContent = open ? '▲ Recolher' : '▼ Expandir';
+    if (open) loadSavedInterpolations();
+}
+
+function loadSavedInterpolations() {
+    const list = document.getElementById('saved-interp-list');
+    if (list) list.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af">A carregar…</div>';
+
+    const fd = new FormData();
+    fd.append('action', 'get_interpolations');
+
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.success) {
+                if (list) list.innerHTML =
+                    '<div class="warning-box">⚠️ ' + escHtml(data.message || 'Erro ao carregar.') +
+                    ' — aplique a migração <strong>002_field_interpolations</strong> em Admin → Migrações.</div>';
+                return;
+            }
+            savedInterpData = data.interpolations || [];
+            renderSavedInterpolations(savedInterpData);
+        })
+        .catch(function() {
+            if (list) list.innerHTML = '<div class="sql-error">❌ Erro de rede ao carregar interpolações.</div>';
+        });
+}
+
+function renderSavedInterpolations(items) {
+    const list = document.getElementById('saved-interp-list');
+    if (!list) return;
+
+    if (!items.length) {
+        list.innerHTML = '<div class="empty-field"><div class="empty-icon">🎨</div>' +
+            '<p>Nenhuma interpolação guardada ainda.<br>' +
+            '<small style="color:#d1d5db">Gere uma interpolação e clique em "💾 Guardar".</small></p></div>';
+        return;
+    }
+
+    const PARAM_LABELS = {
+        conductivity: 'EC (mS/cm)', ph: 'pH',
+        temperature:  'Temp (°C)', moisture: 'Hum (%)'
+    };
+
+    const rows = items.map(function(item) {
+        const dt      = new Date(item.created_at).toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' });
+        const param   = PARAM_LABELS[item.param] || item.param;
+        const terrain = item.terrain_name || '—';
+        const minV    = item.min_val !== null ? parseFloat(item.min_val).toFixed(2) : '—';
+        const maxV    = item.max_val !== null ? parseFloat(item.max_val).toFixed(2) : '—';
+        const loaded  = !!savedOverlayLayers[item.id];
+
+        return '<tr id="saved-row-' + item.id + '">' +
+            '<td style="font-weight:600;max-width:180px">' + escHtml(item.name) + '</td>' +
+            '<td>' + escHtml(terrain) + '</td>' +
+            '<td>' + escHtml(param) + '</td>' +
+            '<td style="font-size:11px;color:#6b7280;white-space:nowrap">' + minV + ' – ' + maxV + '</td>' +
+            '<td style="font-size:11px;color:#9ca3af;white-space:nowrap">' + dt + '</td>' +
+            '<td>' +
+                '<div style="display:flex;gap:4px;flex-wrap:wrap;">' +
+                    '<button id="show-btn-' + item.id + '" class="btn btn-secondary btn-sm" ' +
+                        'onclick="toggleSavedOnMap(' + item.id + ')" ' +
+                        'style="' + (loaded ? 'background:#667eea;color:#fff;border-color:#667eea;' : '') + '">' +
+                        (loaded ? '👁️ Visível' : '👁️ Mostrar') + '</button>' +
+                    '<button class="btn btn-secondary btn-sm" onclick="downloadInterpPng(' + item.id + ')" ' +
+                        'title="Download PNG georeferenciado">⬇ PNG</button>' +
+                    '<button class="btn btn-secondary btn-sm" onclick="downloadInterpPgw(' + item.id + ')" ' +
+                        'title="Download World File (.pgw) para QGIS / SIG">⬇ PGW</button>' +
+                    '<button class="btn btn-danger btn-sm" onclick="deleteSavedInterp(' + item.id + ')" ' +
+                        'title="Eliminar">🗑️</button>' +
+                '</div>' +
+            '</td>' +
+        '</tr>';
+    }).join('');
+
+    list.innerHTML =
+        '<div style="overflow-x:auto">' +
+        '<table>' +
+        '<thead><tr>' +
+            '<th>Nome</th><th>Terreno</th><th>Parâmetro</th>' +
+            '<th>Intervalo</th><th>Data</th><th>Ações</th>' +
+        '</tr></thead>' +
+        '<tbody>' + rows + '</tbody>' +
+        '</table></div>' +
+        '<p style="font-size:11px;color:#9ca3af;margin-top:8px;padding:0 4px">' +
+            '📌 O ficheiro .pgw é o <em>PNG World File</em> — abra-o com o PNG em QGIS (CRS: WGS 84 / EPSG:4326).' +
+        '</p>';
+}
+
+// ── Guardar interpolação ──────────────────────────────────────────────────────
+function saveInterpolation() {
+    if (!lastInterpDataUrl || !lastInterpBounds || !lastInterpMeta) {
+        showAlert('Nenhuma interpolação activa para guardar. Gere primeiro uma interpolação.', 'error');
+        return;
+    }
+    const name = (document.getElementById('interp-save-name').value || '').trim();
+    if (!name) {
+        showAlert('Insira um nome para a interpolação antes de guardar.', 'error');
+        document.getElementById('interp-save-name').focus();
+        return;
+    }
+
+    const saveStatus = document.getElementById('interp-save-status');
+    if (saveStatus) saveStatus.textContent = '⏳ A guardar…';
+
+    const fd = new FormData();
+    fd.append('action',     'save_interpolation');
+    fd.append('name',       name);
+    fd.append('png_data',   lastInterpDataUrl);
+    fd.append('param',      lastInterpMeta.param);
+    fd.append('colormap',   lastInterpMeta.colormap);
+    fd.append('resolution', lastInterpMeta.resolution);
+    fd.append('power',      lastInterpMeta.power);
+    fd.append('min_lat',    lastInterpBounds.minLat);
+    fd.append('max_lat',    lastInterpBounds.maxLat);
+    fd.append('min_lng',    lastInterpBounds.minLng);
+    fd.append('max_lng',    lastInterpBounds.maxLng);
+    if (lastInterpMeta.minV !== undefined) fd.append('min_val', lastInterpMeta.minV);
+    if (lastInterpMeta.maxV !== undefined) fd.append('max_val', lastInterpMeta.maxV);
+    if (lastInterpMeta.terrainId) fd.append('terrain_id', lastInterpMeta.terrainId);
+
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                if (saveStatus) saveStatus.textContent = '✅ Guardado! (ID #' + data.id + ')';
+                document.getElementById('interp-save-name').value = '';
+                // Auto-abre o painel de guardadas e recarrega a lista
+                const panel = document.getElementById('saved-interp-panel');
+                if (panel && panel.style.display === 'none') {
+                    panel.style.display = 'block';
+                    const tb = document.getElementById('saved-interp-toggle');
+                    if (tb) tb.textContent = '▲ Recolher';
+                }
+                loadSavedInterpolations();
+            } else {
+                if (saveStatus) saveStatus.textContent = '❌ ' + (data.message || 'Erro ao guardar.');
+            }
+        })
+        .catch(function() {
+            if (saveStatus) saveStatus.textContent = '❌ Erro de rede.';
+        });
+}
+
+// ── Mostrar / ocultar no mapa ─────────────────────────────────────────────────
+function toggleSavedOnMap(id) {
+    if (savedOverlayLayers[id]) { hideSavedOnMap(id); } else { showSavedOnMap(id); }
+}
+
+function showSavedOnMap(id) {
+    const btn = document.getElementById('show-btn-' + id);
+    if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
+
+    const fd = new FormData();
+    fd.append('action', 'get_interpolation_png');
+    fd.append('id',     id);
+
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.success) {
+                showAlert('❌ ' + (data.message || 'Erro ao carregar interpolação.'), 'error');
+                if (btn) { btn.textContent = '👁️ Mostrar'; btn.disabled = false; }
+                return;
+            }
+            const bounds  = [[data.min_lat, data.min_lng], [data.max_lat, data.max_lng]];
+            const overlay = L.imageOverlay(data.png, bounds, { opacity: 0.75 }).addTo(fieldMap);
+            savedOverlayLayers[id] = overlay;
+            if (fieldLayersControl) fieldLayersControl.addOverlay(overlay, '🎨 ' + data.name);
+            fieldMap.fitBounds(bounds, { padding: [40, 40] });
+            if (btn) {
+                btn.textContent       = '👁️ Visível';
+                btn.style.background  = '#667eea';
+                btn.style.color       = '#fff';
+                btn.style.borderColor = '#667eea';
+                btn.disabled          = false;
+            }
+        })
+        .catch(function() {
+            showAlert('Erro de rede ao carregar interpolação.', 'error');
+            if (btn) { btn.textContent = '👁️ Mostrar'; btn.disabled = false; }
+        });
+}
+
+function hideSavedOnMap(id) {
+    if (savedOverlayLayers[id]) {
+        if (fieldLayersControl) fieldLayersControl.removeLayer(savedOverlayLayers[id]);
+        fieldMap.removeLayer(savedOverlayLayers[id]);
+        delete savedOverlayLayers[id];
+    }
+    const btn = document.getElementById('show-btn-' + id);
+    if (btn) {
+        btn.textContent       = '👁️ Mostrar';
+        btn.style.background  = '';
+        btn.style.color       = '';
+        btn.style.borderColor = '';
+    }
+}
+
+// ── Downloads ─────────────────────────────────────────────────────────────────
+function downloadInterpPng(id) {
+    const item     = savedInterpData.find(function(x) { return parseInt(x.id) === parseInt(id); });
+    const rawName  = item ? item.name : ('interpolacao_' + id);
+    const safeName = rawName.replace(/[^\wÀ-ɏ \-]/g, '_').trim();
+
+    const fd = new FormData();
+    fd.append('action', 'get_interpolation_png');
+    fd.append('id',     id);
+
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.success) { showAlert('Erro: ' + (data.message || ''), 'error'); return; }
+            // Trigger browser download from data URL
+            const a    = document.createElement('a');
+            a.href     = data.png;
+            a.download = safeName + '.png';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        })
+        .catch(function() { showAlert('Erro de rede ao fazer download.', 'error'); });
+}
+
+function downloadInterpPgw(id) {
+    const item = savedInterpData.find(function(x) { return parseInt(x.id) === parseInt(id); });
+    if (!item) { showAlert('Dados não encontrados. Recarregue a lista.', 'error'); return; }
+
+    const res    = parseInt(item.resolution);
+    const minLat = parseFloat(item.min_lat);
+    const maxLat = parseFloat(item.max_lat);
+    const minLng = parseFloat(item.min_lng);
+    const maxLng = parseFloat(item.max_lng);
+
+    // PNG World File (.pgw) — 6 lines:
+    // Line 1: pixel width  (longitude per pixel, positive → east)
+    // Line 2: rotation about y (0 for north-up)
+    // Line 3: rotation about x (0 for north-up)
+    // Line 4: pixel height (latitude per pixel, NEGATIVE → south)
+    // Line 5: longitude of center of upper-left pixel
+    // Line 6: latitude  of center of upper-left pixel
+    const pixW   =  (maxLng - minLng) / res;
+    const pixH   = -(maxLat - minLat) / res;
+    const origX  =  minLng + pixW / 2;
+    const origY  =  maxLat + pixH / 2;   // pixH is negative → slightly south of maxLat
+
+    const pgwContent = [
+        pixW.toFixed(10),
+        '0.0000000000',
+        '0.0000000000',
+        pixH.toFixed(10),
+        origX.toFixed(10),
+        origY.toFixed(10)
+    ].join('\n');
+
+    const safeName = item.name.replace(/[^\wÀ-ɏ \-]/g, '_').trim();
+    const blob = new Blob([pgwContent], { type: 'text/plain' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = safeName + '.pgw';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+// ── Eliminar ──────────────────────────────────────────────────────────────────
+function deleteSavedInterp(id) {
+    if (!confirm('Eliminar esta interpolação da base de dados?')) return;
+
+    hideSavedOnMap(id); // remove from map first if visible
+
+    const fd = new FormData();
+    fd.append('action', 'delete_interpolation');
+    fd.append('id',     id);
+
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                showAlert('Interpolação eliminada.', 'success');
+                loadSavedInterpolations();
+            } else {
+                showAlert('Erro: ' + (data.message || ''), 'error');
+            }
+        })
+        .catch(function() { showAlert('Erro de rede.', 'error'); });
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
