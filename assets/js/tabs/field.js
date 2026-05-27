@@ -987,6 +987,12 @@ function onGeoJSONFileSelected(input) {
     const ext = file.name.split('.').pop().toLowerCase();
     const kb  = (file.size / 1024).toFixed(0);
 
+    if (!['kmz','kml','geojson','json'].includes(ext)) {
+        info.textContent = `⚠️ Formato não suportado (.${ext}). Use .geojson, .json, .kmz ou .kml.`;
+        info.style.color = '#dc2626';
+        return;
+    }
+
     // ── KMZ / KML: guardar File object — conversão feita no servidor ──────────
     if (ext === 'kmz' || ext === 'kml') {
         pendingKmzFile = file;
@@ -1026,7 +1032,7 @@ function onGeoJSONFileSelected(input) {
 }
 
 // Guardar GeoJSON na BD
-const _GJ_FILE_ACCEPT = '.geojson,.json,.kmz,.kml';
+const _GJ_FILE_ACCEPT = '*/*';
 const _GJ_FILE_LABEL  = '📁 Clique para selecionar .geojson / .json / .kmz / .kml';
 
 function _gjReset(status, btn) {

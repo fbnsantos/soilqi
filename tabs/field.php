@@ -954,7 +954,7 @@ try {
                     background:#fff; transition:border-color .2s; font-size:13px; color:#64748b;">
                     📁 Clique para selecionar .geojson / .json / .kmz / .kml
                     <input id="gj-file" type="file"
-                           accept=".geojson,.json,.kmz,.kml"
+                           accept="*/*"
                            style="display:none" onchange="onGeoJSONFileSelected(this)">
                 </label>
                 <div id="gj-file-info" style="font-size:12px; color:#6b7280; margin-top:6px; min-height:16px;"></div>
