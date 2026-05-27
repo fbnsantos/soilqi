@@ -206,6 +206,10 @@ try {
             break;
 
         case 'get_measurements':
+            // Garantir coluna photo_path (migração 004) — idempotente, custo zero se já existir
+            try { $pdo->exec("ALTER TABLE field_measurements ADD COLUMN photo_path VARCHAR(255) NULL AFTER notes"); }
+            catch (PDOException $ignored) { /* já existe — ignorar */ }
+
             $limit = min(intval($_GET['limit'] ?? 200), 500);
             $stmt  = $pdo->prepare(
                 "SELECT m.id, m.latitude, m.longitude, m.gps_accuracy,

@@ -133,10 +133,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
 
                 $wc = $where ? 'WHERE ' . implode(' AND ', $where) : '';
 
+                // Garantir coluna photo_path (migração 004) — idempotente
+                try { $pdo->exec("ALTER TABLE field_measurements ADD COLUMN photo_path VARCHAR(255) NULL AFTER notes"); }
+                catch (PDOException $ignored) { /* já existe */ }
+
                 $stmt = $pdo->prepare("
                     SELECT m.id, m.latitude, m.longitude, m.gps_accuracy,
                            m.conductivity, m.ph, m.temperature, m.moisture,
                            m.notes, m.measured_at,
+                           COALESCE(m.photo_path, '') AS photo_path,
                            t.name  AS terrain_name,
                            u.username
                     FROM   field_measurements m

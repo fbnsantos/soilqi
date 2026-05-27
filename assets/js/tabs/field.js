@@ -243,6 +243,13 @@ function renderTable(data) {
 
         const adminCell = isAdm ? `<td><strong>${escHtml(m.username || '—')}</strong></td>` : '';
 
+        const photoCell = m.photo_path
+            ? `<td style="text-align:center">
+                   <a href="pwa/${escHtml(m.photo_path)}" target="_blank"
+                      title="Ver fotografia" style="font-size:18px;text-decoration:none;">📷</a>
+               </td>`
+            : `<td style="text-align:center;color:#d1d5db;font-size:13px;">—</td>`;
+
         return `<tr>
             <td style="white-space:nowrap">${dt}</td>
             ${adminCell}
@@ -253,6 +260,7 @@ function renderTable(data) {
             <td style="text-align:center">${temp !== null ? temp  : '<span style="color:#d1d5db">—</span>'}</td>
             <td style="text-align:center">${moist!== null ? moist : '<span style="color:#d1d5db">—</span>'}</td>
             <td style="max-width:160px;font-size:12px;color:#6b7280">${escHtml(m.notes || '')}</td>
+            ${photoCell}
             <td>
                 <button class="btn btn-danger btn-sm"
                         onclick="deleteMeasurement(${m.id})"
@@ -276,6 +284,7 @@ function renderTable(data) {
                     <th>Temp (°C)</th>
                     <th>Hum (%)</th>
                     <th>Notas</th>
+                    <th title="Fotografia">📷</th>
                     <th></th>
                 </tr>
             </thead>
