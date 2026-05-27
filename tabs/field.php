@@ -282,37 +282,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 }
                 $fcount = count($features);
 
-                // Calcular bounding box a partir das coordenadas
+                // Calcular bounding box — abordagem iterativa (sem funções aninhadas)
+                // que causavam Fatal Error em PHP na segunda chamada recursiva
                 $minLat = $maxLat = $minLng = $maxLng = null;
-                function extractCoords($geom, &$minLat, &$maxLat, &$minLng, &$maxLng) {
-                    if (!$geom) return;
-                    $type = $geom['type'] ?? '';
-                    $coords = $geom['coordinates'] ?? null;
-                    if (!$coords) return;
-                    $flat = [];
-                    array_walk_recursive($coords, function($v) use (&$flat) { $flat[] = $v; });
-                    // pairs [lng, lat]
-                    $coordList = is_array($coords[0] ?? null) ? $coords : [$coords];
-                    // flatten to list of [lng, lat] pairs
-                    function flattenCoords($c, &$out) {
-                        if (!is_array($c)) return;
-                        if (count($c) >= 2 && is_numeric($c[0]) && is_numeric($c[1])) {
-                            $out[] = $c; return;
-                        }
-                        foreach ($c as $child) flattenCoords($child, $out);
-                    }
-                    $pts = [];
-                    flattenCoords($coords, $pts);
-                    foreach ($pts as $pt) {
-                        $lng = (float)$pt[0]; $lat = (float)$pt[1];
+                $stack = [];
+                foreach ($features as $f) {
+                    $geom = $f['geometry'] ?? null;
+                    if ($geom && isset($geom['coordinates'])) $stack[] = $geom['coordinates'];
+                }
+                // Suporte a Feature simples ou Geometry directa (sem FeatureCollection)
+                if (empty($features)) {
+                    if (isset($parsed['geometry']['coordinates'])) $stack[] = $parsed['geometry']['coordinates'];
+                    elseif (isset($parsed['coordinates']))          $stack[] = $parsed['coordinates'];
+                }
+                while (!empty($stack)) {
+                    $item = array_pop($stack);
+                    if (!is_array($item)) continue;
+                    // Par [lng, lat] — primeiro elemento numérico e não-array
+                    if (count($item) >= 2 && is_numeric($item[0]) && !is_array($item[0])) {
+                        $lng = (float)$item[0]; $lat = (float)$item[1];
                         if ($minLat === null || $lat < $minLat) $minLat = $lat;
                         if ($maxLat === null || $lat > $maxLat) $maxLat = $lat;
                         if ($minLng === null || $lng < $minLng) $minLng = $lng;
                         if ($maxLng === null || $lng > $maxLng) $maxLng = $lng;
+                    } else {
+                        foreach ($item as $child) {
+                            if (is_array($child)) $stack[] = $child;
+                        }
                     }
-                }
-                foreach ($features as $f) {
-                    extractCoords($f['geometry'] ?? null, $minLat, $maxLat, $minLng, $maxLng);
                 }
 
                 $stmt = $pdo->prepare("

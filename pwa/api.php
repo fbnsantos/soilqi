@@ -165,9 +165,9 @@ try {
                         $dir = __DIR__ . '/uploads/photos/';
                         if (!is_dir($dir)) mkdir($dir, 0755, true);
 
-                        // Proteger directoria contra execução directa
+                        // Desativar listagem mas permitir acesso directo a ficheiros (fotos)
                         $htacc = $dir . '.htaccess';
-                        if (!file_exists($htacc)) file_put_contents($htacc, "Options -Indexes\nDeny from all\n");
+                        if (!file_exists($htacc)) file_put_contents($htacc, "Options -Indexes\n");
 
                         $fname      = $measurement_id . '_' . time() . '.jpg';
                         $fullPath   = $dir . $fname;

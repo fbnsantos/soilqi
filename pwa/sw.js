@@ -3,7 +3,7 @@
 // ── VERSÃO ────────────────────────────────────────────────────────────────────
 // Muda este número sempre que houver uma nova versão para forçar a actualização
 // nos telemóveis dos utilizadores.
-const CACHE_VERSION = 'v10'; // 2026-05-27 — full-width layout
+const CACHE_VERSION = 'v11'; // 2026-05-27 — fix GeoJSON bbox + photo viewer
 const CACHE = `soilqi-field-${CACHE_VERSION}`;
 
 const STATIC = [

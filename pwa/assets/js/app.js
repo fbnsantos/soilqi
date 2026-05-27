@@ -545,15 +545,20 @@ function renderCard(m) {
         ? '<span class="sync-tag synced">Sincronizado</span>'
         : '<span class="sync-tag pending">Pendente</span>';
 
-    // Fotografia (apenas para medições sincronizadas com caminho guardado)
-    const photoHtml = (m.photo_path && m._synced)
-        ? `<img src="../${escHtml(m.photo_path)}" alt="Foto da medição"
-                style="width:100%;border-radius:8px;margin-top:8px;max-height:200px;object-fit:cover;display:block;"
-                loading="lazy" onerror="this.style.display='none'">`
+    // Fotografia — botão que abre o viewer
+    // photo_path é relativo à raiz da PWA (ex: "uploads/photos/1_xxx.jpg")
+    const photoSrc = (m.photo_path && m._synced)
+        ? escHtml(m.photo_path)          // URL directo do ficheiro
         : (m.photo_b64 && !m._synced)
-            ? `<img src="${m.photo_b64}" alt="Foto (local)"
-                    style="width:100%;border-radius:8px;margin-top:8px;max-height:200px;object-fit:cover;display:block;">`
-            : '';
+            ? m.photo_b64                // data URL (pendente offline)
+            : null;
+
+    const photoBtn = photoSrc
+        ? `<button class="btn-photo" onclick="openPhotoViewer(this.dataset.src)"
+                   data-src="${photoSrc}">
+               📷 Ver fotografia
+           </button>`
+        : '';
 
     return `
         <div class="m-card">
@@ -565,7 +570,7 @@ function renderCard(m) {
             <div class="m-coords">${lat}, ${lng}${accStr}</div>
             <div class="m-values">${chipsHtml}</div>
             ${notesHtml}
-            ${photoHtml}
+            ${photoBtn}
         </div>`;
 }
 
@@ -579,6 +584,39 @@ function onOffline() { isOnline = false; updateOnlineUI(); }
 
 function updateOnlineUI() {
     document.getElementById('status-dot').classList.toggle('online', isOnline);
+}
+
+// ── Photo Viewer ──────────────────────────────────────────────────────────────
+function openPhotoViewer(src) {
+    // Remover viewer anterior se existir
+    const old = document.getElementById('photo-viewer');
+    if (old) old.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'photo-viewer';
+    overlay.innerHTML = `
+        <div id="photo-viewer-bg"></div>
+        <div id="photo-viewer-inner">
+            <img src="${src}" alt="Fotografia da medição" id="photo-viewer-img"
+                 onerror="this.alt='Foto não disponível'">
+            <button id="photo-viewer-close" onclick="closePhotoViewer()"
+                    aria-label="Fechar">✕</button>
+        </div>`;
+    document.body.appendChild(overlay);
+    document.getElementById('photo-viewer-bg').addEventListener('click', closePhotoViewer);
+    // Fechar com Escape
+    overlay._keyHandler = e => { if (e.key === 'Escape') closePhotoViewer(); };
+    document.addEventListener('keydown', overlay._keyHandler);
+    // Animar entrada
+    requestAnimationFrame(() => overlay.classList.add('open'));
+}
+
+function closePhotoViewer() {
+    const overlay = document.getElementById('photo-viewer');
+    if (!overlay) return;
+    document.removeEventListener('keydown', overlay._keyHandler);
+    overlay.classList.remove('open');
+    setTimeout(() => overlay.remove(), 220);
 }
 
 // ── SW Update Banner ──────────────────────────────────────────────────────────
