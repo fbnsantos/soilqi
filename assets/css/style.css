@@ -117,6 +117,38 @@ body {
     gap: 10px;
 }
 
+.user-details {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+}
+
+.user-name {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.user-role {
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-weight: 600;
+    margin-top: 2px;
+    width: fit-content;
+}
+
+.role-admin {
+    background: rgba(251, 191, 36, 0.25);
+    color: #fde68a;
+    border: 1px solid rgba(251, 191, 36, 0.4);
+}
+
+.role-user {
+    background: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
 .user-avatar {
     width: 36px;
     height: 36px;

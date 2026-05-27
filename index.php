@@ -52,11 +52,7 @@ if ($availableTabs[$activeTab]['requiresAuth'] && !$isLoggedIn) {
     redirect('login.php');
 }
 
-// Verificar se o tab requer permissões de admin
-if ($availableTabs[$activeTab]['requiresAdmin'] && !$isAdmin) {
-    setFlashMessage('Acesso negado. Requer permissões de administrador.', 'error');
-    $activeTab = 'map'; // Redireciona para o mapa
-}
+// Tab de admin: não redireciona — o conteúdo do tab trata do acesso negado
 
 // Verificar se o ficheiro do tab existe
 $tabFile = $availableTabs[$activeTab]['file'];
@@ -93,7 +89,12 @@ if (!file_exists($tabFile)) {
                         <div class="user-avatar">
                             <?php echo strtoupper(substr($currentUser['username'], 0, 1)); ?>
                         </div>
-                        <span><?php echo htmlspecialchars($currentUser['username']); ?></span>
+                        <div class="user-details">
+                            <span class="user-name"><?php echo htmlspecialchars($currentUser['username']); ?></span>
+                            <span class="user-role <?php echo $isAdmin ? 'role-admin' : 'role-user'; ?>">
+                                <?php echo $isAdmin ? '👑 Admin' : '👤 Utilizador'; ?>
+                            </span>
+                        </div>
                     </div>
                     <a href="logout.php" class="logout-btn">Sair</a>
                 <?php else: ?>
@@ -107,14 +108,11 @@ if (!file_exists($tabFile)) {
     <div class="nav-menu">
         <div class="nav-content">
             <?php foreach ($availableTabs as $tabKey => $tabInfo): ?>
-                <?php 
+                <?php
                 // Mostrar tab se:
                 // 1. Não requer auth, OU
-                // 2. User está logado e não requer admin, OU
-                // 3. User está logado e é admin
-                $showTab = !$tabInfo['requiresAuth'] || 
-                          ($isLoggedIn && !$tabInfo['requiresAdmin']) || 
-                          ($isLoggedIn && $tabInfo['requiresAdmin'] && $isAdmin);
+                // 2. User está logado (tabs com requiresAdmin também aparecem — o conteúdo trata das permissões)
+                $showTab = !$tabInfo['requiresAuth'] || $isLoggedIn;
                 ?>
                 <?php if ($showTab): ?>
                     <a href="?tab=<?php echo $tabKey; ?>" 
