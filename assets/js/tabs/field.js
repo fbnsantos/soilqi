@@ -1026,8 +1026,7 @@ function onGeoJSONFileSelected(input) {
 }
 
 // Guardar GeoJSON na BD
-const _GJ_FILE_ACCEPT = '.geojson,.json,.kmz,.kml,application/json,application/geo+json,' +
-    'application/vnd.google-earth.kmz,application/vnd.google-earth.kml+xml';
+const _GJ_FILE_ACCEPT = '.geojson,.json,.kmz,.kml';
 const _GJ_FILE_LABEL  = '📁 Clique para selecionar .geojson / .json / .kmz / .kml';
 
 function _gjReset(status, btn) {
