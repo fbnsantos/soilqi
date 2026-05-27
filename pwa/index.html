@@ -188,10 +188,13 @@
 
 <script src="assets/js/app.js"></script>
 <!-- versão da app — útil para confirmar que o cache foi actualizado -->
-<div id="app-version" style="text-align:center;font-size:10px;color:#aaa;padding:6px 0 2px;
-     position:fixed;bottom:calc(var(--nav-h,66px) + 2px);right:6px;
-     background:transparent;pointer-events:none;z-index:100;opacity:.5;">
-    v13
-</div>
+<button id="app-version" onclick="checkVersionManual()"
+        title="Toque para verificar actualizações"
+        style="position:fixed;bottom:calc(var(--nav-h,66px) + 4px);right:8px;
+               z-index:100;background:transparent;border:none;padding:3px 5px;
+               font-size:11px;color:#aaa;cursor:pointer;opacity:.6;
+               font-family:inherit;letter-spacing:.3px;line-height:1;">
+    v14
+</button>
 </body>
 </html>

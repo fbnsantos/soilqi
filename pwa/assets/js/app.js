@@ -1,10 +1,11 @@
 'use strict';
 
 // ── Config ───────────────────────────────────────────────────────────────────
-const API      = 'api.php';
-const IDB_NAME = 'soilqi_field';
-const IDB_VER  = 1;
-const TOKEN_KEY = 'soilqi_api_token';   // localStorage key for persistent session
+const API        = 'api.php';
+const IDB_NAME   = 'soilqi_field';
+const IDB_VER    = 1;
+const TOKEN_KEY  = 'soilqi_api_token';   // localStorage key for persistent session
+const APP_VERSION = 'v14';               // deve coincidir com CACHE_VERSION no sw.js
 
 // ── State ────────────────────────────────────────────────────────────────────
 let idb           = null;
@@ -158,6 +159,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     document.getElementById('measurement-form').addEventListener('submit', handleSubmit);
     showTab('capture');
+
+    // Mostrar versão correcta no badge (lida da constante, não do HTML)
+    _setVersionBadge(null);
 });
 
 // ── IndexedDB ────────────────────────────────────────────────────────────────
@@ -647,6 +651,7 @@ function showUpdateBanner() {
             Atualizar
         </button>`;
     document.body.prepend(banner);
+    _setVersionBadge('update');
 }
 
 function applyUpdate() {
@@ -655,6 +660,68 @@ function applyUpdate() {
         // controllerchange vai disparar e recarregar automaticamente
     } else {
         window.location.reload(true);
+    }
+}
+
+// ── Verificação manual de versão ──────────────────────────────────────────────
+function _setVersionBadge(state) {
+    const el = document.getElementById('app-version');
+    if (!el) return;
+    if (state === 'update') {
+        el.textContent = APP_VERSION + ' ↑';
+        el.style.color   = '#f59e0b';
+        el.style.opacity = '1';
+        el.title = 'Nova versão disponível — clique para atualizar';
+    } else if (state === 'ok') {
+        el.textContent = APP_VERSION + ' ✓';
+        el.style.color   = '#4ade80';
+        el.style.opacity = '1';
+        el.title = 'Versão mais recente instalada';
+        // Voltar ao normal após 4 s
+        setTimeout(() => {
+            el.textContent = APP_VERSION;
+            el.style.color   = '';
+            el.style.opacity = '.6';
+            el.title = 'Toque para verificar actualizações';
+        }, 4000);
+    } else {
+        el.textContent = APP_VERSION;
+        el.style.color   = '';
+        el.style.opacity = '.6';
+        el.title = 'Toque para verificar actualizações';
+    }
+}
+
+async function checkVersionManual() {
+    const el = document.getElementById('app-version');
+    if (el) { el.textContent = APP_VERSION + ' …'; el.style.opacity = '1'; }
+
+    if (!swReg) {
+        toast(`Versão ${APP_VERSION}`, 'info');
+        _setVersionBadge(null);
+        return;
+    }
+    // SW já tem uma versão à espera
+    if (swReg.waiting) {
+        _setVersionBadge('update');
+        showUpdateBanner();
+        return;
+    }
+    // Forçar verificação junto ao servidor
+    try {
+        await swReg.update();
+        if (swReg.waiting) {
+            _setVersionBadge('update');
+            showUpdateBanner();
+        } else if (swReg.installing) {
+            toast('⬇️ A instalar nova versão…', 'info');
+        } else {
+            _setVersionBadge('ok');
+            toast(`✓ Versão ${APP_VERSION} — já tem a versão mais recente`, 'success');
+        }
+    } catch {
+        toast(`Versão ${APP_VERSION} — sem ligação para verificar`, 'warning');
+        _setVersionBadge(null);
     }
 }
 
