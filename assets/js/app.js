@@ -47,7 +47,7 @@ function initMap() {
           '🛰️ Satélite': satLayer,
           '🏔️ Relevo':   topoLayer },
         { '🏷️ Etiquetas (satélite)': labelsLayer },
-        { position: 'topright', collapsed: true }
+        { position: 'topright', collapsed: false }
     ).addTo(map);
 
     // Criar layer group para terrenos desenhados
@@ -553,7 +553,7 @@ function loadMapGeoJSONLayers() {
     const fd = new FormData();
     fd.append('action', 'get_geojson_layers');
 
-    fetch('', { method: 'POST', body: fd })
+    fetch('index.php', { method: 'POST', body: fd })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data.success) {
@@ -618,7 +618,7 @@ function toggleMapGeoJSON(id, name) {
     fd.append('action', 'get_geojson_data');
     fd.append('id', id);
 
-    fetch('', { method: 'POST', body: fd })
+    fetch('index.php', { method: 'POST', body: fd })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data.success || !data.geojson) {

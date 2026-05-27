@@ -598,6 +598,39 @@ body {
     pointer-events: none;
 }
 
+/* ── Leaflet Layers Control ───────────────────────────── */
+/* collapsed:false — painel sempre expandido, estilo limpo */
+.leaflet-control-layers {
+    border-radius: 10px !important;
+    box-shadow: 0 2px 12px rgba(0,0,0,.15) !important;
+    border: 1px solid #e5e7eb !important;
+    font-family: inherit;
+    font-size: 13px;
+    min-width: 160px;
+}
+.leaflet-control-layers-expanded {
+    padding: 10px 14px !important;
+}
+.leaflet-control-layers-list label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+    cursor: pointer;
+    font-size: 13px;
+    color: #374151;
+}
+.leaflet-control-layers-separator {
+    border-top: 1px solid #e5e7eb;
+    margin: 6px 0;
+}
+/* Título "Camadas base" / "Overlays" */
+.leaflet-control-layers-base::before,
+.leaflet-control-layers-overlays::before {
+    content: attr(aria-label);
+    display: none;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .main-grid {
