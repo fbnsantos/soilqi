@@ -3,7 +3,7 @@
 // ── VERSÃO ────────────────────────────────────────────────────────────────────
 // Muda este número sempre que houver uma nova versão para forçar a actualização
 // nos telemóveis dos utilizadores.
-const CACHE_VERSION = 'v8'; // 2026-05-27 — SW update detection
+const CACHE_VERSION = 'v9'; // 2026-05-27 — Android install prompt + PNG icons
 const CACHE = `soilqi-field-${CACHE_VERSION}`;
 
 const STATIC = [
@@ -11,7 +11,11 @@ const STATIC = [
     './index.html',
     './assets/css/style.css',
     './assets/js/app.js',
-    './manifest.json'
+    './manifest.json',
+    './icons/icon-192.png',
+    './icons/icon-512.png',
+    './icons/icon-maskable-192.png',
+    './icons/icon-maskable-512.png'
 ];
 
 // ── Install: pré-cachear assets estáticos ─────────────────────────────────────

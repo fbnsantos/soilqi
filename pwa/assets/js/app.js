@@ -7,8 +7,9 @@ const IDB_VER  = 1;
 const TOKEN_KEY = 'soilqi_api_token';   // localStorage key for persistent session
 
 // ── State ────────────────────────────────────────────────────────────────────
-let idb         = null;
-let swReg       = null;        // ServiceWorkerRegistration (para updates)
+let idb           = null;
+let swReg         = null;        // ServiceWorkerRegistration (para updates)
+let deferredPrompt = null;       // beforeinstallprompt event (Android install)
 let watchId     = null;
 let gpsLat      = null;
 let gpsLng      = null;
@@ -23,6 +24,77 @@ function clearToken()     { localStorage.removeItem(TOKEN_KEY); updateTokenBadge
 function updateTokenBadge() {
     const el = document.getElementById('token-badge');
     if (el) el.style.display = getToken() ? 'inline' : 'none';
+}
+
+// ── Install Prompt (Android) ──────────────────────────────────────────────────
+window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();         // impede o mini-banner automático do Chrome
+    deferredPrompt = e;
+    showInstallBanner();
+});
+
+// Esconder banner quando o utilizador instala (qualquer caminho)
+window.addEventListener('appinstalled', () => {
+    deferredPrompt = null;
+    const b = document.getElementById('pwa-install-banner');
+    if (b) b.remove();
+});
+
+function showInstallBanner() {
+    if (document.getElementById('pwa-install-banner')) return;
+    // Não mostrar se já está em modo standalone (já instalado)
+    if (window.matchMedia('(display-mode: standalone)').matches) return;
+    if (window.navigator.standalone) return; // iOS PWA instalada
+
+    const banner = document.createElement('div');
+    banner.id = 'pwa-install-banner';
+    banner.innerHTML = `
+        <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;">
+            <img src="icons/icon-192.png" alt=""
+                 style="width:44px;height:44px;border-radius:10px;flex-shrink:0;">
+            <div style="min-width:0;">
+                <div style="font-weight:700;font-size:14px;line-height:1.2;">Instalar SoilQI Field</div>
+                <div style="font-size:12px;opacity:.85;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                    Acesso rápido + funciona offline
+                </div>
+            </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-shrink:0;">
+            <button id="pwa-install-btn"
+                    style="background:#fff;color:#2d6a4f;border:none;border-radius:8px;
+                           padding:8px 16px;font-weight:700;cursor:pointer;font-size:13px;">
+                Instalar
+            </button>
+            <button id="pwa-install-dismiss"
+                    style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4);
+                           border-radius:8px;padding:8px 10px;cursor:pointer;font-size:13px;">
+                ✕
+            </button>
+        </div>`;
+    banner.style.cssText = [
+        'position:fixed', 'bottom:72px', 'left:10px', 'right:10px', 'z-index:9998',
+        'background:#2d6a4f', 'color:#fff', 'border-radius:16px',
+        'padding:12px 14px', 'display:flex', 'align-items:center',
+        'gap:12px', 'box-shadow:0 4px 20px rgba(0,0,0,.35)',
+        'border:1px solid rgba(255,255,255,.15)'
+    ].join(';');
+
+    document.body.appendChild(banner);
+
+    document.getElementById('pwa-install-btn').addEventListener('click', async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        deferredPrompt = null;
+        banner.remove();
+        if (outcome === 'accepted') toast('App instalada! ✓', 'success');
+    });
+
+    document.getElementById('pwa-install-dismiss').addEventListener('click', () => {
+        banner.remove();
+        // Guardar rejeição — não mostrar novamente nesta sessão
+        sessionStorage.setItem('pwa_install_dismissed', '1');
+    });
 }
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
