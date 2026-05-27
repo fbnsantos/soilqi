@@ -9,6 +9,11 @@ let drawControl;
 let currentLayer = null;
 const isLoggedIn = typeof userLoggedIn !== 'undefined' && userLoggedIn;
 
+// ── Interpolações de campo no mapa principal ──────────────────────────────────
+let mapLayersControl  = null;            // referência ao L.control.layers
+let mapInterpOverlays = {};              // id → L.imageOverlay actualmente no mapa
+let mapInterpData     = [];              // lista de itens carregada do servidor
+
 // Inicializar mapa
 function initMap() {
     // Criar mapa centrado em Portugal
@@ -37,7 +42,7 @@ function initMap() {
 
     osmLayer.addTo(map);
 
-    L.control.layers(
+    mapLayersControl = L.control.layers(
         { '🗺️ Mapa':     osmLayer,
           '🛰️ Satélite': satLayer,
           '🏔️ Relevo':   topoLayer },
@@ -217,21 +222,35 @@ function displayTerrains(terrains) {
 
     container.innerHTML = terrains.map(terrain => `
         <div class="terrain-item">
-            <div class="terrain-name">${terrain.name}</div>
+            <div class="terrain-name">${escMapHtml(terrain.name)}</div>
             <div class="terrain-details">
-                ${terrain.description ? terrain.description + ' • ' : ''}
+                ${terrain.description ? escMapHtml(terrain.description) + ' • ' : ''}
                 ${terrain.area} ha • ${new Date(terrain.created_at).toLocaleDateString('pt-PT')}
             </div>
             <div class="terrain-actions">
                 <button class="btn btn-secondary btn-sm" onclick="zoomToTerrain(${terrain.id})" title="Centrar no mapa">
                     🔍
                 </button>
-                <button class="btn btn-danger btn-sm" onclick="deleteTerrain(${terrain.id}, '${terrain.name}')" title="Eliminar">
+                <button class="btn btn-danger btn-sm" onclick="deleteTerrain(${terrain.id}, '${terrain.name.replace(/'/g,"\\'")}'" title="Eliminar">
                     🗑️
                 </button>
             </div>
         </div>
     `).join('');
+
+    // Actualizar selector de terrenos para layers de interpolação
+    const interpSel = document.getElementById('map-interp-terrain');
+    if (interpSel) {
+        const prev = interpSel.value;
+        interpSel.innerHTML = '<option value="">— Selecione um terreno —</option>' +
+            terrains.map(t =>
+                `<option value="${t.id}"${String(t.id) === prev ? ' selected' : ''}>${escMapHtml(t.name)}</option>`
+            ).join('');
+        // Se o terreno anteriormente seleccionado desapareceu, limpar overlays
+        if (prev && !terrains.find(t => String(t.id) === prev)) {
+            loadMapInterpolations('');
+        }
+    }
 }
 
 // Carregar terrenos no mapa
@@ -374,6 +393,155 @@ function showAlert(message, type) {
     setTimeout(() => {
         alert.remove();
     }, 5000);
+}
+
+// ── Interpolações de campo: carregar lista para um terreno ────────────────────
+function loadMapInterpolations(terrainId) {
+    const listEl = document.getElementById('map-interp-list');
+
+    // Remover todos os overlays de interpolação actualmente no mapa
+    Object.keys(mapInterpOverlays).forEach(function(id) {
+        if (mapLayersControl) mapLayersControl.removeLayer(mapInterpOverlays[id]);
+        map.removeLayer(mapInterpOverlays[id]);
+    });
+    mapInterpOverlays = {};
+    mapInterpData     = [];
+
+    if (!terrainId) {
+        if (listEl) listEl.innerHTML =
+            '<span style="color:#9ca3af;font-size:13px">Selecione um terreno para ver as interpolações guardadas.</span>';
+        return;
+    }
+
+    if (listEl) listEl.innerHTML =
+        '<span style="color:#9ca3af;font-size:13px">A carregar…</span>';
+
+    const fd = new FormData();
+    fd.append('action',     'get_terrain_interpolations');
+    fd.append('terrain_id', terrainId);
+
+    fetch('index.php', { method: 'POST', body: fd })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.success) {
+                if (listEl) listEl.innerHTML =
+                    '<span style="color:#ef4444;font-size:12px">❌ ' + escMapHtml(data.message || 'Erro.') + '</span>';
+                return;
+            }
+            mapInterpData = data.interpolations || [];
+            renderMapInterpolations(mapInterpData);
+        })
+        .catch(function() {
+            if (listEl) listEl.innerHTML =
+                '<span style="color:#ef4444;font-size:12px">❌ Erro de rede.</span>';
+        });
+}
+
+// ── Renderizar lista de interpolações na sidebar ───────────────────────────────
+function renderMapInterpolations(items) {
+    const listEl = document.getElementById('map-interp-list');
+    if (!listEl) return;
+
+    if (!items.length) {
+        listEl.innerHTML =
+            '<div style="padding:10px 0; color:#9ca3af; font-size:13px; text-align:center;">' +
+            '🎨 Sem interpolações guardadas para este terreno.<br>' +
+            '<small>Gere e guarde em <strong>Medições de Campo → IDW</strong>.</small></div>';
+        return;
+    }
+
+    const PARAM = {
+        conductivity: '⚡ EC (mS/cm)', ph: '🧪 pH',
+        temperature:  '🌡️ Temp (°C)',  moisture: '💧 Hum (%)'
+    };
+
+    listEl.innerHTML = items.map(function(item) {
+        const dt      = new Date(item.created_at).toLocaleDateString('pt-PT');
+        const param   = PARAM[item.param] || item.param;
+        const loaded  = !!mapInterpOverlays[item.id];
+        const minV    = item.min_val !== null ? parseFloat(item.min_val).toFixed(2) : '?';
+        const maxV    = item.max_val !== null ? parseFloat(item.max_val).toFixed(2) : '?';
+        return '<div style="padding:8px 0; border-bottom:1px solid #f3f4f6; display:flex;' +
+                           'align-items:center; justify-content:space-between; gap:8px;">' +
+            '<div style="min-width:0; flex:1;">' +
+                '<div style="font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' +
+                    escMapHtml(item.name) + '</div>' +
+                '<div style="font-size:11px; color:#9ca3af;">' + param +
+                    ' · ' + minV + '–' + maxV + ' · ' + dt + '</div>' +
+            '</div>' +
+            '<button id="map-iBtn-' + item.id + '" class="btn btn-secondary btn-sm" ' +
+                    'onclick="toggleMapInterp(' + item.id + ')" ' +
+                    'style="white-space:nowrap; font-size:12px; flex-shrink:0;' +
+                    (loaded ? 'background:#667eea;color:#fff;border-color:#667eea;' : '') + '">' +
+                (loaded ? '👁️ Visível' : '👁️ Mostrar') +
+            '</button>' +
+        '</div>';
+    }).join('');
+}
+
+// ── Activar / desactivar overlay no mapa ──────────────────────────────────────
+function toggleMapInterp(id) {
+    if (mapInterpOverlays[id]) {
+        // Já visível → remover
+        if (mapLayersControl) mapLayersControl.removeLayer(mapInterpOverlays[id]);
+        map.removeLayer(mapInterpOverlays[id]);
+        delete mapInterpOverlays[id];
+        _mapInterpBtnReset(id);
+        return;
+    }
+
+    // Não visível → carregar PNG do servidor
+    const btn = document.getElementById('map-iBtn-' + id);
+    if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
+
+    const fd = new FormData();
+    fd.append('action', 'get_interpolation_png');
+    fd.append('id',     id);
+
+    fetch('index.php', { method: 'POST', body: fd })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.success) {
+                showAlert('❌ ' + (data.message || 'Erro ao carregar interpolação.'), 'error');
+                _mapInterpBtnReset(id);
+                return;
+            }
+            const bounds  = [[data.min_lat, data.min_lng], [data.max_lat, data.max_lng]];
+            const overlay = L.imageOverlay(data.png, bounds, { opacity: 0.75 }).addTo(map);
+            mapInterpOverlays[id] = overlay;
+            if (mapLayersControl) mapLayersControl.addOverlay(overlay, '🎨 ' + data.name);
+            map.fitBounds(bounds, { padding: [40, 40] });
+            const b = document.getElementById('map-iBtn-' + id);
+            if (b) {
+                b.textContent       = '👁️ Visível';
+                b.style.background  = '#667eea';
+                b.style.color       = '#fff';
+                b.style.borderColor = '#667eea';
+                b.disabled          = false;
+            }
+        })
+        .catch(function() {
+            showAlert('Erro de rede ao carregar interpolação.', 'error');
+            _mapInterpBtnReset(id);
+        });
+}
+
+function _mapInterpBtnReset(id) {
+    const btn = document.getElementById('map-iBtn-' + id);
+    if (btn) {
+        btn.textContent       = '👁️ Mostrar';
+        btn.style.background  = '';
+        btn.style.color       = '';
+        btn.style.borderColor = '';
+        btn.disabled          = false;
+    }
+}
+
+// ── Utilitário de escape HTML (app.js) ───────────────────────────────────────
+function escMapHtml(s) {
+    return String(s)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 // Inicializar quando o documento estiver pronto

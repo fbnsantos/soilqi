@@ -61,16 +61,75 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 
             case 'get_terrain':
                 $terrain_id = intval($_POST['terrain_id']);
-                
+
                 $stmt = $pdo->prepare("SELECT * FROM terrains WHERE id = ? AND user_id = ?");
                 $stmt->execute([$terrain_id, $currentUser['id']]);
                 $terrain = $stmt->fetch();
-                
+
                 if ($terrain) {
                     $response['success'] = true;
                     $response['terrain'] = $terrain;
                 } else {
                     $response['message'] = 'Terreno não encontrado.';
+                }
+                break;
+
+            // ── Interpolações de campo guardadas ───────────────────────────────
+
+            case 'get_terrain_interpolations':
+                $terrain_id = intval($_POST['terrain_id'] ?? 0);
+                if ($terrain_id <= 0) {
+                    $response['success']        = true;
+                    $response['interpolations'] = [];
+                    break;
+                }
+                // Verify terrain belongs to user
+                $chk = $pdo->prepare("SELECT id FROM terrains WHERE id = ? AND user_id = ?");
+                $chk->execute([$terrain_id, $currentUser['id']]);
+                if (!$chk->fetch()) {
+                    $response['message'] = 'Terreno não encontrado.';
+                    break;
+                }
+                try {
+                    $stmt = $pdo->prepare("
+                        SELECT id, name, param, colormap, resolution,
+                               min_lat, max_lat, min_lng, max_lng,
+                               min_val, max_val, created_at
+                        FROM field_interpolations
+                        WHERE terrain_id = ? AND user_id = ?
+                        ORDER BY created_at DESC
+                    ");
+                    $stmt->execute([$terrain_id, $currentUser['id']]);
+                    $response['success']        = true;
+                    $response['interpolations'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                } catch (PDOException $tableErr) {
+                    // Tabela ainda não existe (migração 002 não aplicada) — devolver lista vazia
+                    $response['success']        = true;
+                    $response['interpolations'] = [];
+                }
+                break;
+
+            case 'get_interpolation_png':
+                $id = intval($_POST['id'] ?? 0);
+                if ($id <= 0) { $response['message'] = 'ID inválido.'; break; }
+                try {
+                    $stmt = $pdo->prepare("
+                        SELECT png_data, min_lat, max_lat, min_lng, max_lng, name
+                        FROM field_interpolations
+                        WHERE id = ? AND user_id = ?
+                    ");
+                    $stmt->execute([$id, $currentUser['id']]);
+                    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$row) { $response['message'] = 'Interpolação não encontrada.'; break; }
+                    $response['success'] = true;
+                    $response['png']     = 'data:image/png;base64,' . base64_encode($row['png_data']);
+                    $response['min_lat'] = (float)$row['min_lat'];
+                    $response['max_lat'] = (float)$row['max_lat'];
+                    $response['min_lng'] = (float)$row['min_lng'];
+                    $response['max_lng'] = (float)$row['max_lng'];
+                    $response['name']    = $row['name'];
+                } catch (PDOException $tableErr) {
+                    $response['message'] = 'Tabela de interpolações não existe. Aplique a migração 002 em Admin → Migrações.';
                 }
                 break;
         }
@@ -158,6 +217,26 @@ if ($isLoggedIn) {
                     <div class="empty-state">
                         <h4>A carregar...</h4>
                     </div>
+                </div>
+            </div>
+
+            <!-- Interpolações de Campo como Layers -->
+            <div class="section">
+                <h3>🎨 Layers de Campo</h3>
+                <p style="font-size:12px; color:#9ca3af; margin:-4px 0 10px;">
+                    Interpolações IDW guardadas no separador Medições de Campo.
+                </p>
+                <div class="form-group" style="margin-bottom:10px;">
+                    <label style="font-size:12px; font-weight:600; color:#6b7280;
+                                  display:block; margin-bottom:4px;">Terreno</label>
+                    <select id="map-interp-terrain" onchange="loadMapInterpolations(this.value)"
+                            style="width:100%; padding:7px 10px; border:1.5px solid #e5e7eb;
+                                   border-radius:7px; font-size:13px; background:#fff;">
+                        <option value="">— Selecione um terreno —</option>
+                    </select>
+                </div>
+                <div id="map-interp-list" style="color:#9ca3af; font-size:13px; padding:2px 0;">
+                    Selecione um terreno para ver as interpolações guardadas.
                 </div>
             </div>
         </div>
