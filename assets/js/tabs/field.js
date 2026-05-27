@@ -22,8 +22,10 @@ let lastInterpMeta      = null; // { minV, maxV, param, colormap, terrainId, res
 
 // GeoJSON layers: id -> Leaflet GeoJSON layer currently on map
 let geojsonOverlayLayers = {};
-// Raw GeoJSON text pending save
-let pendingGeoJSON = null;
+// Raw GeoJSON text pending save (for .geojson/.json)
+let pendingGeoJSON  = null;
+// Raw File object pending save (for .kmz/.kml — sent to server for conversion)
+let pendingKmzFile  = null;
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function () {
@@ -956,23 +958,38 @@ function toggleGeoJSONPanel() {
     if (open) loadGeoJSONLayers();
 }
 
-// Ficheiro selecionado — ler e pré-validar
+// Ficheiro selecionado — ler e pré-validar (GeoJSON/JSON local; KMZ/KML via servidor)
 function onGeoJSONFileSelected(input) {
     const file = input.files[0];
     if (!file) return;
 
-    const info   = document.getElementById('gj-file-info');
+    const info    = document.getElementById('gj-file-info');
     const saveBtn = document.getElementById('gj-save-btn');
-    const label  = document.getElementById('gj-file-label');
     pendingGeoJSON = null;
+    pendingKmzFile = null;
     saveBtn.disabled = true;
 
-    if (file.size > 10 * 1024 * 1024) {
-        info.textContent = '⚠️ Ficheiro demasiado grande (máx. 10 MB).';
+    if (file.size > 20 * 1024 * 1024) {
+        info.textContent = '⚠️ Ficheiro demasiado grande (máx. 20 MB).';
         info.style.color = '#dc2626';
         return;
     }
 
+    const ext = file.name.split('.').pop().toLowerCase();
+    const kb  = (file.size / 1024).toFixed(0);
+
+    // ── KMZ / KML: guardar File object — conversão feita no servidor ──────────
+    if (ext === 'kmz' || ext === 'kml') {
+        pendingKmzFile = file;
+        info.textContent = `✓ ${file.name}  •  ${kb} KB  •  será convertido pelo servidor`;
+        info.style.color = '#16a34a';
+        const nameEl = document.getElementById('gj-name');
+        if (!nameEl.value) nameEl.value = file.name.replace(/\.(kmz|kml)$/i, '');
+        saveBtn.disabled = false;
+        return;
+    }
+
+    // ── GeoJSON / JSON: ler e validar localmente ──────────────────────────────
     const reader = new FileReader();
     reader.onload = function (e) {
         try {
@@ -986,11 +1003,8 @@ function onGeoJSONFileSelected(input) {
             else { throw new Error('Tipo GeoJSON não reconhecido: ' + type); }
 
             pendingGeoJSON = e.target.result;
-            const kb = (file.size / 1024).toFixed(0);
-            info.textContent = `✓ ${escHtml(file.name)}  •  ${count} feature(s)  •  ${kb} KB`;
+            info.textContent = `✓ ${file.name}  •  ${count} feature(s)  •  ${kb} KB`;
             info.style.color = '#16a34a';
-            label.querySelector('span') && (label.querySelector('span').textContent = '📁 ' + file.name);
-            // pré-preencher nome se vazio
             const nameEl = document.getElementById('gj-name');
             if (!nameEl.value) nameEl.value = file.name.replace(/\.(geojson|json)$/i, '');
             saveBtn.disabled = false;
@@ -1003,8 +1017,26 @@ function onGeoJSONFileSelected(input) {
 }
 
 // Guardar GeoJSON na BD
+const _GJ_FILE_ACCEPT = '.geojson,.json,.kmz,.kml,application/json,application/geo+json,' +
+    'application/vnd.google-earth.kmz,application/vnd.google-earth.kml+xml';
+const _GJ_FILE_LABEL  = '📁 Clique para selecionar .geojson / .json / .kmz / .kml';
+
+function _gjReset(status, btn) {
+    pendingGeoJSON = null;
+    pendingKmzFile = null;
+    ['gj-name','gj-description'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    const terr = document.getElementById('gj-terrain'); if (terr) terr.value = '';
+    try { document.getElementById('gj-file').value = ''; } catch {}
+    document.getElementById('gj-file-info').textContent = '';
+    document.getElementById('gj-file-label').innerHTML =
+        _GJ_FILE_LABEL +
+        `<input id="gj-file" type="file" accept="${_GJ_FILE_ACCEPT}" style="display:none" onchange="onGeoJSONFileSelected(this)">`;
+    btn.disabled = true;
+    if (status) { status.textContent = ''; }
+}
+
 function saveGeoJSON() {
-    if (!pendingGeoJSON) return;
+    if (!pendingGeoJSON && !pendingKmzFile) return;
 
     const name   = (document.getElementById('gj-name')?.value || '').trim();
     const descr  = (document.getElementById('gj-description')?.value || '').trim();
@@ -1012,18 +1044,27 @@ function saveGeoJSON() {
     const status = document.getElementById('gj-save-status');
     const btn    = document.getElementById('gj-save-btn');
 
-    if (!name) { status.textContent = '⚠️ Preencha o nome da camada.'; status.style.color='#dc2626'; return; }
+    if (!name) { status.textContent = '⚠️ Preencha o nome da camada.'; status.style.color = '#dc2626'; return; }
 
     btn.disabled = true;
-    status.textContent = '⏳ A guardar…';
-    status.style.color = '#6b7280';
 
     const fd = new FormData();
-    fd.append('action',       'save_geojson');
-    fd.append('name',         name);
-    fd.append('description',  descr);
-    fd.append('terrain_id',   terrId);
-    fd.append('geojson_data', pendingGeoJSON);
+    fd.append('name',        name);
+    fd.append('description', descr);
+    fd.append('terrain_id',  terrId);
+
+    if (pendingKmzFile) {
+        // KMZ/KML: enviar ficheiro raw — servidor converte para GeoJSON
+        fd.append('action',    'save_kmz');
+        fd.append('kmz_file',  pendingKmzFile, pendingKmzFile.name);
+        status.textContent = '⏳ A converter e guardar…';
+    } else {
+        // GeoJSON/JSON: enviar texto já validado
+        fd.append('action',       'save_geojson');
+        fd.append('geojson_data', pendingGeoJSON);
+        status.textContent = '⏳ A guardar…';
+    }
+    status.style.color = '#6b7280';
 
     fetch('', { method: 'POST', body: fd })
         .then(r => r.json())
@@ -1031,17 +1072,7 @@ function saveGeoJSON() {
             if (data.success) {
                 status.textContent = '✓ ' + data.message;
                 status.style.color = '#16a34a';
-                pendingGeoJSON = null;
-                document.getElementById('gj-name').value = '';
-                document.getElementById('gj-description').value = '';
-                document.getElementById('gj-terrain').value = '';
-                document.getElementById('gj-file').value = '';
-                document.getElementById('gj-file-info').textContent = '';
-                document.getElementById('gj-file-label').innerHTML =
-                    '📁 Clique para selecionar ficheiro .geojson / .json' +
-                    '<input id="gj-file" type="file" accept=".geojson,.json,application/json,application/geo+json" ' +
-                    'style="display:none" onchange="onGeoJSONFileSelected(this)">';
-                btn.disabled = true;
+                _gjReset(null, btn);
                 loadGeoJSONLayers();
             } else {
                 status.textContent = '⚠️ ' + (data.message || 'Erro ao guardar.');

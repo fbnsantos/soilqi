@@ -8,6 +8,93 @@ if (!isset($isLoggedIn)) $isLoggedIn = false;
 if (!isset($isAdmin))    $isAdmin    = false;
 if (!isset($currentUser)) $currentUser = null;
 
+// ── KML → GeoJSON helpers ─────────────────────────────────────────────────────
+function kml_parse_coords_fld(?DOMNode $node): ?array {
+    if (!$node) return null;
+    $text   = trim($node->textContent);
+    $points = [];
+    foreach (preg_split('/[\s\r\n]+/', $text) as $triple) {
+        $triple = trim($triple);
+        if ($triple === '') continue;
+        $parts = explode(',', $triple);
+        if (count($parts) >= 2) {
+            $points[] = [(float)$parts[0], (float)$parts[1]]; // [lon, lat]
+        }
+    }
+    return $points ?: null;
+}
+
+function kml_geom_to_geojson_fld(DOMElement $node, DOMXPath $xp): ?array {
+    $ln = $node->localName;
+
+    if ($ln === 'Point') {
+        $cn  = $xp->query('.//*[local-name()="coordinates"]', $node)->item(0);
+        $pts = kml_parse_coords_fld($cn);
+        return $pts ? ['type' => 'Point', 'coordinates' => $pts[0]] : null;
+    }
+    if ($ln === 'LineString') {
+        $cn  = $xp->query('.//*[local-name()="coordinates"]', $node)->item(0);
+        $pts = kml_parse_coords_fld($cn);
+        return $pts ? ['type' => 'LineString', 'coordinates' => $pts] : null;
+    }
+    if ($ln === 'Polygon') {
+        $rings = [];
+        $outer = $xp->query('.//*[local-name()="outerBoundaryIs"]//*[local-name()="coordinates"]', $node)->item(0);
+        $outerPts = kml_parse_coords_fld($outer);
+        if ($outerPts) $rings[] = $outerPts;
+        foreach ($xp->query('.//*[local-name()="innerBoundaryIs"]//*[local-name()="coordinates"]', $node) as $inner) {
+            $innerPts = kml_parse_coords_fld($inner);
+            if ($innerPts) $rings[] = $innerPts;
+        }
+        return $rings ? ['type' => 'Polygon', 'coordinates' => $rings] : null;
+    }
+    if ($ln === 'MultiGeometry') {
+        $geoms = [];
+        foreach ($node->childNodes as $child) {
+            if (!($child instanceof DOMElement)) continue;
+            $g = kml_geom_to_geojson_fld($child, $xp);
+            if ($g) $geoms[] = $g;
+        }
+        return $geoms ? ['type' => 'GeometryCollection', 'geometries' => $geoms] : null;
+    }
+    return null;
+}
+
+function kml_to_geojson_fld(string $kmlStr): array {
+    libxml_use_internal_errors(true);
+    $dom = new DOMDocument();
+    $dom->loadXML($kmlStr);
+    libxml_clear_errors();
+
+    $xp         = new DOMXPath($dom);
+    $placemarks = $xp->query('//*[local-name()="Placemark"]');
+    $features   = [];
+
+    foreach ($placemarks as $pm) {
+        $name = '';
+        $desc = '';
+        $geom = null;
+        foreach ($pm->childNodes as $child) {
+            if (!($child instanceof DOMElement)) continue;
+            $ln = $child->localName;
+            if ($ln === 'name') {
+                $name = trim($child->textContent);
+            } elseif ($ln === 'description') {
+                $desc = trim(strip_tags($child->textContent));
+            } elseif (in_array($ln, ['Point','LineString','Polygon','MultiGeometry'])) {
+                $geom = kml_geom_to_geojson_fld($child, $xp);
+            }
+        }
+        if ($geom) {
+            $props = [];
+            if ($name !== '') $props['name'] = $name;
+            if ($desc !== '') $props['description'] = $desc;
+            $features[] = ['type' => 'Feature', 'geometry' => $geom, 'properties' => $props];
+        }
+    }
+    return ['type' => 'FeatureCollection', 'features' => $features];
+}
+
 // ── API Handler (POST) ───────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
     header('Content-Type: application/json');
@@ -325,6 +412,97 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 $response['success'] = true;
                 $response['id']      = (int)$pdo->lastInsertId();
                 $response['message'] = "GeoJSON \"{$name}\" guardado ({$fcount} feature(s)).";
+                break;
+
+            case 'save_kmz':
+                $name       = trim(sanitizeInput($_POST['name'] ?? ''));
+                $descr      = trim(sanitizeInput($_POST['description'] ?? ''));
+                $terrain_id = !empty($_POST['terrain_id']) ? intval($_POST['terrain_id']) : null;
+
+                if (!$name) { $response['message'] = 'Nome obrigatório.'; break; }
+
+                $file = $_FILES['kmz_file'] ?? null;
+                if (!$file || $file['error'] !== UPLOAD_ERR_OK) {
+                    $response['message'] = 'Erro no upload do ficheiro (código: ' . ($file['error'] ?? '?') . ').';
+                    break;
+                }
+
+                $ext    = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+                $kmlStr = null;
+
+                if ($ext === 'kmz') {
+                    if (!class_exists('ZipArchive')) {
+                        $response['message'] = 'ZipArchive não está disponível neste servidor.'; break;
+                    }
+                    $zip = new ZipArchive();
+                    if ($zip->open($file['tmp_name']) !== true) {
+                        $response['message'] = 'Não foi possível abrir o ficheiro KMZ.'; break;
+                    }
+                    for ($i = 0; $i < $zip->numFiles; $i++) {
+                        $zname = $zip->getNameIndex($i);
+                        if (strtolower(pathinfo($zname, PATHINFO_EXTENSION)) === 'kml') {
+                            $kmlStr = $zip->getFromIndex($i);
+                            break;
+                        }
+                    }
+                    $zip->close();
+                    if (!$kmlStr) { $response['message'] = 'Nenhum ficheiro KML encontrado dentro do KMZ.'; break; }
+                } elseif ($ext === 'kml') {
+                    $kmlStr = file_get_contents($file['tmp_name']);
+                } else {
+                    $response['message'] = 'Formato não suportado. Use .kmz ou .kml.'; break;
+                }
+
+                $parsed   = kml_to_geojson_fld($kmlStr);
+                $features = $parsed['features'] ?? [];
+                $fcount   = count($features);
+
+                if ($fcount === 0) {
+                    $response['message'] = 'Nenhuma geometria encontrada no ficheiro. Verifique se o KML contém Placemarks com geometria.';
+                    break;
+                }
+
+                $geojson = json_encode($parsed, JSON_UNESCAPED_UNICODE);
+
+                // Calcular bounding box (mesmo algoritmo iterativo do save_geojson)
+                $minLat = $maxLat = $minLng = $maxLng = null;
+                $stack  = [];
+                foreach ($features as $f) {
+                    $geom = $f['geometry'] ?? null;
+                    if ($geom && isset($geom['coordinates'])) $stack[] = $geom['coordinates'];
+                    elseif ($geom && isset($geom['geometries'])) {
+                        foreach ($geom['geometries'] as $g) {
+                            if (isset($g['coordinates'])) $stack[] = $g['coordinates'];
+                        }
+                    }
+                }
+                while (!empty($stack)) {
+                    $item = array_pop($stack);
+                    if (!is_array($item)) continue;
+                    if (count($item) >= 2 && is_numeric($item[0]) && !is_array($item[0])) {
+                        $lng = (float)$item[0]; $lat = (float)$item[1];
+                        if ($minLat === null || $lat < $minLat) $minLat = $lat;
+                        if ($maxLat === null || $lat > $maxLat) $maxLat = $lat;
+                        if ($minLng === null || $lng < $minLng) $minLng = $lng;
+                        if ($maxLng === null || $lng > $maxLng) $maxLng = $lng;
+                    } else {
+                        foreach ($item as $child) { if (is_array($child)) $stack[] = $child; }
+                    }
+                }
+
+                $stmt = $pdo->prepare("
+                    INSERT INTO field_geojson
+                        (user_id, terrain_id, name, description, geojson_data,
+                         feature_count, bbox_min_lat, bbox_max_lat, bbox_min_lng, bbox_max_lng)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ");
+                $stmt->execute([
+                    $currentUser['id'], $terrain_id, $name, $descr ?: null, $geojson,
+                    $fcount, $minLat, $maxLat, $minLng, $maxLng
+                ]);
+                $response['success'] = true;
+                $response['id']      = (int)$pdo->lastInsertId();
+                $response['message'] = "KMZ/KML \"{$name}\" convertido e guardado ({$fcount} feature(s)).";
                 break;
 
             case 'get_geojson_layers':
@@ -729,13 +907,14 @@ try {
 <!-- Camadas GeoJSON -->
 <div class="section interp-section">
     <div class="section-title" style="cursor:pointer; user-select:none;" onclick="toggleGeoJSONPanel()">
-        <h3>🗺️ Camadas GeoJSON</h3>
+        <h3>🗺️ Camadas Vectoriais</h3>
         <span id="geojson-toggle-btn" class="btn btn-secondary btn-sm">▼ Expandir</span>
     </div>
     <div id="geojson-panel" style="display:none; margin-top:16px;">
         <p style="color:#6b7280; font-size:13px; margin-bottom:14px;">
-            Importe ficheiros <strong>.geojson</strong> ou <strong>.json</strong> para guardar camadas vectoriais
-            (polígonos, linhas, pontos) na base de dados e visualizá-las sobreposta ao mapa.
+            Importe ficheiros <strong>.geojson</strong>, <strong>.json</strong>, <strong>.kmz</strong>
+            ou <strong>.kml</strong> para guardar camadas vectoriais (polígonos, linhas, pontos)
+            na base de dados e visualizá-las sobrepostas ao mapa.
         </p>
 
         <!-- Formulário de importação -->
@@ -768,8 +947,9 @@ try {
                     display:flex; align-items:center; gap:10px; cursor:pointer;
                     padding:12px 14px; border:2px dashed #cbd5e1; border-radius:10px;
                     background:#fff; transition:border-color .2s; font-size:13px; color:#64748b;">
-                    📁 Clique para selecionar ficheiro .geojson / .json
-                    <input id="gj-file" type="file" accept=".geojson,.json,application/json,application/geo+json"
+                    📁 Clique para selecionar .geojson / .json / .kmz / .kml
+                    <input id="gj-file" type="file"
+                           accept=".geojson,.json,.kmz,.kml,application/json,application/geo+json,application/vnd.google-earth.kmz,application/vnd.google-earth.kml+xml"
                            style="display:none" onchange="onGeoJSONFileSelected(this)">
                 </label>
                 <div id="gj-file-info" style="font-size:12px; color:#6b7280; margin-top:6px; min-height:16px;"></div>
