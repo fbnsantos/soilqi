@@ -187,13 +187,14 @@ async function handleSubmit(e) {
     };
 
     if (isOnline) {
-        const ok = await postToServer(m);
-        if (ok) {
+        const result = await postToServer(m);
+        if (result.ok) {
             toast('Medição guardada! ✓', 'success');
             resetForm();
         } else {
+            if (result.needsLogin) { showLogin(); return; }
             await idbAdd('pending', { ...m, _ts: Date.now() });
-            toast('Guardado localmente — sem ligação ao servidor.', 'warning');
+            toast(`Guardado localmente. (${result.msg})`, 'warning');
             resetForm();
         }
     } else {
@@ -220,6 +221,7 @@ function resetForm() {
 }
 
 // ── Server Comms ──────────────────────────────────────────────────────────────
+// Devolve { ok, msg, needsLogin }
 async function postToServer(payload) {
     try {
         const res  = await fetch(API, {
@@ -227,9 +229,16 @@ async function postToServer(payload) {
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify(payload)
         });
-        const data = await res.json();
-        return data.success === true;
-    } catch { return false; }
+        let data;
+        try { data = await res.json(); }
+        catch { return { ok: false, msg: `Resposta inválida do servidor (HTTP ${res.status})` }; }
+
+        if (res.status === 401) return { ok: false, msg: 'Sessão expirada — faça login novamente.', needsLogin: true };
+        return { ok: data.success === true, msg: data.message || 'Erro desconhecido' };
+    } catch (err) {
+        console.error('[SoilQI] postToServer:', err);
+        return { ok: false, msg: 'Servidor inacessível' };
+    }
 }
 
 // ── Sync ──────────────────────────────────────────────────────────────────────
@@ -242,8 +251,9 @@ async function syncPending() {
     for (const item of items) {
         const { localId, _ts, ...payload } = item;
         payload.action = 'save_measurement';
-        const ok = await postToServer(payload);
-        if (ok) { await idbDelete('pending', localId); n++; }
+        const result = await postToServer(payload);
+        if (result.ok) { await idbDelete('pending', localId); n++; }
+        else if (result.needsLogin) { showLogin(); break; }
     }
     if (n) { toast(`${n} medição(ões) sincronizadas ✓`, 'success'); }
     await refreshPendingUI();

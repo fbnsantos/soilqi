@@ -114,7 +114,13 @@ try {
 
 } catch (PDOException $e) {
     http_response_code(500);
-    $response['message'] = 'Erro na base de dados.';
+    $code = $e->getCode();
+    // MySQL 1146 = table doesn't exist
+    if ($code === '42S02' || strpos($e->getMessage(), "doesn't exist") !== false) {
+        $response['message'] = 'Tabela field_measurements não existe. Execute pwa/migrate_field.sql na base de dados.';
+    } else {
+        $response['message'] = 'Erro na base de dados: ' . $e->getMessage();
+    }
 }
 
 echo json_encode($response);
