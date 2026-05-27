@@ -14,11 +14,14 @@ if (!isset($currentUser)) $currentUser = null;
 
 // Verificar permissões de administrador
 if (!$isAdmin) {
-    echo '<div class="section">';
-    echo '<div class="warning-box">';
-    echo '<strong>⚠️ Acesso Negado</strong><br>';
-    echo 'Apenas administradores podem aceder a esta página.';
-    echo '</div>';
+    echo '<div class="section" style="text-align:center;padding:60px 20px;">';
+    echo '<div style="font-size:56px;margin-bottom:16px;">🔒</div>';
+    echo '<h2 style="color:#1f2937;margin-bottom:8px;">Acesso Restrito</h2>';
+    echo '<p style="color:#6b7280;margin-bottom:4px;">Esta área é exclusiva para administradores do sistema.</p>';
+    if ($isLoggedIn) {
+        echo '<p style="color:#9ca3af;font-size:13px;">A sua conta <strong>' . htmlspecialchars($currentUser['username']) . '</strong> não tem permissões de administrador.</p>';
+        echo '<p style="color:#9ca3af;font-size:13px;margin-top:8px;">Contacte um administrador para obter acesso.</p>';
+    }
     echo '</div>';
     return;
 }
