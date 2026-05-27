@@ -97,6 +97,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 $response['terrain']  = $t;
                 break;
 
+            case 'save_field_measurement':
+                $lat        = floatval($_POST['latitude']    ?? 0);
+                $lng        = floatval($_POST['longitude']   ?? 0);
+                $ec         = (isset($_POST['conductivity']) && $_POST['conductivity'] !== '') ? floatval($_POST['conductivity']) : null;
+                $ph         = (isset($_POST['ph'])           && $_POST['ph']           !== '') ? floatval($_POST['ph'])           : null;
+                $temp       = (isset($_POST['temperature'])  && $_POST['temperature']  !== '') ? floatval($_POST['temperature'])  : null;
+                $moisture   = (isset($_POST['moisture'])     && $_POST['moisture']     !== '') ? floatval($_POST['moisture'])     : null;
+                $terrain_id = !empty($_POST['terrain_id'])   ? intval($_POST['terrain_id'])    : null;
+                $notes      = sanitizeInput($_POST['notes']  ?? '');
+                $measured_at = !empty($_POST['measured_at']) ? $_POST['measured_at'] : date('Y-m-d H:i:s');
+
+                if ($lat == 0 && $lng == 0) { $response['message'] = 'Coordenadas inválidas.'; break; }
+
+                $stmt = $pdo->prepare(
+                    "INSERT INTO field_measurements
+                        (user_id, terrain_id, latitude, longitude, gps_accuracy,
+                         conductivity, ph, temperature, moisture, notes, measured_at)
+                     VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)"
+                );
+                $stmt->execute([
+                    $currentUser['id'], $terrain_id, $lat, $lng,
+                    $ec, $ph, $temp, $moisture, $notes, $measured_at
+                ]);
+                $response['success'] = true;
+                $response['message'] = 'Medição guardada com sucesso!';
+                $response['id']      = (int)$pdo->lastInsertId();
+                break;
+
             case 'delete_field_measurement':
                 $id = intval($_POST['id'] ?? 0);
                 if ($id <= 0) { $response['message'] = 'ID inválido.'; break; }
@@ -229,6 +257,107 @@ try {
 <!-- Mapa -->
 <div class="section" style="padding:0; overflow:hidden; border-radius:12px; margin-bottom:20px; position:relative;">
     <div id="field-map" style="height:420px; width:100%;"></div>
+</div>
+
+<!-- Modal: Nova Medição por Clique no Mapa -->
+<div id="quick-modal-backdrop" onclick="closeQuickModal()"
+     style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:9000;"></div>
+
+<div id="quick-modal"
+     style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+            z-index:9001; background:#fff; border-radius:16px; box-shadow:0 20px 60px rgba(0,0,0,.3);
+            width:min(480px,96vw); max-height:90dvh; overflow-y:auto;">
+
+    <div style="padding:18px 20px 0; display:flex; align-items:center; justify-content:space-between;">
+        <h3 style="font-size:17px; color:#1f2937;">📍 Nova Medição</h3>
+        <button onclick="closeQuickModal()"
+                style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;padding:4px;">✕</button>
+    </div>
+
+    <div style="padding:16px 20px;">
+        <!-- Coordenadas -->
+        <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:10px; padding:12px; margin-bottom:14px;">
+            <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:#0369a1; margin-bottom:8px;">
+                📌 Coordenadas (clique no mapa)
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <div>
+                    <label style="font-size:11px; color:#6b7280; display:block; margin-bottom:3px;">Latitude</label>
+                    <input id="qm-lat" type="number" step="0.0000001"
+                           style="width:100%;padding:7px 9px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:13px;font-family:monospace;">
+                </div>
+                <div>
+                    <label style="font-size:11px; color:#6b7280; display:block; margin-bottom:3px;">Longitude</label>
+                    <input id="qm-lng" type="number" step="0.0000001"
+                           style="width:100%;padding:7px 9px;border:1.5px solid #e5e7eb;border-radius:7px;font-size:13px;font-family:monospace;">
+                </div>
+            </div>
+            <div style="font-size:11px; color:#94a3b8; margin-top:5px;">📵 Sem precisão GPS (entrada manual)</div>
+        </div>
+
+        <!-- Parâmetros do solo -->
+        <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:#374151; margin-bottom:8px;">
+            Parâmetros do Solo
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+            <div>
+                <label style="font-size:12px; color:#6b7280; display:flex; justify-content:space-between; margin-bottom:4px;">
+                    Condutividade EC <span style="color:#9ca3af">mS/cm</span>
+                </label>
+                <input id="qm-ec" type="number" step="0.01" min="0" placeholder="0.00" inputmode="decimal"
+                       style="width:100%;padding:9px 10px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;">
+            </div>
+            <div>
+                <label style="font-size:12px; color:#6b7280; display:flex; justify-content:space-between; margin-bottom:4px;">
+                    pH <span style="color:#9ca3af">0–14</span>
+                </label>
+                <input id="qm-ph" type="number" step="0.1" min="0" max="14" placeholder="7.0" inputmode="decimal"
+                       style="width:100%;padding:9px 10px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;">
+            </div>
+            <div>
+                <label style="font-size:12px; color:#6b7280; display:flex; justify-content:space-between; margin-bottom:4px;">
+                    Temperatura <span style="color:#9ca3af">°C</span>
+                </label>
+                <input id="qm-temp" type="number" step="0.1" placeholder="20.0" inputmode="decimal"
+                       style="width:100%;padding:9px 10px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;">
+            </div>
+            <div>
+                <label style="font-size:12px; color:#6b7280; display:flex; justify-content:space-between; margin-bottom:4px;">
+                    Humidade <span style="color:#9ca3af">%</span>
+                </label>
+                <input id="qm-moisture" type="number" step="0.1" min="0" max="100" placeholder="30.0" inputmode="decimal"
+                       style="width:100%;padding:9px 10px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;">
+            </div>
+        </div>
+
+        <!-- Terreno e Notas -->
+        <div style="margin-bottom:10px;">
+            <label style="font-size:12px; color:#6b7280; display:block; margin-bottom:4px;">Terreno</label>
+            <select id="qm-terrain"
+                    style="width:100%;padding:9px 10px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;appearance:none;background:white;">
+                <option value="">— Sem terreno associado —</option>
+                <?php foreach ($filterTerrains as $t): ?>
+                    <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); ?></option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <div>
+            <label style="font-size:12px; color:#6b7280; display:block; margin-bottom:4px;">Notas</label>
+            <textarea id="qm-notes" rows="2" placeholder="Observações, profundidade, condições…"
+                      style="width:100%;padding:9px 10px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;resize:vertical;"></textarea>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div style="padding:12px 20px 18px; display:flex; gap:10px; border-top:1px solid #f3f4f6;">
+        <button id="qm-submit" onclick="submitQuickMeasurement()"
+                class="btn btn-primary" style="flex:1; padding:12px; font-size:15px;">
+            💾 Guardar Medição
+        </button>
+        <button onclick="closeQuickModal()" class="btn btn-secondary" style="padding:12px 20px;">
+            Cancelar
+        </button>
+    </div>
 </div>
 
 <!-- Painel de Interpolação Espacial -->

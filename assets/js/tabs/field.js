@@ -6,6 +6,8 @@ let fieldMap            = null;
 let markerLayer         = null;
 let allMeasurements     = [];
 let interpolationOverlay = null;
+let addModeActive       = false;
+let tempMarker          = null;
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function () {
@@ -42,6 +44,34 @@ function initFieldMap() {
     ).addTo(fieldMap);
 
     markerLayer = L.layerGroup().addTo(fieldMap);
+
+    // ── Controlo "Adicionar medição" ──────────────────────────────────────────
+    const AddControl = L.Control.extend({
+        options: { position: 'topleft' },
+        onAdd: function () {
+            const btn = L.DomUtil.create('button', 'leaflet-bar leaflet-control field-add-btn');
+            btn.id          = 'field-add-ctrl';
+            btn.title       = 'Clique para ativar modo de adição de medição';
+            btn.textContent = '📍 Adicionar';
+            btn.style.cssText = [
+                'background:#fff', 'border:2px solid rgba(0,0,0,.2)',
+                'border-radius:4px', 'padding:4px 10px',
+                'cursor:pointer', 'font-size:13px', 'font-weight:600',
+                'white-space:nowrap', 'display:flex', 'align-items:center', 'gap:4px',
+                'box-shadow:0 1px 5px rgba(0,0,0,.3)'
+            ].join(';');
+            L.DomEvent.on(btn, 'click', L.DomEvent.stopPropagation);
+            L.DomEvent.on(btn, 'click', toggleAddMode);
+            return btn;
+        }
+    });
+    new AddControl().addTo(fieldMap);
+
+    // ── Listener de clique no mapa ────────────────────────────────────────────
+    fieldMap.on('click', function (e) {
+        if (!addModeActive) return;
+        openQuickModal(e.latlng.lat, e.latlng.lng);
+    });
 }
 
 function ecColor(ec) {
@@ -455,6 +485,130 @@ function drawInterpLegend(minV, maxV, colormap, label) {
     document.getElementById('legend-max').textContent = maxV.toFixed(2);
     document.getElementById('interp-legend-title').textContent = `Legenda: ${label}`;
     document.getElementById('interp-legend').style.display = 'block';
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ADICIONAR MEDIÇÃO DIRECTAMENTE NO MAPA
+// ══════════════════════════════════════════════════════════════════════════════
+
+function toggleAddMode() {
+    addModeActive = !addModeActive;
+    const btn = document.getElementById('field-add-ctrl');
+    if (addModeActive) {
+        fieldMap.getContainer().style.cursor = 'crosshair';
+        if (btn) {
+            btn.textContent  = '✖ Cancelar';
+            btn.style.background = '#fee2e2';
+            btn.style.borderColor = '#ef4444';
+            btn.style.color = '#b91c1c';
+        }
+        showAlert('Clique no mapa para adicionar uma medição nesse ponto.', 'info');
+    } else {
+        fieldMap.getContainer().style.cursor = '';
+        if (btn) {
+            btn.textContent  = '📍 Adicionar';
+            btn.style.background = '#fff';
+            btn.style.borderColor = 'rgba(0,0,0,.2)';
+            btn.style.color = '';
+        }
+        // remove temp marker if modal was closed without saving
+        if (tempMarker) { fieldMap.removeLayer(tempMarker); tempMarker = null; }
+    }
+}
+
+function openQuickModal(lat, lng) {
+    // Desligar modo de adição imediatamente
+    addModeActive = false;
+    const btn = document.getElementById('field-add-ctrl');
+    if (btn) {
+        btn.textContent  = '📍 Adicionar';
+        btn.style.background = '#fff';
+        btn.style.borderColor = 'rgba(0,0,0,.2)';
+        btn.style.color = '';
+    }
+    fieldMap.getContainer().style.cursor = '';
+
+    // Marcador temporário no local clicado
+    if (tempMarker) fieldMap.removeLayer(tempMarker);
+    tempMarker = L.circleMarker([lat, lng], {
+        radius: 10, fillColor: '#667eea', color: '#fff',
+        weight: 3, opacity: 1, fillOpacity: 0.9,
+        dashArray: '4 2'
+    }).addTo(fieldMap);
+    tempMarker.bindPopup('📍 Nova medição aqui').openPopup();
+
+    // Preencher coordenadas no modal
+    document.getElementById('qm-lat').value = lat.toFixed(7);
+    document.getElementById('qm-lng').value = lng.toFixed(7);
+
+    // Limpar campos anteriores
+    ['qm-ec','qm-ph','qm-temp','qm-moisture','qm-notes'].forEach(function(id) {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    const terrSel = document.getElementById('qm-terrain');
+    if (terrSel) terrSel.value = '';
+
+    // Mostrar modal
+    document.getElementById('quick-modal-backdrop').style.display = 'block';
+    document.getElementById('quick-modal').style.display = 'block';
+    document.getElementById('qm-ec').focus();
+}
+
+function closeQuickModal() {
+    document.getElementById('quick-modal-backdrop').style.display = 'none';
+    document.getElementById('quick-modal').style.display = 'none';
+
+    if (tempMarker) { fieldMap.removeLayer(tempMarker); tempMarker = null; }
+}
+
+function submitQuickMeasurement() {
+    const lat  = parseFloat(document.getElementById('qm-lat').value);
+    const lng  = parseFloat(document.getElementById('qm-lng').value);
+
+    if (isNaN(lat) || isNaN(lng)) {
+        showAlert('Coordenadas inválidas.', 'error');
+        return;
+    }
+
+    const fd = new FormData();
+    fd.append('action',    'save_field_measurement');
+    fd.append('latitude',  lat);
+    fd.append('longitude', lng);
+
+    const ec    = document.getElementById('qm-ec').value.trim();
+    const ph    = document.getElementById('qm-ph').value.trim();
+    const temp  = document.getElementById('qm-temp').value.trim();
+    const moist = document.getElementById('qm-moisture').value.trim();
+    const notes = document.getElementById('qm-notes').value.trim();
+    const terr  = document.getElementById('qm-terrain').value;
+
+    if (ec)    fd.append('conductivity', ec);
+    if (ph)    fd.append('ph', ph);
+    if (temp)  fd.append('temperature', temp);
+    if (moist) fd.append('moisture', moist);
+    if (notes) fd.append('notes', notes);
+    if (terr)  fd.append('terrain_id', terr);
+
+    const submitBtn = document.getElementById('qm-submit');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '⏳ A guardar…'; }
+
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = '💾 Guardar'; }
+            if (data.success) {
+                closeQuickModal();
+                showAlert('Medição adicionada com sucesso.', 'success');
+                applyFilters();   // actualiza tabela, mapa e estatísticas
+            } else {
+                showAlert('Erro: ' + (data.message || 'Falha ao guardar.'), 'error');
+            }
+        })
+        .catch(function() {
+            if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = '💾 Guardar'; }
+            showAlert('Erro de rede ao guardar medição.', 'error');
+        });
 }
 
 // ── Util ──────────────────────────────────────────────────────────────────────
