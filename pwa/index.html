@@ -21,6 +21,7 @@
         <h1>SoilQI Field</h1>
     </div>
     <div class="header-right">
+        <span id="token-badge" title="Sessão guardada" style="display:none;font-size:16px;line-height:1">🔑</span>
         <div id="status-dot" class="status-dot" title="Estado da ligação"></div>
         <span id="pending-badge" class="pending-badge" title="Medições por sincronizar"></span>
     </div>
@@ -122,6 +123,33 @@
                     <label for="inp-notes">Notas</label>
                     <textarea id="inp-notes" name="notes"
                               placeholder="Observações, profundidade da sonda, condições…"></textarea>
+                </div>
+            </div>
+
+            <!-- Fotografia -->
+            <div class="form-card">
+                <div class="form-card-title">📷 Fotografia (opcional)</div>
+                <div style="display:flex; flex-direction:column; gap:10px;">
+                    <label id="photo-label" style="
+                        display:flex; align-items:center; justify-content:center; gap:10px;
+                        padding:14px; border:2px dashed #86efac; border-radius:12px;
+                        background:#f0fdf4; cursor:pointer; font-size:14px; color:#166534;
+                        font-weight:600; transition:border-color .2s;">
+                        📸 Tirar / Escolher Fotografia
+                        <input id="inp-photo" type="file" accept="image/*" capture="environment"
+                               style="display:none" onchange="onPhotoSelected(this)">
+                    </label>
+                    <div id="photo-preview-wrap" style="display:none; position:relative;">
+                        <img id="photo-preview" src="" alt="Pré-visualização"
+                             style="width:100%; border-radius:10px; max-height:220px;
+                                    object-fit:cover; display:block;">
+                        <button type="button" onclick="clearPhoto()"
+                                style="position:absolute;top:6px;right:6px;
+                                       background:rgba(0,0,0,.5);color:#fff;
+                                       border:none;border-radius:50%;width:28px;height:28px;
+                                       font-size:16px;cursor:pointer;line-height:1;">✕</button>
+                        <div id="photo-size" style="font-size:11px;color:#6b7280;margin-top:4px;text-align:right;"></div>
+                    </div>
                 </div>
             </div>
 

@@ -210,6 +210,19 @@ function displayTerrains(terrains) {
     
     if (!container) return; // Se não estiver logado, não existe o container
     
+    // Actualizar selector de terrenos para layers de interpolação (sempre, mesmo com 0 terrenos)
+    const interpSel = document.getElementById('map-interp-terrain');
+    if (interpSel) {
+        const prev = interpSel.value;
+        interpSel.innerHTML = '<option value="">— Selecione um terreno —</option>' +
+            terrains.map(t =>
+                `<option value="${t.id}"${String(t.id) === prev ? ' selected' : ''}>${escMapHtml(t.name)}</option>`
+            ).join('');
+        if (prev && !terrains.find(t => String(t.id) === prev)) {
+            loadMapInterpolations('');
+        }
+    }
+
     if (terrains.length === 0) {
         container.innerHTML = `
             <div class="empty-state">
@@ -231,26 +244,16 @@ function displayTerrains(terrains) {
                 <button class="btn btn-secondary btn-sm" onclick="zoomToTerrain(${terrain.id})" title="Centrar no mapa">
                     🔍
                 </button>
-                <button class="btn btn-danger btn-sm" onclick="deleteTerrain(${terrain.id}, '${terrain.name.replace(/'/g,"\\'")}'" title="Eliminar">
+                <button class="btn btn-danger btn-sm"
+                        data-id="${terrain.id}"
+                        data-name="${escMapHtml(terrain.name)}"
+                        onclick="deleteTerrain(this.dataset.id, this.dataset.name)"
+                        title="Eliminar">
                     🗑️
                 </button>
             </div>
         </div>
     `).join('');
-
-    // Actualizar selector de terrenos para layers de interpolação
-    const interpSel = document.getElementById('map-interp-terrain');
-    if (interpSel) {
-        const prev = interpSel.value;
-        interpSel.innerHTML = '<option value="">— Selecione um terreno —</option>' +
-            terrains.map(t =>
-                `<option value="${t.id}"${String(t.id) === prev ? ' selected' : ''}>${escMapHtml(t.name)}</option>`
-            ).join('');
-        // Se o terreno anteriormente seleccionado desapareceu, limpar overlays
-        if (prev && !terrains.find(t => String(t.id) === prev)) {
-            loadMapInterpolations('');
-        }
-    }
 }
 
 // Carregar terrenos no mapa

@@ -141,14 +141,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
     exit;
 }
 
-// Obter estatísticas do utilizador (apenas se logado)
-$stats = ['total_terrains' => 0, 'total_area' => 0];
+// Obter estatísticas e lista de terrenos (apenas se logado)
+$stats       = ['total_terrains' => 0, 'total_area' => 0];
+$mapTerrains = [];
 if ($isLoggedIn) {
     try {
-        $pdo = getDBConnection();
+        $pdo  = getDBConnection();
         $stmt = $pdo->prepare("SELECT COUNT(*) as total_terrains, COALESCE(SUM(area), 0) as total_area FROM terrains WHERE user_id = ?");
         $stmt->execute([$currentUser['id']]);
         $stats = $stmt->fetch();
+
+        $stmtT = $pdo->prepare("SELECT id, name FROM terrains WHERE user_id = ? ORDER BY name ASC");
+        $stmtT->execute([$currentUser['id']]);
+        $mapTerrains = $stmtT->fetchAll();
     } catch (PDOException $e) {
         $stats = ['total_terrains' => 0, 'total_area' => 0];
     }
@@ -233,6 +238,11 @@ if ($isLoggedIn) {
                             style="width:100%; padding:7px 10px; border:1.5px solid #e5e7eb;
                                    border-radius:7px; font-size:13px; background:#fff;">
                         <option value="">— Selecione um terreno —</option>
+                        <?php foreach ($mapTerrains as $t): ?>
+                            <option value="<?php echo (int)$t['id']; ?>">
+                                <?php echo htmlspecialchars($t['name']); ?>
+                            </option>
+                        <?php endforeach; ?>
                     </select>
                 </div>
                 <div id="map-interp-list" style="color:#9ca3af; font-size:13px; padding:2px 0;">

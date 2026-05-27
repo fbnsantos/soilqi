@@ -4,6 +4,7 @@
 const API      = 'api.php';
 const IDB_NAME = 'soilqi_field';
 const IDB_VER  = 1;
+const TOKEN_KEY = 'soilqi_api_token';   // localStorage key for persistent session
 
 // ── State ────────────────────────────────────────────────────────────────────
 let idb         = null;
@@ -12,6 +13,16 @@ let gpsLat      = null;
 let gpsLng      = null;
 let gpsAccuracy = null;
 let isOnline    = navigator.onLine;
+let capturedPhotoB64 = null;   // base64 JPEG da fotografia actual
+
+// ── Token helpers ─────────────────────────────────────────────────────────────
+function getToken()       { return localStorage.getItem(TOKEN_KEY); }
+function setToken(t)      { localStorage.setItem(TOKEN_KEY, t); updateTokenBadge(); }
+function clearToken()     { localStorage.removeItem(TOKEN_KEY); updateTokenBadge(); }
+function updateTokenBadge() {
+    const el = document.getElementById('token-badge');
+    if (el) el.style.display = getToken() ? 'inline' : 'none';
+}
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -20,6 +31,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     idb = await openIDB();
+    updateTokenBadge();
 
     const authed = await checkAuth();
     if (!authed) { showLogin(); return; }
@@ -81,20 +93,68 @@ function idbDelete(store, key) {
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 async function checkAuth() {
+    const token = getToken();
     try {
-        const res  = await fetch(`${API}?action=check_auth`);
+        const headers = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const res  = await fetch(`${API}?action=check_auth`, { headers });
         const data = await res.json();
-        return data.success === true;
+
+        if (data.success) {
+            // Se não havia token, gerar um agora para futuras sessões
+            if (!token && isOnline) generateAndStoreToken();
+            return true;
+        }
+        // Token rejeitado pelo servidor — limpar
+        if (token) { clearToken(); }
+        return false;
     } catch {
-        // If offline, assume session is still valid
-        return !navigator.onLine ? true : false;
+        // Offline: assumir sessão/token ainda válidos
+        return true;
     }
 }
 
+async function generateAndStoreToken() {
+    try {
+        const data = await callApi({ action: 'generate_token', device_name: 'SoilQI PWA' });
+        if (data && data.success && data.token) {
+            setToken(data.token);
+            toast('🔑 Sessão guardada — próximas entradas serão automáticas.', 'success');
+        }
+    } catch {}
+}
+
 function showLogin() {
-    document.getElementById('main-ui').style.display = 'none';
-    document.getElementById('nav-bar').style.display = 'none';
+    document.getElementById('main-ui').style.display     = 'none';
+    document.getElementById('nav-bar').style.display     = 'none';
     document.getElementById('login-screen').style.display = 'flex';
+}
+
+// ── API low-level ─────────────────────────────────────────────────────────────
+// Devolve o objecto JSON completo (sem envelope { ok, msg })
+async function callApi(payload) {
+    const token = getToken();
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(API, {
+        method:  'POST',
+        headers,
+        body:    JSON.stringify(payload)
+    });
+    if (res.status === 401) return { success: false, _needsLogin: true };
+    return res.json();
+}
+
+// Devolve { ok, msg, needsLogin } — compatível com código existente
+async function postToServer(payload) {
+    try {
+        const data = await callApi(payload);
+        if (data._needsLogin) return { ok: false, msg: 'Sessão expirada — faça login novamente.', needsLogin: true };
+        return { ok: data.success === true, msg: data.message || 'Erro desconhecido' };
+    } catch (err) {
+        console.error('[SoilQI] postToServer:', err);
+        return { ok: false, msg: 'Servidor inacessível' };
+    }
 }
 
 // ── Tabs ─────────────────────────────────────────────────────────────────────
@@ -112,8 +172,8 @@ function startGPS() {
     setGPS('A localizar…', 'searching');
     watchId = navigator.geolocation.watchPosition(onGPSSuccess, onGPSError, {
         enableHighAccuracy: true,
-        maximumAge: 5000,
-        timeout: 20000
+        maximumAge:  5000,
+        timeout:    20000
     });
 }
 
@@ -151,8 +211,63 @@ function onGPSError(err) {
 
 function setGPS(text, cls) {
     document.getElementById('gps-status').textContent = text;
-    const card = document.getElementById('gps-card');
-    card.className = `gps-card ${cls}`;
+    document.getElementById('gps-card').className = `gps-card ${cls}`;
+}
+
+// ── Fotografia ────────────────────────────────────────────────────────────────
+async function onPhotoSelected(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    const label = document.getElementById('photo-label');
+    label.textContent = '⏳ A comprimir…';
+
+    capturedPhotoB64 = await compressPhoto(file);
+
+    if (capturedPhotoB64) {
+        document.getElementById('photo-preview').src           = capturedPhotoB64;
+        document.getElementById('photo-preview-wrap').style.display = 'block';
+        // Estimar tamanho
+        const kb = Math.round(capturedPhotoB64.length * 0.75 / 1024);
+        document.getElementById('photo-size').textContent = `~${kb} KB após compressão`;
+        label.innerHTML = '📸 Alterar fotografia <input id="inp-photo" type="file" accept="image/*" capture="environment" style="display:none" onchange="onPhotoSelected(this)">';
+    } else {
+        toast('Erro a processar fotografia.', 'error');
+        label.textContent = '📸 Tirar / Escolher Fotografia';
+    }
+}
+
+function clearPhoto() {
+    capturedPhotoB64 = null;
+    document.getElementById('photo-preview-wrap').style.display = 'none';
+    document.getElementById('photo-preview').src = '';
+    document.getElementById('photo-size').textContent = '';
+    // Recriar input para permitir seleccionar a mesma foto novamente
+    const label = document.getElementById('photo-label');
+    label.innerHTML = '📸 Tirar / Escolher Fotografia <input id="inp-photo" type="file" accept="image/*" capture="environment" style="display:none" onchange="onPhotoSelected(this)">';
+}
+
+async function compressPhoto(file) {
+    return new Promise(resolve => {
+        const MAX = 1200;
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = () => {
+            let { width: w, height: h } = img;
+            if (w > MAX || h > MAX) {
+                if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+                else       { w = Math.round(w * MAX / h); h = MAX; }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width  = w;
+            canvas.height = h;
+            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+            URL.revokeObjectURL(url);
+            resolve(canvas.toDataURL('image/jpeg', 0.78));
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+        img.src = url;
+    });
 }
 
 // ── Form Submit ───────────────────────────────────────────────────────────────
@@ -168,8 +283,8 @@ async function handleSubmit(e) {
     }
 
     const btn = document.getElementById('btn-submit');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spin">⟳</span> A guardar…';
+    btn.disabled    = true;
+    btn.innerHTML   = '<span class="spin">⟳</span> A guardar…';
 
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
     const m = {
@@ -183,6 +298,7 @@ async function handleSubmit(e) {
         terrain_id:   document.getElementById('inp-terrain').value || null,
         notes:        document.getElementById('inp-notes').value.trim(),
         measured_at:  now,
+        photo_b64:    capturedPhotoB64,  // null se sem foto
         action:       'save_measurement'
     };
 
@@ -193,6 +309,7 @@ async function handleSubmit(e) {
             resetForm();
         } else {
             if (result.needsLogin) { showLogin(); return; }
+            // Guardar localmente (sem foto para poupar espaço se a foto for grande)
             await idbAdd('pending', { ...m, _ts: Date.now() });
             toast(`Guardado localmente. (${result.msg})`, 'warning');
             resetForm();
@@ -203,7 +320,7 @@ async function handleSubmit(e) {
         resetForm();
     }
 
-    btn.disabled = false;
+    btn.disabled  = false;
     btn.innerHTML = '📊 Registar Medição';
     await refreshPendingUI();
 }
@@ -218,27 +335,7 @@ function resetForm() {
         document.getElementById(id).value = '';
     });
     document.getElementById('inp-terrain').value = '';
-}
-
-// ── Server Comms ──────────────────────────────────────────────────────────────
-// Devolve { ok, msg, needsLogin }
-async function postToServer(payload) {
-    try {
-        const res  = await fetch(API, {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify(payload)
-        });
-        let data;
-        try { data = await res.json(); }
-        catch { return { ok: false, msg: `Resposta inválida do servidor (HTTP ${res.status})` }; }
-
-        if (res.status === 401) return { ok: false, msg: 'Sessão expirada — faça login novamente.', needsLogin: true };
-        return { ok: data.success === true, msg: data.message || 'Erro desconhecido' };
-    } catch (err) {
-        console.error('[SoilQI] postToServer:', err);
-        return { ok: false, msg: 'Servidor inacessível' };
-    }
+    clearPhoto();
 }
 
 // ── Sync ──────────────────────────────────────────────────────────────────────
@@ -252,18 +349,18 @@ async function syncPending() {
         const { localId, _ts, ...payload } = item;
         payload.action = 'save_measurement';
         const result = await postToServer(payload);
-        if (result.ok) { await idbDelete('pending', localId); n++; }
+        if (result.ok)          { await idbDelete('pending', localId); n++; }
         else if (result.needsLogin) { showLogin(); break; }
     }
-    if (n) { toast(`${n} medição(ões) sincronizadas ✓`, 'success'); }
+    if (n) toast(`${n} medição(ões) sincronizadas ✓`, 'success');
     await refreshPendingUI();
 }
 
 async function refreshPendingUI() {
     const items = await idbGetAll('pending');
     const n = items.length;
-    const badge   = document.getElementById('pending-badge');
-    const navDot  = document.getElementById('nav-dot-capture');
+    const badge  = document.getElementById('pending-badge');
+    const navDot = document.getElementById('nav-dot-capture');
     badge.textContent = n;
     badge.classList.toggle('visible', n > 0);
     navDot.classList.toggle('visible', n > 0);
@@ -273,7 +370,9 @@ async function refreshPendingUI() {
 async function loadTerrains() {
     if (!isOnline) return;
     try {
-        const res  = await fetch(`${API}?action=get_terrains`);
+        const token = getToken();
+        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+        const res  = await fetch(`${API}?action=get_terrains`, { headers });
         const data = await res.json();
         if (!data.success) return;
         const sel = document.getElementById('inp-terrain');
@@ -293,7 +392,9 @@ async function loadMeasurements() {
     let server = [];
     if (isOnline) {
         try {
-            const res  = await fetch(`${API}?action=get_measurements`);
+            const token = getToken();
+            const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+            const res  = await fetch(`${API}?action=get_measurements`, { headers });
             const data = await res.json();
             if (data.success) server = (data.measurements || []).map(m => ({ ...m, _synced: true }));
         } catch {}
@@ -301,8 +402,7 @@ async function loadMeasurements() {
 
     const pending = await idbGetAll('pending');
     const local   = pending.map(m => ({ ...m, id: `p${m.localId}`, _synced: false }));
-
-    const all = [...local, ...server];
+    const all     = [...local, ...server];
 
     if (!all.length) {
         list.innerHTML = `
@@ -323,10 +423,10 @@ function renderCard(m) {
     const accStr = m.gps_accuracy ? ` ±${parseFloat(m.gps_accuracy).toFixed(0)}m` : '';
 
     const chips = [];
-    if (m.conductivity != null && m.conductivity !== '') chips.push(['EC', `${parseFloat(m.conductivity).toFixed(2)} mS/cm`]);
-    if (m.ph           != null && m.ph           !== '') chips.push(['pH', parseFloat(m.ph).toFixed(1)]);
+    if (m.conductivity != null && m.conductivity !== '') chips.push(['EC',   `${parseFloat(m.conductivity).toFixed(2)} mS/cm`]);
+    if (m.ph           != null && m.ph           !== '') chips.push(['pH',   parseFloat(m.ph).toFixed(1)]);
     if (m.temperature  != null && m.temperature  !== '') chips.push(['Temp', `${parseFloat(m.temperature).toFixed(1)} °C`]);
-    if (m.moisture     != null && m.moisture     !== '') chips.push(['Hum', `${parseFloat(m.moisture).toFixed(1)} %`]);
+    if (m.moisture     != null && m.moisture     !== '') chips.push(['Hum',  `${parseFloat(m.moisture).toFixed(1)} %`]);
 
     const chipsHtml = chips.length
         ? chips.map(([l,v]) => `<div class="m-chip"><span class="lbl">${l}</span><span class="val">${v}</span></div>`).join('')
@@ -338,6 +438,16 @@ function renderCard(m) {
         ? '<span class="sync-tag synced">Sincronizado</span>'
         : '<span class="sync-tag pending">Pendente</span>';
 
+    // Fotografia (apenas para medições sincronizadas com caminho guardado)
+    const photoHtml = (m.photo_path && m._synced)
+        ? `<img src="../${escHtml(m.photo_path)}" alt="Foto da medição"
+                style="width:100%;border-radius:8px;margin-top:8px;max-height:200px;object-fit:cover;display:block;"
+                loading="lazy" onerror="this.style.display='none'">`
+        : (m.photo_b64 && !m._synced)
+            ? `<img src="${m.photo_b64}" alt="Foto (local)"
+                    style="width:100%;border-radius:8px;margin-top:8px;max-height:200px;object-fit:cover;display:block;">`
+            : '';
+
     return `
         <div class="m-card">
             <div class="m-card-head">
@@ -348,6 +458,7 @@ function renderCard(m) {
             <div class="m-coords">${lat}, ${lng}${accStr}</div>
             <div class="m-values">${chipsHtml}</div>
             ${notesHtml}
+            ${photoHtml}
         </div>`;
 }
 
@@ -367,7 +478,7 @@ function updateOnlineUI() {
 function toast(msg, type = 'info') {
     document.querySelectorAll('.toast').forEach(t => t.remove());
     const el = document.createElement('div');
-    el.className = `toast ${type}`;
+    el.className   = `toast ${type}`;
     el.textContent = msg;
     document.body.appendChild(el);
     setTimeout(() => { el.style.transition = 'opacity .3s'; el.style.opacity = '0'; }, 2800);
