@@ -554,10 +554,13 @@ function renderCard(m) {
             : null;
 
     const photoBtn = photoSrc
-        ? `<button class="btn-photo" onclick="openPhotoViewer(this.dataset.src)"
-                   data-src="${photoSrc}">
-               📷 Ver fotografia
-           </button>`
+        ? `<div class="m-photo-thumb" onclick="openPhotoViewer(this.dataset.src)"
+                data-src="${photoSrc}" role="button" tabindex="0"
+                title="Ver fotografia em tamanho completo">
+               <img src="${photoSrc}" alt="Fotografia da medição"
+                    onerror="this.parentElement.style.display='none'">
+               <span class="m-photo-label">📷 Ver foto</span>
+           </div>`
         : '';
 
     return `
