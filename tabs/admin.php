@@ -248,11 +248,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn && $isAdmin) {
                 }
 
                 $response['success']    = true;
-                $response['migrations'] = array_values(array_map(fn($f) => [
-                    'filename'   => $f,
-                    'applied'    => isset($applied[$f]),
-                    'applied_at' => $applied[$f] ?? null,
-                ], $filenames));
+                $response['migrations'] = array_values(array_map(function($f) use ($applied) {
+                    return [
+                        'filename'   => $f,
+                        'applied'    => isset($applied[$f]),
+                        'applied_at' => $applied[$f] ?? null,
+                    ];
+                }, $filenames));
                 break;
 
             case 'run_migration':
@@ -294,7 +296,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn && $isAdmin) {
                 $sql = preg_replace('/\/\*.*?\*\//s', '', $sql);       // strip /* */ comments
                 $statements = array_values(array_filter(
                     array_map('trim', explode(';', $sql)),
-                    fn($s) => strlen($s) > 0
+                    function($s) { return strlen($s) > 0; }
                 ));
 
                 $executed = 0;
