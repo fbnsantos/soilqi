@@ -81,6 +81,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 $response['stats']        = $stats;
                 break;
 
+            case 'get_terrain_geom':
+                $tid = intval($_POST['terrain_id'] ?? 0);
+                if ($tid <= 0) { $response['message'] = 'ID inválido.'; break; }
+                if ($isAdmin) {
+                    $stmt = $pdo->prepare("SELECT id, name, coordinates FROM terrains WHERE id = ?");
+                    $stmt->execute([$tid]);
+                } else {
+                    $stmt = $pdo->prepare("SELECT id, name, coordinates FROM terrains WHERE id = ? AND user_id = ?");
+                    $stmt->execute([$tid, $currentUser['id']]);
+                }
+                $t = $stmt->fetch();
+                if (!$t) { $response['message'] = 'Terreno não encontrado.'; break; }
+                $response['success']  = true;
+                $response['terrain']  = $t;
+                break;
+
             case 'delete_field_measurement':
                 $id = intval($_POST['id'] ?? 0);
                 if ($id <= 0) { $response['message'] = 'ID inválido.'; break; }
@@ -211,8 +227,87 @@ try {
 </div>
 
 <!-- Mapa -->
-<div class="section" style="padding:0; overflow:hidden; border-radius:12px; margin-bottom:20px;">
-    <div id="field-map" style="height:380px; width:100%;"></div>
+<div class="section" style="padding:0; overflow:hidden; border-radius:12px; margin-bottom:20px; position:relative;">
+    <div id="field-map" style="height:420px; width:100%;"></div>
+</div>
+
+<!-- Painel de Interpolação Espacial -->
+<div class="section interp-section">
+    <div class="section-title" style="cursor:pointer; user-select:none;" onclick="toggleInterpPanel()">
+        <h3>🎨 Interpolação Espacial IDW</h3>
+        <span id="interp-toggle-btn" class="btn btn-secondary btn-sm">▼ Expandir</span>
+    </div>
+    <div id="interp-panel" style="display:none; margin-top:16px;">
+        <p style="color:#6b7280; font-size:13px; margin-bottom:14px;">
+            Selecione um campo e um parâmetro para gerar uma superfície interpolada (IDW) visível sobre o terreno no mapa.
+        </p>
+        <div class="field-filters" style="flex-wrap:wrap;">
+
+            <div class="filter-group">
+                <label>Campo (terreno)</label>
+                <select id="interp-terrain-sel" style="min-width:160px;">
+                    <option value="">— Selecione —</option>
+                    <?php foreach ($filterTerrains as $t): ?>
+                        <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>Parâmetro</label>
+                <select id="interp-param">
+                    <option value="conductivity">⚡ Condutividade EC (mS/cm)</option>
+                    <option value="ph">🧪 pH</option>
+                    <option value="temperature">🌡️ Temperatura (°C)</option>
+                    <option value="moisture">💧 Humidade (%)</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>Escala de cores</label>
+                <select id="interp-colormap">
+                    <option value="ryg">🔴→🟡→🟢 Alto→Baixo</option>
+                    <option value="gyr">🟢→🟡→🔴 Baixo→Alto</option>
+                    <option value="plasma">🟣 Plasma</option>
+                    <option value="blues">🔵 Azuis</option>
+                    <option value="viridis">🌈 Viridis</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>Resolução</label>
+                <select id="interp-res">
+                    <option value="150">Rápida (150 px)</option>
+                    <option value="250" selected>Normal (250 px)</option>
+                    <option value="400">Alta (400 px)</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>Opacidade: <span id="interp-opacity-val">70</span>%</label>
+                <input type="range" id="interp-opacity" min="10" max="100" value="70" style="min-width:120px;"
+                    oninput="document.getElementById('interp-opacity-val').textContent=this.value; updateOverlayOpacity()">
+            </div>
+
+            <div class="filter-group filter-actions" style="gap:8px; flex-direction:row; align-items:flex-end;">
+                <button class="btn btn-primary" onclick="generateInterpolation()">🎨 Gerar</button>
+                <button class="btn btn-secondary" onclick="removeInterpolation()">🗑️ Remover</button>
+            </div>
+        </div>
+
+        <div id="interp-status" style="margin-top:12px; font-size:13px; color:#6b7280; min-height:20px;"></div>
+
+        <!-- Legenda de cores -->
+        <div id="interp-legend" style="display:none; margin-top:14px;">
+            <div style="font-size:12px; font-weight:600; color:#374151; margin-bottom:4px;" id="interp-legend-title"></div>
+            <canvas id="legend-canvas" width="320" height="24" style="border-radius:5px; width:100%; max-width:320px; display:block;"></canvas>
+            <div style="display:flex; justify-content:space-between; font-size:11px; color:#9ca3af; max-width:320px; margin-top:3px;">
+                <span id="legend-min"></span>
+                <span id="legend-mid"></span>
+                <span id="legend-max"></span>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Tabela -->

@@ -14,11 +14,36 @@ function initMap() {
     // Criar mapa centrado em Portugal
     map = L.map('map').setView([39.5, -8.0], 7);
 
-    // Adicionar tile layer
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors',
+    // ── Camadas base ─────────────────────────────────────────────────────
+    const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>',
         maxZoom: 19
-    }).addTo(map);
+    });
+    const satLayer = L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles © Esri — Source: Esri, DigitalGlobe, GeoEye, Earthstar Geographics',
+        maxZoom: 19
+    });
+    const topoLayer = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenTopoMap contributors',
+        maxZoom: 17
+    });
+    const labelsLayer = L.tileLayer(
+        'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png', {
+        attribution: '© Carto',
+        maxZoom: 19,
+        pane: 'shadowPane'
+    });
+
+    osmLayer.addTo(map);
+
+    L.control.layers(
+        { '🗺️ Mapa':     osmLayer,
+          '🛰️ Satélite': satLayer,
+          '🏔️ Relevo':   topoLayer },
+        { '🏷️ Etiquetas (satélite)': labelsLayer },
+        { position: 'topright', collapsed: true }
+    ).addTo(map);
 
     // Criar layer group para terrenos desenhados
     drawnItems = new L.FeatureGroup();
