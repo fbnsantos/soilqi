@@ -348,10 +348,118 @@ function showTableStructure() {
     });
 }
 
+// =====================================================
+// MIGRAÇÕES DE BASE DE DADOS
+// =====================================================
+
+function loadMigrations() {
+    const container = document.getElementById('migrations-list');
+    if (!container) return;
+    container.innerHTML = '<div class="text-center" style="padding:20px;color:#6b7280;">A carregar…</div>';
+
+    const fd = new FormData();
+    fd.append('action', 'get_migrations');
+
+    fetch('?tab=admin', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) displayMigrations(data.migrations);
+            else container.innerHTML = `<div class="sql-error">❌ ${data.message}</div>`;
+        })
+        .catch(() => {
+            container.innerHTML = '<div class="sql-error">❌ Erro ao carregar migrações.</div>';
+        });
+}
+
+function displayMigrations(migrations) {
+    const container = document.getElementById('migrations-list');
+
+    if (!migrations || migrations.length === 0) {
+        container.innerHTML = `
+            <div class="sql-info">
+                ℹ️ Nenhum ficheiro <code>.sql</code> encontrado na pasta <code>migrations/</code>.<br>
+                <small style="color:#6b7280">Crie ficheiros como <code>001_nome.sql</code> nessa pasta para os ver aqui.</small>
+            </div>`;
+        return;
+    }
+
+    const allApplied = migrations.every(m => m.applied);
+    const pendingCount = migrations.filter(m => !m.applied).length;
+
+    const summary = allApplied
+        ? `<div class="sql-success" style="margin-bottom:12px">✅ Todas as migrações estão aplicadas.</div>`
+        : `<div class="warning-box" style="margin-bottom:12px">
+               ⚠️ <strong>${pendingCount}</strong> migração(ões) por aplicar.
+           </div>`;
+
+    const rows = migrations.map(m => {
+        const badge = m.applied
+            ? '<span class="badge badge-admin">✅ Aplicada</span>'
+            : '<span class="badge badge-user">⏳ Pendente</span>';
+        const when = m.applied_at
+            ? new Date(m.applied_at).toLocaleString('pt-PT')
+            : '—';
+        const action = m.applied
+            ? '<span style="color:#9ca3af;font-size:12px">Já aplicada</span>'
+            : `<button class="btn btn-primary btn-sm" onclick="runMigration('${escapeHtml(m.filename)}')">▶️ Aplicar</button>`;
+
+        return `<tr>
+            <td><code style="font-size:13px">${escapeHtml(m.filename)}</code></td>
+            <td>${badge}</td>
+            <td style="font-size:12px;color:#6b7280">${when}</td>
+            <td>${action}</td>
+        </tr>`;
+    }).join('');
+
+    container.innerHTML = summary + `
+        <div class="data-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Ficheiro</th>
+                        <th>Estado</th>
+                        <th>Aplicada em</th>
+                        <th>Ação</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>`;
+}
+
+function runMigration(filename) {
+    if (!confirm(`Aplicar a migração "${filename}"?\n\nEsta operação modifica a base de dados.`)) return;
+
+    // Feedback visual no botão
+    const btns = document.querySelectorAll(`[onclick="runMigration('${filename}')"]`);
+    btns.forEach(b => { b.disabled = true; b.textContent = '⏳ A aplicar…'; });
+
+    const fd = new FormData();
+    fd.append('action', 'run_migration');
+    fd.append('filename', filename);
+
+    fetch('?tab=admin', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showAlert(`✅ ${data.message}`, 'success');
+                loadMigrations();
+            } else {
+                showAlert(`❌ ${data.message}`, 'error');
+                btns.forEach(b => { b.disabled = false; b.innerHTML = '▶️ Aplicar'; });
+            }
+        })
+        .catch(() => {
+            showAlert('❌ Erro de ligação ao aplicar a migração.', 'error');
+            btns.forEach(b => { b.disabled = false; b.innerHTML = '▶️ Aplicar'; });
+        });
+}
+
 // Carregar utilizadores quando a página carrega
 document.addEventListener('DOMContentLoaded', function() {
     if (activeTab === 'admin') {
         loadUsers();
+        loadMigrations();
         
         // Atalhos de teclado para o SQL editor
         const sqlQuery = document.getElementById('sql-query');

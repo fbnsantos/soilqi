@@ -200,19 +200,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn && $isAdmin) {
                 // Total de utilizadores
                 $stmt = $pdo->query("SELECT COUNT(*) as total FROM users");
                 $totalUsers = $stmt->fetch()['total'];
-                
+
                 // Total de admins
                 $stmt = $pdo->query("SELECT COUNT(*) as total FROM users WHERE role = '" . ROLE_ADMIN . "'");
                 $totalAdmins = $stmt->fetch()['total'];
-                
+
                 // Total de terrenos
                 $stmt = $pdo->query("SELECT COUNT(*) as total FROM terrains");
                 $totalTerrains = $stmt->fetch()['total'];
-                
+
                 // Área total
                 $stmt = $pdo->query("SELECT COALESCE(SUM(area), 0) as total FROM terrains");
                 $totalArea = $stmt->fetch()['total'];
-                
+
                 $response['success'] = true;
                 $response['stats'] = [
                     'users' => $totalUsers,
@@ -220,6 +220,96 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn && $isAdmin) {
                     'terrains' => $totalTerrains,
                     'area' => $totalArea
                 ];
+                break;
+
+            // ── Migrações ─────────────────────────────────────────────────────
+            case 'get_migrations':
+                // Auto-criar tabela de controlo se não existir
+                $pdo->exec("CREATE TABLE IF NOT EXISTS schema_migrations (
+                    id          INT          PRIMARY KEY AUTO_INCREMENT,
+                    filename    VARCHAR(255) NOT NULL UNIQUE,
+                    applied_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $migrationsDir = __DIR__ . '/../migrations/';
+                $filenames = [];
+                if (is_dir($migrationsDir)) {
+                    $found = glob($migrationsDir . '*.sql');
+                    natsort($found);
+                    foreach ($found as $f) { $filenames[] = basename($f); }
+                }
+
+                $applied = [];
+                foreach ($pdo->query("SELECT filename, applied_at FROM schema_migrations")->fetchAll() as $row) {
+                    $applied[$row['filename']] = $row['applied_at'];
+                }
+
+                $response['success']    = true;
+                $response['migrations'] = array_values(array_map(fn($f) => [
+                    'filename'   => $f,
+                    'applied'    => isset($applied[$f]),
+                    'applied_at' => $applied[$f] ?? null,
+                ], $filenames));
+                break;
+
+            case 'run_migration':
+                $filename = basename($_POST['filename'] ?? '');
+
+                // Validação do nome (apenas letras, números, hífen, underscore, ponto)
+                if (empty($filename) || !preg_match('/^[\w\-]+\.sql$/i', $filename)) {
+                    $response['message'] = 'Nome de ficheiro inválido.';
+                    break;
+                }
+
+                $migrationsDir = realpath(__DIR__ . '/../migrations');
+                $filepath      = $migrationsDir . DIRECTORY_SEPARATOR . $filename;
+
+                if (!$migrationsDir || !file_exists($filepath)
+                    || strpos(realpath($filepath), $migrationsDir) !== 0) {
+                    $response['message'] = 'Ficheiro não encontrado ou acesso negado.';
+                    break;
+                }
+
+                // Garantir tabela de controlo existe
+                $pdo->exec("CREATE TABLE IF NOT EXISTS schema_migrations (
+                    id INT PRIMARY KEY AUTO_INCREMENT,
+                    filename VARCHAR(255) NOT NULL UNIQUE,
+                    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // Verificar se já foi aplicada
+                $chk = $pdo->prepare("SELECT id FROM schema_migrations WHERE filename = ?");
+                $chk->execute([$filename]);
+                if ($chk->fetch()) {
+                    $response['message'] = 'Esta migração já foi aplicada anteriormente.';
+                    break;
+                }
+
+                // Ler SQL e separar em statements
+                $sql = file_get_contents($filepath);
+                $sql = preg_replace('/--[^\n]*/', '', $sql);           // strip -- comments
+                $sql = preg_replace('/\/\*.*?\*\//s', '', $sql);       // strip /* */ comments
+                $statements = array_values(array_filter(
+                    array_map('trim', explode(';', $sql)),
+                    fn($s) => strlen($s) > 0
+                ));
+
+                $executed = 0;
+                try {
+                    foreach ($statements as $sqlStmt) {
+                        // Ignorar USE / CREATE DATABASE (dependentes do servidor)
+                        if (preg_match('/^\s*(USE\s|CREATE\s+DATABASE)/i', $sqlStmt)) continue;
+                        $pdo->exec($sqlStmt);
+                        $executed++;
+                    }
+                    // Registar como aplicada
+                    $pdo->prepare("INSERT INTO schema_migrations (filename) VALUES (?)")->execute([$filename]);
+                    $response['success']    = true;
+                    $response['message']    = "Migração \"{$filename}\" aplicada! ({$executed} instruções executadas)";
+                    $response['statements'] = $executed;
+                } catch (PDOException $migEx) {
+                    $response['message'] = 'Erro ao executar migração: ' . $migEx->getMessage();
+                }
                 break;
         }
     } catch (PDOException $e) {
@@ -372,6 +462,21 @@ try {
         <div class="warning-box">
             <strong>⚠️ Atenção:</strong> Estas ações podem afetar o funcionamento do sistema. 
             Use com cuidado.
+        </div>
+    </div>
+
+    <!-- Migrações de Base de Dados -->
+    <div class="section">
+        <div class="section-title">
+            <h3>🗄️ Migrações de Base de Dados</h3>
+            <button class="btn btn-primary btn-sm" onclick="loadMigrations()">🔄 Atualizar</button>
+        </div>
+        <p style="color:#6b7280;font-size:14px;margin-bottom:16px;">
+            Coloque ficheiros <code>.sql</code> na pasta <code>migrations/</code> do projeto para os gerir aqui.
+            As migrações são executadas por ordem (ex: <code>001_…sql</code>, <code>002_…sql</code>).
+        </p>
+        <div id="migrations-list">
+            <div class="text-center" style="padding:20px;color:#6b7280;">A carregar…</div>
         </div>
     </div>
 
