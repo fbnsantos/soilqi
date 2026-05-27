@@ -32,6 +32,13 @@ $availableTabs = [
         'requiresAuth' => false,
         'requiresAdmin' => false
     ],
+    'field' => [
+        'title' => 'Medições de Campo',
+        'icon' => '📊',
+        'file' => 'tabs/field.php',
+        'requiresAuth' => true,
+        'requiresAdmin' => false
+    ],
     'admin' => [
         'title' => 'Administração',
         'icon' => '⚙️',
