@@ -1,0 +1,19 @@
+{
+  "name": "SoilQI Field",
+  "short_name": "SoilQI",
+  "description": "Recolha de dados de solo no campo com GPS",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#2d6a4f",
+  "theme_color": "#2d6a4f",
+  "lang": "pt",
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

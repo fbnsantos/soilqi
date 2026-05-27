@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#2d6a4f">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="SoilQI Field">
+    <title>SoilQI Field</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icons/icon.svg">
+    <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────── -->
+<header class="app-header">
+    <div class="header-left">
+        <span class="app-logo">🌱</span>
+        <h1>SoilQI Field</h1>
+    </div>
+    <div class="header-right">
+        <div id="status-dot" class="status-dot" title="Estado da ligação"></div>
+        <span id="pending-badge" class="pending-badge" title="Medições por sincronizar"></span>
+    </div>
+</header>
+
+<!-- ── Login Screen ────────────────────────────────────── -->
+<div id="login-screen" class="login-screen" style="display:none">
+    <div class="login-card">
+        <div class="login-logo">🌱</div>
+        <h2>SoilQI Field</h2>
+        <p>Precisa de fazer login no sistema<br>para utilizar a aplicação de campo.</p>
+        <a href="../login.php" class="btn-login">Entrar / Registar</a>
+    </div>
+</div>
+
+<!-- ── Main UI ─────────────────────────────────────────── -->
+<main id="main-ui">
+
+    <!-- CAPTURAR -->
+    <div id="screen-capture" class="screen">
+
+        <!-- GPS Card -->
+        <div id="gps-card" class="gps-card searching">
+            <div class="gps-top">
+                <div class="gps-icon-wrap">📍</div>
+                <div class="gps-info">
+                    <div class="gps-status" id="gps-status">A localizar…</div>
+                    <div class="gps-accuracy" id="gps-accuracy">Aguarda sinal GNSS</div>
+                </div>
+                <button class="btn-gps-refresh" id="btn-gps-refresh"
+                        onclick="refreshGPS()" title="Atualizar GPS">↻</button>
+            </div>
+            <div class="gps-coords">
+                <div>
+                    <span class="coord-label">Latitude</span>
+                    <input class="coord-input" id="inp-lat" type="number"
+                           step="0.0000001" placeholder="–" inputmode="decimal">
+                </div>
+                <div>
+                    <span class="coord-label">Longitude</span>
+                    <input class="coord-input" id="inp-lng" type="number"
+                           step="0.0000001" placeholder="–" inputmode="decimal">
+                </div>
+            </div>
+        </div>
+
+        <!-- Measurement Form -->
+        <form id="measurement-form">
+
+            <div class="form-card">
+                <div class="form-card-title">Parâmetros do Solo</div>
+                <div class="form-row">
+                    <div class="form-field">
+                        <label for="inp-ec">
+                            Condutividade EC
+                            <span class="field-unit">mS/cm</span>
+                        </label>
+                        <input id="inp-ec" name="conductivity" type="number"
+                               step="0.01" min="0" placeholder="0.00" inputmode="decimal">
+                    </div>
+                    <div class="form-field">
+                        <label for="inp-ph">
+                            pH
+                            <span class="field-unit">0–14</span>
+                        </label>
+                        <input id="inp-ph" name="ph" type="number"
+                               step="0.1" min="0" max="14" placeholder="7.0" inputmode="decimal">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-field">
+                        <label for="inp-temp">
+                            Temperatura
+                            <span class="field-unit">°C</span>
+                        </label>
+                        <input id="inp-temp" name="temperature" type="number"
+                               step="0.1" placeholder="20.0" inputmode="decimal">
+                    </div>
+                    <div class="form-field">
+                        <label for="inp-moisture">
+                            Humidade
+                            <span class="field-unit">%</span>
+                        </label>
+                        <input id="inp-moisture" name="moisture" type="number"
+                               step="0.1" min="0" max="100" placeholder="30.0" inputmode="decimal">
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-card">
+                <div class="form-card-title">Informação Adicional</div>
+                <div class="form-field">
+                    <label for="inp-terrain">Terreno</label>
+                    <select id="inp-terrain" name="terrain_id">
+                        <option value="">— Sem terreno associado —</option>
+                    </select>
+                </div>
+                <div class="form-field">
+                    <label for="inp-notes">Notas</label>
+                    <textarea id="inp-notes" name="notes"
+                              placeholder="Observações, profundidade da sonda, condições…"></textarea>
+                </div>
+            </div>
+
+            <button type="submit" class="btn-submit" id="btn-submit">
+                📊 Registar Medição
+            </button>
+
+        </form>
+    </div><!-- /screen-capture -->
+
+    <!-- HISTÓRICO -->
+    <div id="screen-history" class="screen">
+        <div class="history-toolbar">
+            <h2>Medições</h2>
+            <button class="btn-icon-only" onclick="loadMeasurements()" title="Atualizar">↻</button>
+        </div>
+        <div id="measurement-list" class="measurement-list">
+            <div class="loading-state">A carregar…</div>
+        </div>
+    </div>
+
+</main><!-- /main-ui -->
+
+<!-- ── Bottom Nav ──────────────────────────────────────── -->
+<nav id="nav-bar" class="bottom-nav">
+    <button id="nav-capture" class="nav-btn" onclick="showTab('capture')">
+        <span class="nav-icon">📍</span>
+        <span>Capturar</span>
+        <span id="nav-dot-capture" class="nav-dot"></span>
+    </button>
+    <button id="nav-history" class="nav-btn" onclick="showTab('history')">
+        <span class="nav-icon">📋</span>
+        <span>Histórico</span>
+    </button>
+</nav>
+
+<script src="assets/js/app.js"></script>
+</body>
+</html>

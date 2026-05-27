@@ -20,6 +20,35 @@ echo "<p><strong>Whoami:</strong> <code>" . trim($whoami) . "</code></p>";
 
 echo "<hr>";
 
+
+// ==================================================
+// 2. CONFIGURAR GIT E FAZER PULL
+// ==================================================
+
+echo "<h3>📦 Git Operations</h3>";
+
+// Adicionar diretório como seguro
+$output = shell_exec("git config --global --add safe.directory /var/www/html/pikachu/pikachuPM 2>&1");
+if ($output) {
+    echo "<p>Git safe directory: <code>$output</code></p>";
+}
+
+// Executar git pull
+echo "<p><strong>Executando git pull...</strong></p>";
+$gitOutput = shell_exec('git pull 2>&1');
+echo "<pre style='background:#f4f4f4; padding:10px; border-radius:5px;'>$gitOutput</pre>";
+
+// Verificar status do git
+$gitStatus = shell_exec('git status --porcelain 2>&1');
+if (empty(trim($gitStatus))) {
+    echo "<p>✅ Repositório está limpo e atualizado</p>";
+} else {
+    echo "<p>⚠️ Existem alterações locais:</p>";
+    echo "<pre style='background:#fff3cd; padding:10px; border-radius:5px;'>$gitStatus</pre>";
+}
+
+echo "<hr>";
+
 // ==================================================
 // 1. GERAR CONFIG.PHP A PARTIR DO TEMPLATE
 // ==================================================
@@ -190,33 +219,6 @@ if (!empty($dbParams)) {
     echo "<hr>";
 }
 
-// ==================================================
-// 2. CONFIGURAR GIT E FAZER PULL
-// ==================================================
-
-echo "<h3>📦 Git Operations</h3>";
-
-// Adicionar diretório como seguro
-$output = shell_exec("git config --global --add safe.directory /var/www/html/pikachu/pikachuPM 2>&1");
-if ($output) {
-    echo "<p>Git safe directory: <code>$output</code></p>";
-}
-
-// Executar git pull
-echo "<p><strong>Executando git pull...</strong></p>";
-$gitOutput = shell_exec('git pull 2>&1');
-echo "<pre style='background:#f4f4f4; padding:10px; border-radius:5px;'>$gitOutput</pre>";
-
-// Verificar status do git
-$gitStatus = shell_exec('git status --porcelain 2>&1');
-if (empty(trim($gitStatus))) {
-    echo "<p>✅ Repositório está limpo e atualizado</p>";
-} else {
-    echo "<p>⚠️ Existem alterações locais:</p>";
-    echo "<pre style='background:#fff3cd; padding:10px; border-radius:5px;'>$gitStatus</pre>";
-}
-
-echo "<hr>";
 
 // ==================================================
 // 3. NPM BUILD (se diretório PKMT existe)
