@@ -540,6 +540,152 @@ function _mapInterpBtnReset(id) {
     }
 }
 
+// ── Camadas GeoJSON no mapa principal ────────────────────────────────────────
+let mapGeoJSONOverlays = {};   // id → L.geoJSON layer no mapa
+const MAP_GJ_COLORS = ['#3b82f6','#f59e0b','#ef4444','#8b5cf6','#10b981','#ec4899','#06b6d4','#84cc16'];
+let   mapGjColorIdx  = 0;
+const mapGjColorMap  = {};     // id → color
+
+function loadMapGeoJSONLayers() {
+    const list = document.getElementById('map-geojson-list');
+    if (!list) return;
+
+    const fd = new FormData();
+    fd.append('action', 'get_geojson_layers');
+
+    fetch('', { method: 'POST', body: fd })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.success) {
+                list.innerHTML = '<span style="color:#ef4444; font-size:12px;">Erro ao carregar camadas.</span>';
+                return;
+            }
+            renderMapGeoJSONList(data.layers || []);
+        })
+        .catch(function() {
+            list.innerHTML = '<span style="color:#ef4444; font-size:12px;">Erro de rede.</span>';
+        });
+}
+
+function renderMapGeoJSONList(layers) {
+    const list = document.getElementById('map-geojson-list');
+    if (!layers.length) {
+        list.innerHTML = '<span style="color:#9ca3af; font-size:12px;">Nenhuma camada GeoJSON importada ainda.<br>' +
+                         'Importe no separador <strong>Medições de Campo</strong>.</span>';
+        return;
+    }
+
+    list.innerHTML = layers.map(function(l) {
+        const onMap = !!mapGeoJSONOverlays[l.id];
+        const color = mapGjColorMap[l.id] || MAP_GJ_COLORS[mapGjColorIdx % MAP_GJ_COLORS.length];
+        return '<div style="display:flex; align-items:center; gap:6px; padding:5px 0; ' +
+               'border-bottom:1px solid #f3f4f6;">' +
+               '<span style="display:inline-block; width:10px; height:10px; border-radius:50%; ' +
+               'background:' + escMapHtml(color) + '; flex-shrink:0;"></span>' +
+               '<div style="flex:1; min-width:0;">' +
+               '<div style="font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; ' +
+               'text-overflow:ellipsis;" title="' + escMapHtml(l.name) + '">' + escMapHtml(l.name) + '</div>' +
+               '<div style="font-size:10px; color:#9ca3af;">' + (l.feature_count || 0) + ' features' +
+               (l.terrain_name ? ' · ' + escMapHtml(l.terrain_name) : '') + '</div>' +
+               '</div>' +
+               '<button id="map-gjBtn-' + l.id + '" ' +
+               'data-id="' + l.id + '" data-name="' + escMapHtml(l.name) + '" ' +
+               'onclick="toggleMapGeoJSON(this.dataset.id, this.dataset.name)" ' +
+               'style="font-size:11px; padding:3px 8px; border-radius:5px; cursor:pointer; ' +
+               'border:1.5px solid ' + (onMap ? '#2d6a4f' : '#d1d5db') + '; ' +
+               'background:' + (onMap ? '#2d6a4f' : '#fff') + '; ' +
+               'color:' + (onMap ? '#fff' : '#374151') + '; white-space:nowrap;">' +
+               (onMap ? '✓ Visível' : '👁️ Mostrar') +
+               '</button></div>';
+    }).join('');
+}
+
+function toggleMapGeoJSON(id, name) {
+    id = String(id);
+
+    if (mapGeoJSONOverlays[id]) {
+        map.removeLayer(mapGeoJSONOverlays[id]);
+        if (mapLayersControl) mapLayersControl.removeLayer(mapGeoJSONOverlays[id]);
+        delete mapGeoJSONOverlays[id];
+        _mapGjBtnReset(id, name);
+        return;
+    }
+
+    const btn = document.getElementById('map-gjBtn-' + id);
+    if (btn) btn.textContent = '⏳…';
+
+    const fd = new FormData();
+    fd.append('action', 'get_geojson_data');
+    fd.append('id', id);
+
+    fetch('', { method: 'POST', body: fd })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.success || !data.geojson) {
+                if (btn) { btn.textContent = '👁️ Mostrar'; _mapGjBtnReset(id, name); }
+                return;
+            }
+
+            if (!mapGjColorMap[id]) {
+                mapGjColorMap[id] = MAP_GJ_COLORS[mapGjColorIdx % MAP_GJ_COLORS.length];
+                mapGjColorIdx++;
+            }
+            var color = mapGjColorMap[id];
+
+            var gjData;
+            try { gjData = JSON.parse(data.geojson); } catch(e) {
+                _mapGjBtnReset(id, name); return;
+            }
+
+            var layer = L.geoJSON(gjData, {
+                style: { color: color, weight: 2, opacity: 0.9, fillOpacity: 0.2, fillColor: color },
+                pointToLayer: function(feature, latlng) {
+                    return L.circleMarker(latlng, {
+                        radius: 5, fillColor: color, color: '#fff',
+                        weight: 1.5, opacity: 1, fillOpacity: 0.85
+                    });
+                },
+                onEachFeature: function(feature, lyr) {
+                    var props = feature.properties || {};
+                    var keys  = Object.keys(props);
+                    if (!keys.length) return;
+                    var html  = keys.slice(0, 10).map(function(k) {
+                        return '<tr><td style="color:#6b7280;padding-right:8px;font-size:11px;">' +
+                               escMapHtml(k) + '</td><td style="font-size:12px;"><strong>' +
+                               escMapHtml(String(props[k])) + '</strong></td></tr>';
+                    }).join('');
+                    lyr.bindPopup('<div style="max-height:200px;overflow:auto;">' +
+                        '<div style="font-weight:700;font-size:13px;margin-bottom:6px;">' +
+                        escMapHtml(data.name) + '</div>' +
+                        '<table>' + html + '</table></div>');
+                }
+            }).addTo(map);
+
+            mapGeoJSONOverlays[id] = layer;
+            if (mapLayersControl) mapLayersControl.addOverlay(layer, '🗺️ ' + escMapHtml(data.name));
+
+            try { map.fitBounds(layer.getBounds(), { padding: [30, 30] }); } catch(e) {}
+
+            if (btn) {
+                btn.textContent   = '✓ Visível';
+                btn.style.background  = '#2d6a4f';
+                btn.style.color       = '#fff';
+                btn.style.borderColor = '#2d6a4f';
+            }
+        })
+        .catch(function() { _mapGjBtnReset(id, name); });
+}
+
+function _mapGjBtnReset(id, name) {
+    var btn = document.getElementById('map-gjBtn-' + id);
+    if (btn) {
+        btn.textContent   = '👁️ Mostrar';
+        btn.style.background  = '#fff';
+        btn.style.color       = '#374151';
+        btn.style.borderColor = '#d1d5db';
+    }
+}
+
 // ── Utilitário de escape HTML (app.js) ───────────────────────────────────────
 function escMapHtml(s) {
     return String(s)
@@ -550,4 +696,5 @@ function escMapHtml(s) {
 // Inicializar quando o documento estiver pronto
 document.addEventListener('DOMContentLoaded', function() {
     initMap();
+    loadMapGeoJSONLayers();
 });

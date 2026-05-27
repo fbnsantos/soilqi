@@ -20,6 +20,11 @@ let lastInterpDataUrl   = null;
 let lastInterpBounds    = null; // { minLat, maxLat, minLng, maxLng }
 let lastInterpMeta      = null; // { minV, maxV, param, colormap, terrainId, resolution, power }
 
+// GeoJSON layers: id -> Leaflet GeoJSON layer currently on map
+let geojsonOverlayLayers = {};
+// Raw GeoJSON text pending save
+let pendingGeoJSON = null;
+
 // ── Boot ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function () {
     if (activeTab !== 'field') return;
@@ -937,6 +942,304 @@ function submitQuickMeasurement() {
             if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = '💾 Guardar'; }
             showAlert('Erro de rede ao guardar medição.', 'error');
         });
+}
+
+// ── GeoJSON Import & Layers ───────────────────────────────────────────────────
+
+function toggleGeoJSONPanel() {
+    const panel = document.getElementById('geojson-panel');
+    const btn   = document.getElementById('geojson-toggle-btn');
+    if (!panel) return;
+    const open = panel.style.display === 'none';
+    panel.style.display = open ? 'block' : 'none';
+    btn.textContent = open ? '▲ Recolher' : '▼ Expandir';
+    if (open) loadGeoJSONLayers();
+}
+
+// Ficheiro selecionado — ler e pré-validar
+function onGeoJSONFileSelected(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    const info   = document.getElementById('gj-file-info');
+    const saveBtn = document.getElementById('gj-save-btn');
+    const label  = document.getElementById('gj-file-label');
+    pendingGeoJSON = null;
+    saveBtn.disabled = true;
+
+    if (file.size > 10 * 1024 * 1024) {
+        info.textContent = '⚠️ Ficheiro demasiado grande (máx. 10 MB).';
+        info.style.color = '#dc2626';
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function (e) {
+        try {
+            const parsed = JSON.parse(e.target.result);
+            const type   = parsed.type || '';
+            let count = 0;
+            if (type === 'FeatureCollection') count = (parsed.features || []).length;
+            else if (type === 'Feature')      count = 1;
+            else if (['Polygon','MultiPolygon','LineString','MultiLineString',
+                      'Point','MultiPoint','GeometryCollection'].includes(type)) count = 1;
+            else { throw new Error('Tipo GeoJSON não reconhecido: ' + type); }
+
+            pendingGeoJSON = e.target.result;
+            const kb = (file.size / 1024).toFixed(0);
+            info.textContent = `✓ ${escHtml(file.name)}  •  ${count} feature(s)  •  ${kb} KB`;
+            info.style.color = '#16a34a';
+            label.querySelector('span') && (label.querySelector('span').textContent = '📁 ' + file.name);
+            // pré-preencher nome se vazio
+            const nameEl = document.getElementById('gj-name');
+            if (!nameEl.value) nameEl.value = file.name.replace(/\.(geojson|json)$/i, '');
+            saveBtn.disabled = false;
+        } catch (err) {
+            info.textContent = '⚠️ Ficheiro inválido: ' + err.message;
+            info.style.color = '#dc2626';
+        }
+    };
+    reader.readAsText(file);
+}
+
+// Guardar GeoJSON na BD
+function saveGeoJSON() {
+    if (!pendingGeoJSON) return;
+
+    const name   = (document.getElementById('gj-name')?.value || '').trim();
+    const descr  = (document.getElementById('gj-description')?.value || '').trim();
+    const terrId = document.getElementById('gj-terrain')?.value || '';
+    const status = document.getElementById('gj-save-status');
+    const btn    = document.getElementById('gj-save-btn');
+
+    if (!name) { status.textContent = '⚠️ Preencha o nome da camada.'; status.style.color='#dc2626'; return; }
+
+    btn.disabled = true;
+    status.textContent = '⏳ A guardar…';
+    status.style.color = '#6b7280';
+
+    const fd = new FormData();
+    fd.append('action',       'save_geojson');
+    fd.append('name',         name);
+    fd.append('description',  descr);
+    fd.append('terrain_id',   terrId);
+    fd.append('geojson_data', pendingGeoJSON);
+
+    fetch('', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                status.textContent = '✓ ' + data.message;
+                status.style.color = '#16a34a';
+                pendingGeoJSON = null;
+                document.getElementById('gj-name').value = '';
+                document.getElementById('gj-description').value = '';
+                document.getElementById('gj-terrain').value = '';
+                document.getElementById('gj-file').value = '';
+                document.getElementById('gj-file-info').textContent = '';
+                document.getElementById('gj-file-label').innerHTML =
+                    '📁 Clique para selecionar ficheiro .geojson / .json' +
+                    '<input id="gj-file" type="file" accept=".geojson,.json,application/json,application/geo+json" ' +
+                    'style="display:none" onchange="onGeoJSONFileSelected(this)">';
+                btn.disabled = true;
+                loadGeoJSONLayers();
+            } else {
+                status.textContent = '⚠️ ' + (data.message || 'Erro ao guardar.');
+                status.style.color = '#dc2626';
+                btn.disabled = false;
+            }
+        })
+        .catch(() => {
+            status.textContent = '⚠️ Erro de rede.';
+            status.style.color = '#dc2626';
+            btn.disabled = false;
+        });
+}
+
+// Carregar lista de camadas guardadas
+function loadGeoJSONLayers() {
+    const list = document.getElementById('geojson-layers-list');
+    if (!list) return;
+    list.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;">A carregar…</div>';
+
+    const fd = new FormData();
+    fd.append('action', 'get_geojson_layers');
+
+    fetch('', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) { list.innerHTML = '<div style="color:#dc2626;padding:10px;">' + escHtml(data.message||'Erro') + '</div>'; return; }
+            renderGeoJSONList(data.layers || []);
+        })
+        .catch(() => { list.innerHTML = '<div style="color:#dc2626;padding:10px;">Erro de rede.</div>'; });
+}
+
+const GJ_COLORS = ['#3b82f6','#f59e0b','#ef4444','#8b5cf6','#10b981','#ec4899','#06b6d4','#84cc16'];
+let   gjColorIdx = 0;
+const gjColorMap = {}; // id -> color
+
+function renderGeoJSONList(layers) {
+    const list = document.getElementById('geojson-layers-list');
+    if (!layers.length) {
+        list.innerHTML = '<div style="text-align:center;padding:24px;color:#9ca3af;">Nenhuma camada guardada ainda.</div>';
+        return;
+    }
+
+    list.innerHTML = `
+        <table class="data-table" style="font-size:13px; width:100%; border-collapse:collapse;">
+            <thead>
+                <tr>
+                    <th>Nome</th>
+                    <th>Features</th>
+                    <th>Terreno</th>
+                    <th>Data</th>
+                    <th style="text-align:center;">Acções</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${layers.map(l => {
+                    const dt = new Date(l.created_at).toLocaleDateString('pt-PT');
+                    const onMap = !!geojsonOverlayLayers[l.id];
+                    const color = gjColorMap[l.id] || GJ_COLORS[gjColorIdx % GJ_COLORS.length];
+                    return `
+                    <tr>
+                        <td>
+                            <span style="display:inline-block;width:10px;height:10px;border-radius:50%;
+                                         background:${escHtml(color)};margin-right:5px;"></span>
+                            <strong>${escHtml(l.name)}</strong>
+                            ${l.description ? `<div style="font-size:11px;color:#9ca3af;margin-top:1px;">${escHtml(l.description)}</div>` : ''}
+                        </td>
+                        <td style="text-align:center;">${l.feature_count}</td>
+                        <td>${l.terrain_name ? escHtml(l.terrain_name) : '<span style="color:#d1d5db">—</span>'}</td>
+                        <td style="white-space:nowrap;">${dt}</td>
+                        <td style="text-align:center; white-space:nowrap;">
+                            <button class="btn btn-sm ${onMap ? 'btn-primary' : 'btn-secondary'}"
+                                    id="gj-map-btn-${l.id}"
+                                    data-id="${l.id}"
+                                    onclick="toggleGeoJSONOnFieldMap(this.dataset.id)"
+                                    title="${onMap ? 'Remover do mapa' : 'Mostrar no mapa'}"
+                                    style="margin-right:4px;">
+                                ${onMap ? '🗺️ Visível' : '👁️ Mostrar'}
+                            </button>
+                            <button class="btn btn-danger btn-sm"
+                                    data-id="${l.id}"
+                                    data-name="${escHtml(l.name)}"
+                                    onclick="deleteGeoJSONLayer(this.dataset.id, this.dataset.name)"
+                                    title="Eliminar">🗑️</button>
+                        </td>
+                    </tr>`;
+                }).join('')}
+            </tbody>
+        </table>`;
+}
+
+// Mostrar/ocultar camada GeoJSON no mapa de medições
+function toggleGeoJSONOnFieldMap(id) {
+    id = String(id);
+    if (geojsonOverlayLayers[id]) {
+        // Remover
+        fieldMap.removeLayer(geojsonOverlayLayers[id]);
+        if (fieldLayersControl) fieldLayersControl.removeLayer(geojsonOverlayLayers[id]);
+        delete geojsonOverlayLayers[id];
+        const btn = document.getElementById('gj-map-btn-' + id);
+        if (btn) { btn.textContent = '👁️ Mostrar'; btn.className = 'btn btn-sm btn-secondary'; }
+        return;
+    }
+
+    // Buscar dados e adicionar
+    const btn = document.getElementById('gj-map-btn-' + id);
+    if (btn) btn.textContent = '⏳…';
+
+    const fd = new FormData();
+    fd.append('action', 'get_geojson_data');
+    fd.append('id', id);
+
+    fetch('', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success || !data.geojson) {
+                showAlert('Erro ao carregar GeoJSON: ' + (data.message || '?'), 'error');
+                if (btn) { btn.textContent = '👁️ Mostrar'; btn.className = 'btn btn-sm btn-secondary'; }
+                return;
+            }
+
+            // Atribuir cor persistente
+            if (!gjColorMap[id]) {
+                gjColorMap[id] = GJ_COLORS[gjColorIdx % GJ_COLORS.length];
+                gjColorIdx++;
+            }
+            const color = gjColorMap[id];
+
+            let gjData;
+            try { gjData = JSON.parse(data.geojson); } catch(e) {
+                showAlert('GeoJSON corrompido na base de dados.', 'error');
+                if (btn) { btn.textContent = '👁️ Mostrar'; btn.className = 'btn btn-sm btn-secondary'; }
+                return;
+            }
+
+            const layer = L.geoJSON(gjData, {
+                style: { color: color, weight: 2, opacity: 0.9, fillOpacity: 0.25, fillColor: color },
+                pointToLayer: function(feature, latlng) {
+                    return L.circleMarker(latlng, {
+                        radius: 6, fillColor: color, color: '#fff',
+                        weight: 1.5, opacity: 1, fillOpacity: 0.85
+                    });
+                },
+                onEachFeature: function(feature, lyr) {
+                    const props = feature.properties || {};
+                    const keys  = Object.keys(props);
+                    if (!keys.length) return;
+                    const html = keys.slice(0, 10).map(k =>
+                        `<tr><td style="color:#6b7280;padding-right:8px;font-size:11px;">${escHtml(k)}</td>
+                             <td style="font-size:12px;"><strong>${escHtml(String(props[k]))}</strong></td></tr>`
+                    ).join('');
+                    lyr.bindPopup(`<div style="max-height:200px;overflow:auto;">
+                        <div style="font-weight:700;font-size:13px;margin-bottom:6px;">
+                            ${escHtml(data.name)}
+                        </div>
+                        <table>${html}</table>
+                    </div>`);
+                }
+            }).addTo(fieldMap);
+
+            geojsonOverlayLayers[id] = layer;
+            if (fieldLayersControl) fieldLayersControl.addOverlay(layer, '🗺️ ' + escHtml(data.name));
+
+            // Fazer zoom para a camada
+            try { fieldMap.fitBounds(layer.getBounds(), { padding: [30, 30] }); } catch(e) {}
+
+            if (btn) { btn.textContent = '🗺️ Visível'; btn.className = 'btn btn-sm btn-primary'; }
+        })
+        .catch(() => {
+            showAlert('Erro de rede ao carregar GeoJSON.', 'error');
+            if (btn) { btn.textContent = '👁️ Mostrar'; btn.className = 'btn btn-sm btn-secondary'; }
+        });
+}
+
+// Eliminar camada
+function deleteGeoJSONLayer(id, name) {
+    if (!confirm(`Eliminar a camada "${name}"?\nEsta acção não pode ser desfeita.`)) return;
+
+    const fd = new FormData();
+    fd.append('action', 'delete_geojson');
+    fd.append('id', id);
+
+    fetch('', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                // Remover do mapa se visível
+                if (geojsonOverlayLayers[id]) {
+                    fieldMap.removeLayer(geojsonOverlayLayers[id]);
+                    if (fieldLayersControl) fieldLayersControl.removeLayer(geojsonOverlayLayers[id]);
+                    delete geojsonOverlayLayers[id];
+                }
+                loadGeoJSONLayers();
+            } else {
+                showAlert('Erro: ' + (data.message || 'Falha.'), 'error');
+            }
+        })
+        .catch(() => showAlert('Erro de rede.', 'error'));
 }
 
 // ── Util ──────────────────────────────────────────────────────────────────────

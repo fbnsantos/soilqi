@@ -258,6 +258,143 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                     $response['message'] = 'Não encontrada ou sem permissão.';
                 }
                 break;
+
+            // ── Camadas GeoJSON ────────────────────────────────────────────────
+
+            case 'save_geojson':
+                $name       = trim(sanitizeInput($_POST['name'] ?? ''));
+                $descr      = trim(sanitizeInput($_POST['description'] ?? ''));
+                $terrain_id = !empty($_POST['terrain_id']) ? intval($_POST['terrain_id']) : null;
+                $geojson    = $_POST['geojson_data'] ?? '';
+
+                if (!$name)    { $response['message'] = 'Nome obrigatório.'; break; }
+                if (!$geojson) { $response['message'] = 'Dados GeoJSON em falta.'; break; }
+
+                // Validar JSON e calcular bounding box + contagem de features
+                $parsed = json_decode($geojson, true);
+                if (!$parsed) { $response['message'] = 'GeoJSON inválido (JSON malformado).'; break; }
+
+                $features = [];
+                if (($parsed['type'] ?? '') === 'FeatureCollection') {
+                    $features = $parsed['features'] ?? [];
+                } elseif (($parsed['type'] ?? '') === 'Feature') {
+                    $features = [$parsed];
+                }
+                $fcount = count($features);
+
+                // Calcular bounding box a partir das coordenadas
+                $minLat = $maxLat = $minLng = $maxLng = null;
+                function extractCoords($geom, &$minLat, &$maxLat, &$minLng, &$maxLng) {
+                    if (!$geom) return;
+                    $type = $geom['type'] ?? '';
+                    $coords = $geom['coordinates'] ?? null;
+                    if (!$coords) return;
+                    $flat = [];
+                    array_walk_recursive($coords, function($v) use (&$flat) { $flat[] = $v; });
+                    // pairs [lng, lat]
+                    $coordList = is_array($coords[0] ?? null) ? $coords : [$coords];
+                    // flatten to list of [lng, lat] pairs
+                    function flattenCoords($c, &$out) {
+                        if (!is_array($c)) return;
+                        if (count($c) >= 2 && is_numeric($c[0]) && is_numeric($c[1])) {
+                            $out[] = $c; return;
+                        }
+                        foreach ($c as $child) flattenCoords($child, $out);
+                    }
+                    $pts = [];
+                    flattenCoords($coords, $pts);
+                    foreach ($pts as $pt) {
+                        $lng = (float)$pt[0]; $lat = (float)$pt[1];
+                        if ($minLat === null || $lat < $minLat) $minLat = $lat;
+                        if ($maxLat === null || $lat > $maxLat) $maxLat = $lat;
+                        if ($minLng === null || $lng < $minLng) $minLng = $lng;
+                        if ($maxLng === null || $lng > $maxLng) $maxLng = $lng;
+                    }
+                }
+                foreach ($features as $f) {
+                    extractCoords($f['geometry'] ?? null, $minLat, $maxLat, $minLng, $maxLng);
+                }
+
+                $stmt = $pdo->prepare("
+                    INSERT INTO field_geojson
+                        (user_id, terrain_id, name, description, geojson_data,
+                         feature_count, bbox_min_lat, bbox_max_lat, bbox_min_lng, bbox_max_lng)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ");
+                $stmt->execute([
+                    $currentUser['id'], $terrain_id, $name, $descr ?: null, $geojson,
+                    $fcount, $minLat, $maxLat, $minLng, $maxLng
+                ]);
+                $response['success'] = true;
+                $response['id']      = (int)$pdo->lastInsertId();
+                $response['message'] = "GeoJSON \"{$name}\" guardado ({$fcount} feature(s)).";
+                break;
+
+            case 'get_geojson_layers':
+                $where  = [];
+                $params = [];
+                if (!$isAdmin) {
+                    $where[]  = 'g.user_id = ?';
+                    $params[] = $currentUser['id'];
+                }
+                $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+                $stmt = $pdo->prepare("
+                    SELECT g.id, g.name, g.description, g.feature_count,
+                           g.bbox_min_lat, g.bbox_max_lat, g.bbox_min_lng, g.bbox_max_lng,
+                           g.created_at, t.name AS terrain_name, u.username
+                    FROM field_geojson g
+                    LEFT JOIN terrains t ON t.id = g.terrain_id
+                    LEFT JOIN users    u ON u.id = g.user_id
+                    $wc
+                    ORDER BY g.created_at DESC
+                ");
+                $stmt->execute($params);
+                $response['success'] = true;
+                $response['layers']  = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                break;
+
+            case 'get_geojson_data':
+                $id = intval($_POST['id'] ?? 0);
+                if ($id <= 0) { $response['message'] = 'ID inválido.'; break; }
+
+                if ($isAdmin) {
+                    $stmt = $pdo->prepare("SELECT id, name, geojson_data, bbox_min_lat, bbox_max_lat, bbox_min_lng, bbox_max_lng FROM field_geojson WHERE id = ?");
+                    $stmt->execute([$id]);
+                } else {
+                    $stmt = $pdo->prepare("SELECT id, name, geojson_data, bbox_min_lat, bbox_max_lat, bbox_min_lng, bbox_max_lng FROM field_geojson WHERE id = ? AND user_id = ?");
+                    $stmt->execute([$id, $currentUser['id']]);
+                }
+                $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                if (!$row) { $response['message'] = 'Camada não encontrada ou sem permissão.'; break; }
+
+                $response['success']     = true;
+                $response['id']          = (int)$row['id'];
+                $response['name']        = $row['name'];
+                $response['geojson']     = $row['geojson_data'];
+                $response['bbox_min_lat'] = $row['bbox_min_lat'] !== null ? (float)$row['bbox_min_lat'] : null;
+                $response['bbox_max_lat'] = $row['bbox_max_lat'] !== null ? (float)$row['bbox_max_lat'] : null;
+                $response['bbox_min_lng'] = $row['bbox_min_lng'] !== null ? (float)$row['bbox_min_lng'] : null;
+                $response['bbox_max_lng'] = $row['bbox_max_lng'] !== null ? (float)$row['bbox_max_lng'] : null;
+                break;
+
+            case 'delete_geojson':
+                $id = intval($_POST['id'] ?? 0);
+                if ($id <= 0) { $response['message'] = 'ID inválido.'; break; }
+
+                if ($isAdmin) {
+                    $stmt = $pdo->prepare("DELETE FROM field_geojson WHERE id = ?");
+                    $stmt->execute([$id]);
+                } else {
+                    $stmt = $pdo->prepare("DELETE FROM field_geojson WHERE id = ? AND user_id = ?");
+                    $stmt->execute([$id, $currentUser['id']]);
+                }
+                if ($stmt->rowCount() > 0) {
+                    $response['success'] = true;
+                    $response['message'] = 'Camada GeoJSON eliminada.';
+                } else {
+                    $response['message'] = 'Não encontrada ou sem permissão.';
+                }
+                break;
         }
 
     } catch (PDOException $e) {
@@ -587,6 +724,70 @@ try {
             em PNG com ficheiro de georreferenciação (.pgw) compatível com QGIS e outros SIG.
         </p>
         <div id="saved-interp-list">
+            <div style="text-align:center; padding:20px; color:#9ca3af;">A carregar…</div>
+        </div>
+    </div>
+</div>
+
+<!-- Camadas GeoJSON -->
+<div class="section interp-section">
+    <div class="section-title" style="cursor:pointer; user-select:none;" onclick="toggleGeoJSONPanel()">
+        <h3>🗺️ Camadas GeoJSON</h3>
+        <span id="geojson-toggle-btn" class="btn btn-secondary btn-sm">▼ Expandir</span>
+    </div>
+    <div id="geojson-panel" style="display:none; margin-top:16px;">
+        <p style="color:#6b7280; font-size:13px; margin-bottom:14px;">
+            Importe ficheiros <strong>.geojson</strong> ou <strong>.json</strong> para guardar camadas vectoriais
+            (polígonos, linhas, pontos) na base de dados e visualizá-las sobreposta ao mapa.
+        </p>
+
+        <!-- Formulário de importação -->
+        <div style="background:#f8fafc; border:1.5px dashed #94a3b8; border-radius:12px; padding:16px; margin-bottom:16px;">
+            <div style="font-size:12px; font-weight:700; color:#374151; text-transform:uppercase;
+                        letter-spacing:.5px; margin-bottom:12px;">📂 Importar novo ficheiro</div>
+            <div class="field-filters" style="flex-wrap:wrap; gap:10px;">
+                <div class="filter-group" style="flex:1; min-width:180px;">
+                    <label>Nome da camada *</label>
+                    <input id="gj-name" type="text" placeholder="Ex: Parcelas Norte 2026"
+                           style="width:100%;">
+                </div>
+                <div class="filter-group" style="flex:1; min-width:140px;">
+                    <label>Terreno (opcional)</label>
+                    <select id="gj-terrain" style="width:100%;">
+                        <option value="">— Nenhum —</option>
+                        <?php foreach ($filterTerrains as $t): ?>
+                            <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="filter-group" style="flex:2; min-width:220px;">
+                    <label>Descrição (opcional)</label>
+                    <input id="gj-description" type="text" placeholder="Notas sobre esta camada"
+                           style="width:100%;">
+                </div>
+            </div>
+            <div style="margin-top:10px;">
+                <label id="gj-file-label" style="
+                    display:flex; align-items:center; gap:10px; cursor:pointer;
+                    padding:12px 14px; border:2px dashed #cbd5e1; border-radius:10px;
+                    background:#fff; transition:border-color .2s; font-size:13px; color:#64748b;">
+                    📁 Clique para selecionar ficheiro .geojson / .json
+                    <input id="gj-file" type="file" accept=".geojson,.json,application/json,application/geo+json"
+                           style="display:none" onchange="onGeoJSONFileSelected(this)">
+                </label>
+                <div id="gj-file-info" style="font-size:12px; color:#6b7280; margin-top:6px; min-height:16px;"></div>
+            </div>
+            <div style="margin-top:12px; display:flex; gap:8px; align-items:center;">
+                <button class="btn btn-primary btn-sm" onclick="saveGeoJSON()" id="gj-save-btn" disabled
+                        style="padding:8px 18px;">
+                    💾 Guardar na BD
+                </button>
+                <span id="gj-save-status" style="font-size:12px; color:#6b7280;"></span>
+            </div>
+        </div>
+
+        <!-- Lista de camadas guardadas -->
+        <div id="geojson-layers-list">
             <div style="text-align:center; padding:20px; color:#9ca3af;">A carregar…</div>
         </div>
     </div>

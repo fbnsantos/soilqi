@@ -132,6 +132,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                     $response['message'] = 'Tabela de interpolações não existe. Aplique a migração 002 em Admin → Migrações.';
                 }
                 break;
+
+            // ── Camadas GeoJSON ────────────────────────────────────────────────
+
+            case 'get_geojson_layers':
+                try {
+                    $stmt = $pdo->prepare("
+                        SELECT g.id, g.name, g.description, g.feature_count,
+                               g.bbox_min_lat, g.bbox_max_lat, g.bbox_min_lng, g.bbox_max_lng,
+                               g.created_at, t.name AS terrain_name
+                        FROM field_geojson g
+                        LEFT JOIN terrains t ON t.id = g.terrain_id
+                        WHERE g.user_id = ?
+                        ORDER BY g.created_at DESC
+                    ");
+                    $stmt->execute([$currentUser['id']]);
+                    $response['success'] = true;
+                    $response['layers']  = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                } catch (PDOException $tableErr) {
+                    $response['success'] = true;
+                    $response['layers']  = [];   // tabela ainda não existe — ignorar
+                }
+                break;
+
+            case 'get_geojson_data':
+                $id = intval($_POST['id'] ?? 0);
+                if ($id <= 0) { $response['message'] = 'ID inválido.'; break; }
+                try {
+                    $stmt = $pdo->prepare("
+                        SELECT id, name, geojson_data,
+                               bbox_min_lat, bbox_max_lat, bbox_min_lng, bbox_max_lng
+                        FROM field_geojson
+                        WHERE id = ? AND user_id = ?
+                    ");
+                    $stmt->execute([$id, $currentUser['id']]);
+                    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$row) { $response['message'] = 'Camada não encontrada.'; break; }
+                    $response['success'] = true;
+                    $response['id']      = (int)$row['id'];
+                    $response['name']    = $row['name'];
+                    $response['geojson'] = $row['geojson_data'];
+                } catch (PDOException $tableErr) {
+                    $response['message'] = 'Tabela não existe. Aplique a migração 005 em Admin → Migrações.';
+                }
+                break;
         }
     } catch (PDOException $e) {
         $response['message'] = 'Erro no sistema: ' . $e->getMessage();
@@ -247,6 +291,17 @@ if ($isLoggedIn) {
                 </div>
                 <div id="map-interp-list" style="color:#9ca3af; font-size:13px; padding:2px 0;">
                     Selecione um terreno para ver as interpolações guardadas.
+                </div>
+            </div>
+
+            <!-- Camadas GeoJSON -->
+            <div class="section">
+                <h3>🗺️ Camadas GeoJSON</h3>
+                <p style="font-size:12px; color:#9ca3af; margin:-4px 0 10px;">
+                    Ficheiros GeoJSON importados no separador Medições de Campo.
+                </p>
+                <div id="map-geojson-list" style="font-size:13px; color:#9ca3af; padding:2px 0;">
+                    <div style="text-align:center; padding:10px;">A carregar…</div>
                 </div>
             </div>
         </div>
