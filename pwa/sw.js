@@ -3,7 +3,7 @@
 // ── VERSÃO ────────────────────────────────────────────────────────────────────
 // Muda este número sempre que houver uma nova versão para forçar a actualização
 // nos telemóveis dos utilizadores.
-const CACHE_VERSION = 'v12'; // 2026-05-27 — photo thumbnail + version indicator
+const CACHE_VERSION = 'v13'; // 2026-05-27 — force immediate SW update check on load
 const CACHE = `soilqi-field-${CACHE_VERSION}`;
 
 const STATIC = [

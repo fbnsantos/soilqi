@@ -103,6 +103,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             swReg = await navigator.serviceWorker.register('sw.js');
 
+            // Forçar verificação imediata de actualizações em cada carregamento
+            // (sem isto, o browser pode esperar até 24h antes de verificar nova versão)
+            swReg.update().catch(() => {});
+
             // Detectar controller já existente antes de qualquer mudança
             const hadController = !!navigator.serviceWorker.controller;
 

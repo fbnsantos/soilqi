@@ -1,0 +1,22 @@
+# ── SoilQI Field PWA ─────────────────────────────────────────────────────────
+# O sw.js NUNCA deve ser cacheado pelo HTTP — o browser precisa de o buscar
+# sempre para detetar actualizações. Sem isto, a versão antiga pode ficar
+# presa no HTTP cache durante horas/dias.
+
+<Files "sw.js">
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+</Files>
+
+# O manifest também não deve ser cacheado para que mudanças de ícone/nome
+# sejam captadas rapidamente.
+<Files "manifest.json">
+    Header set Cache-Control "no-cache, must-revalidate"
+</Files>
+
+# Assets JS/CSS têm versão gerida pelo SW — podem ter cache curta no HTTP
+# (o SW serve a versão correcta de qualquer forma)
+<FilesMatch "\.(js|css)$">
+    Header set Cache-Control "max-age=3600, must-revalidate"
+</FilesMatch>
