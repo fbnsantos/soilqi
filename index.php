@@ -60,6 +60,15 @@ if (!file_exists($tabFile)) {
     die("Erro: Ficheiro do tab não encontrado: {$tabFile}");
 }
 
+// ── Intercepção de AJAX ──────────────────────────────────────────────────────
+// As chamadas AJAX dos tabs fazem POST com um campo 'action'.
+// Têm de ser tratadas ANTES de qualquer HTML, senão o JSON fica embrulhado
+// na página e o r.json() falha no cliente.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    include $tabFile;   // o tab chama exit() após json_encode()
+    exit;               // segurança: garante que o HTML não é enviado
+}
+
 ?>
 <!DOCTYPE html>
 <html lang="pt">
