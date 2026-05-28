@@ -576,20 +576,8 @@ function pip(lat, lng, poly) {
     return inside;
 }
 
-// ── UI: mostrar/ocultar parâmetros do método seleccionado ────────────────────
-function onInterpMethodChange() {
-    const method = document.getElementById('interp-method')?.value || 'idw';
-    const show = {
-        'ipar-idw':     method === 'idw',
-        'ipar-kriging':  method === 'kriging',
-        'ipar-kriging2': method === 'kriging',
-        'ipar-tps':      method === 'tps',
-    };
-    Object.entries(show).forEach(([id, visible]) => {
-        const el = document.getElementById(id);
-        if (el) el.style.display = visible ? '' : 'none';
-    });
-}
+// onInterpMethodChange — reservado para futuras extensões
+function onInterpMethodChange() {}
 
 // ── UI: toggle painel ─────────────────────────────────────────────────────────
 function toggleInterpPanel() {
