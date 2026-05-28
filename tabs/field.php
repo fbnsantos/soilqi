@@ -833,13 +833,39 @@ try {
                 </select>
             </div>
 
-            <!-- ── Potência p (IDW; ignorado nos outros métodos) ── -->
-            <div class="filter-group">
+            <!-- ── Parâmetros IDW ── -->
+            <div id="ipar-idw" class="filter-group">
                 <label>Potência p: <span id="interp-power-val">2</span></label>
                 <input type="range" id="interp-power" min="1" max="5" step="0.5" value="2"
                        oninput="document.getElementById('interp-power-val').textContent=this.value"
                        style="min-width:100px; accent-color:#667eea;"
-                       title="Expoente de distância (IDW). Não afecta Kriging, TPS ou NN.">
+                       title="p=1 suave/global · p≥3 abrupto/local">
+            </div>
+
+            <!-- ── Parâmetros Kriging ── -->
+            <div id="ipar-kriging" class="filter-group" style="display:none;">
+                <label>Variograma</label>
+                <select id="interp-variogram">
+                    <option value="spherical">Esférico</option>
+                    <option value="exponential">Exponencial</option>
+                    <option value="gaussian">Gaussiano</option>
+                </select>
+            </div>
+            <div id="ipar-kriging2" class="filter-group" style="display:none;">
+                <label>Nugget: <span id="interp-nugget-val">0</span>%</label>
+                <input type="range" id="interp-nugget" min="0" max="40" step="5" value="0"
+                       oninput="document.getElementById('interp-nugget-val').textContent=this.value"
+                       style="min-width:100px; accent-color:#667eea;"
+                       title="Discontinuidade à origem (ruído de medição)">
+            </div>
+
+            <!-- ── Parâmetros TPS ── -->
+            <div id="ipar-tps" class="filter-group" style="display:none;">
+                <label>Suavização: <span id="interp-tps-smooth-val">0</span></label>
+                <input type="range" id="interp-tps-smooth" min="0" max="50" value="0"
+                       oninput="document.getElementById('interp-tps-smooth-val').textContent=this.value"
+                       style="min-width:100px; accent-color:#667eea;"
+                       title="0 = passa exactamente pelos pontos · 50 = superfície mais suave">
             </div>
 
             <div class="filter-group">
