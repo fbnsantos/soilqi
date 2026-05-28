@@ -440,8 +440,8 @@ function _matVec(A, v) {
     return A.map(row => row.reduce((s, a, j) => s + a * v[j], 0));
 }
 
-// ── Kriging Ordinária (variograma esférico auto-ajustado) ─────────────────────
-function buildKriging(pts) {
+// ── Kriging Ordinária (variograma auto-ajustado, modelo e nugget configuráveis) ─
+function buildKriging(pts, variogramType = 'spherical', nuggetPct = 0) {
     const n    = pts.length;
     const cosL = Math.cos(pts.reduce((s, p) => s + p.lat, 0) / n * Math.PI / 180);
 
@@ -454,21 +454,32 @@ function buildKriging(pts) {
         })
     );
 
-    // Auto-ajuste do variograma esférico: nugget=0, sill=variância, range=65º percentil
+    // Auto-ajuste: sill=variância, range=65º percentil das distâncias, nugget=% do sill
     const vals  = pts.map(p => p.v);
     const mean  = vals.reduce((a, b) => a + b, 0) / n;
     const sill  = Math.max(vals.reduce((a, v) => a + (v - mean) ** 2, 0) / n, 1e-10);
     const flatH = [];
     for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) flatH.push(h[i][j]);
     flatH.sort((a, b) => a - b);
-    const range = flatH[Math.floor(flatH.length * 0.65)] || flatH[flatH.length - 1] || 1;
+    const range  = flatH[Math.floor(flatH.length * 0.65)] || flatH[flatH.length - 1] || 1;
+    const nugget = (nuggetPct / 100) * sill;
+    const pSill  = sill - nugget; // sill parcial (continuidade)
 
-    // Covariância esférica: C(h) = sill*(1 − 1.5r + 0.5r³) para r=h/range ≤ 1; 0 caso contrário
+    // Função de covariância: C(0) = sill; C(h>0) depende do modelo
     function cov(d) {
-        if (d <= 0)     return sill;
-        if (d >= range) return 0;
+        if (d <= 0) return sill;
+        if (variogramType === 'exponential') {
+            // Exponencial: alcance prático ≈ 3·range → exp(-3)≈0.05
+            return nugget + pSill * Math.exp(-3 * d / range);
+        }
+        if (variogramType === 'gaussian') {
+            // Gaussiano: alcance prático ≈ √3·range
+            return nugget + pSill * Math.exp(-3 * (d / range) ** 2);
+        }
+        // Esférico (default)
+        if (d >= range) return nugget;
         const r = d / range;
-        return sill * (1 - 1.5 * r + 0.5 * r * r * r);
+        return nugget + pSill * (1 - 1.5 * r + 0.5 * r * r * r);
     }
 
     // Matriz kriging (n+1)×(n+1) com multiplicador de Lagrange
@@ -476,7 +487,7 @@ function buildKriging(pts) {
         Array.from({ length: n + 1 }, (_, j) => {
             if (i === n && j === n) return 0;
             if (i === n || j === n) return 1;
-            return cov(h[i][j]) + (i === j ? sill * 1e-6 : 0); // regularização diagonal
+            return cov(h[i][j]) + (i === j ? sill * 1e-6 : 0); // jitter de estabilidade
         })
     );
 
@@ -494,8 +505,8 @@ function buildKriging(pts) {
     };
 }
 
-// ── Thin Plate Spline ─────────────────────────────────────────────────────────
-function buildTPS(pts) {
+// ── Thin Plate Spline (com parâmetro de suavização λ) ────────────────────────
+function buildTPS(pts, smoothVal = 0) {
     const n   = pts.length;
     const sz  = n + 3;
     const phi = r => (r < 1e-10 ? 0 : r * r * Math.log(r)); // φ(r) = r²·ln(r)
@@ -516,10 +527,20 @@ function buildTPS(pts) {
             for (let j = 0; j < n; j++) {
                 row[j] = k === 0 ? 1 : k === 1 ? pts[j].lat : pts[j].lng;
             }
-            // row[sz] = 0 (restrição de suavidade)
         }
         return row;
     });
+
+    // Suavização λ: adicionar λ·I à sub-matriz Φ (só linhas/colunas 0..n-1)
+    // λ é escalado pelo valor máximo off-diagonal de Φ para ser independente da escala
+    if (smoothVal > 0) {
+        let maxPhi = 0;
+        for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+            if (i !== j) maxPhi = Math.max(maxPhi, Math.abs(M[i][j]));
+        }
+        const lambda = (smoothVal / 50) * maxPhi;
+        for (let i = 0; i < n; i++) M[i][i] += lambda;
+    }
 
     _gauss(M, sz);
     const coeffs = M.map(row => row[sz]);
@@ -553,6 +574,21 @@ function pip(lat, lng, poly) {
         }
     }
     return inside;
+}
+
+// ── UI: mostrar/ocultar parâmetros do método seleccionado ────────────────────
+function onInterpMethodChange() {
+    const method = document.getElementById('interp-method')?.value || 'idw';
+    const show = {
+        'ipar-idw':     method === 'idw',
+        'ipar-kriging':  method === 'kriging',
+        'ipar-kriging2': method === 'kriging',
+        'ipar-tps':      method === 'tps',
+    };
+    Object.entries(show).forEach(([id, visible]) => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = visible ? '' : 'none';
+    });
 }
 
 // ── UI: toggle painel ─────────────────────────────────────────────────────────
@@ -601,8 +637,11 @@ async function generateInterpolation() {
     const colormap  = document.getElementById('interp-colormap').value;
     const resPx     = parseInt(document.getElementById('interp-res').value);
     const opacity   = parseInt(document.getElementById('interp-opacity').value) / 100;
-    const method    = document.getElementById('interp-method')?.value || 'idw';
-    const power     = 2; // expoente IDW
+    const method      = document.getElementById('interp-method')?.value || 'idw';
+    const power       = parseFloat(document.getElementById('interp-power')?.value      || 2);
+    const variogram   = document.getElementById('interp-variogram')?.value             || 'spherical';
+    const nuggetPct   = parseFloat(document.getElementById('interp-nugget')?.value     || 0);
+    const tpsSmooth   = parseFloat(document.getElementById('interp-tps-smooth')?.value || 0);
 
     if (!terrainId) { setInterpStatus('⚠️ Selecione um campo (terreno).'); return; }
 
@@ -642,7 +681,9 @@ async function generateInterpolation() {
         setInterpStatus(`⏳ A construir modelo ${INTERP_METHOD_LABELS[method]} (${pts.length} pontos)…`);
         await new Promise(r => setTimeout(r, 30));
         try {
-            predictor = method === 'kriging' ? buildKriging(pts) : buildTPS(pts);
+            predictor = method === 'kriging'
+                ? buildKriging(pts, variogram, nuggetPct)
+                : buildTPS(pts, tpsSmooth);
         } catch (err) {
             setInterpStatus('❌ Erro ao construir modelo: ' + err.message);
             return;

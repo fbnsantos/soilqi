@@ -825,12 +825,45 @@ try {
 
             <div class="filter-group">
                 <label>Método</label>
-                <select id="interp-method">
+                <select id="interp-method" onchange="onInterpMethodChange()">
                     <option value="idw">IDW — Distância Inversa</option>
                     <option value="kriging">Kriging Ordinária</option>
                     <option value="tps">Thin Plate Spline</option>
                     <option value="nn">Vizinho mais próximo</option>
                 </select>
+            </div>
+
+            <!-- ── Parâmetros IDW ── -->
+            <div id="ipar-idw" class="filter-group">
+                <label>Potência p: <span id="interp-power-val">2</span></label>
+                <input type="range" id="interp-power" min="1" max="5" step="0.5" value="2"
+                       oninput="document.getElementById('interp-power-val').textContent=this.value"
+                       style="min-width:100px; accent-color:#667eea;">
+            </div>
+
+            <!-- ── Parâmetros Kriging ── -->
+            <div id="ipar-kriging" class="filter-group" style="display:none;">
+                <label>Variograma</label>
+                <select id="interp-variogram">
+                    <option value="spherical">Esférico</option>
+                    <option value="exponential">Exponencial</option>
+                    <option value="gaussian">Gaussiano</option>
+                </select>
+            </div>
+            <div id="ipar-kriging2" class="filter-group" style="display:none;">
+                <label>Nugget: <span id="interp-nugget-val">0</span>%</label>
+                <input type="range" id="interp-nugget" min="0" max="40" step="5" value="0"
+                       oninput="document.getElementById('interp-nugget-val').textContent=this.value"
+                       style="min-width:100px; accent-color:#667eea;">
+            </div>
+
+            <!-- ── Parâmetros TPS ── -->
+            <div id="ipar-tps" class="filter-group" style="display:none;">
+                <label>Suavização: <span id="interp-tps-smooth-val">0</span></label>
+                <input type="range" id="interp-tps-smooth" min="0" max="50" value="0"
+                       oninput="document.getElementById('interp-tps-smooth-val').textContent=this.value"
+                       style="min-width:100px; accent-color:#667eea;"
+                       title="0 = interpolação exacta; valores maiores = superfície mais suave">
             </div>
 
             <div class="filter-group">
