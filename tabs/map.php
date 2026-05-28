@@ -296,11 +296,12 @@ if ($isLoggedIn) {
                                   display:flex; justify-content:space-between; align-items:center;
                                   margin-bottom:4px;">
                         <span>Opacidade</span>
-                        <span id="map-interp-opacity-val" style="font-weight:400; color:#9ca3af;">75%</span>
+                        <span id="map-interp-opacity-val" style="font-weight:400; color:#9ca3af;">100%</span>
                     </label>
-                    <input type="range" id="map-interp-opacity" min="0" max="100" value="75"
+                    <input type="range" id="map-interp-opacity" min="0" max="100" value="100"
                            oninput="setMapInterpOpacity(this.value)"
                            style="width:100%; accent-color:#667eea; cursor:pointer; height:4px;">
+
                 </div>
                 <div id="map-interp-list" style="color:#9ca3af; font-size:13px; padding:2px 0;">
                     Selecione um terreno para ver as interpolações guardadas.

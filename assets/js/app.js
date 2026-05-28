@@ -533,7 +533,7 @@ function toggleMapInterp(id) {
 // ── Opacidade das interpolações ───────────────────────────────────────────────
 function _mapInterpOpacity() {
     const el = document.getElementById('map-interp-opacity');
-    return el ? (parseInt(el.value, 10) / 100) : 0.75;
+    return el ? (parseInt(el.value, 10) / 100) : 1.0;
 }
 
 function setMapInterpOpacity(val) {
