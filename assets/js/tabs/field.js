@@ -393,6 +393,150 @@ function idw(pts, lat, lng, power) {
     return ws > 0 ? vs / ws : null;
 }
 
+// ── Vizinho mais próximo ──────────────────────────────────────────────────────
+function nnValue(pts, lat, lng) {
+    const cosL = Math.cos(lat * Math.PI / 180);
+    let best = null, bestD = Infinity;
+    for (const p of pts) {
+        const d = (p.lat - lat) ** 2 + ((p.lng - lng) * cosL) ** 2;
+        if (d < bestD) { bestD = d; best = p.v; }
+    }
+    return best;
+}
+
+// ── Álgebra linear (Gauss-Jordan) ─────────────────────────────────────────────
+function _gauss(M, sz) {
+    // Eliminação de Gauss-Jordan in-place na matriz aumentada M
+    for (let col = 0; col < sz; col++) {
+        let maxRow = col;
+        for (let r = col + 1; r < sz; r++) {
+            if (Math.abs(M[r][col]) > Math.abs(M[maxRow][col])) maxRow = r;
+        }
+        [M[col], M[maxRow]] = [M[maxRow], M[col]];
+        const piv = M[col][col];
+        if (Math.abs(piv) < 1e-14) continue;
+        for (let j = col; j < M[col].length; j++) M[col][j] /= piv;
+        for (let r = 0; r < sz; r++) {
+            if (r === col) continue;
+            const f = M[r][col];
+            if (Math.abs(f) < 1e-14) continue;
+            for (let j = col; j < M[r].length; j++) M[r][j] -= f * M[col][j];
+        }
+    }
+}
+
+function _matInvert(A) {
+    const n = A.length;
+    const M = A.map((row, i) => {
+        const r = [...row, ...new Array(n).fill(0)];
+        r[n + i] = 1;
+        return r;
+    });
+    _gauss(M, n);
+    return M.map(row => row.slice(n));
+}
+
+function _matVec(A, v) {
+    return A.map(row => row.reduce((s, a, j) => s + a * v[j], 0));
+}
+
+// ── Kriging Ordinária (variograma esférico auto-ajustado) ─────────────────────
+function buildKriging(pts) {
+    const n    = pts.length;
+    const cosL = Math.cos(pts.reduce((s, p) => s + p.lat, 0) / n * Math.PI / 180);
+
+    // Distâncias par-a-par
+    const h = Array.from({ length: n }, (_, i) =>
+        pts.map((p, j) => {
+            const dlat = pts[i].lat - p.lat;
+            const dlng = (pts[i].lng - p.lng) * cosL;
+            return Math.sqrt(dlat * dlat + dlng * dlng);
+        })
+    );
+
+    // Auto-ajuste do variograma esférico: nugget=0, sill=variância, range=65º percentil
+    const vals  = pts.map(p => p.v);
+    const mean  = vals.reduce((a, b) => a + b, 0) / n;
+    const sill  = Math.max(vals.reduce((a, v) => a + (v - mean) ** 2, 0) / n, 1e-10);
+    const flatH = [];
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) flatH.push(h[i][j]);
+    flatH.sort((a, b) => a - b);
+    const range = flatH[Math.floor(flatH.length * 0.65)] || flatH[flatH.length - 1] || 1;
+
+    // Covariância esférica: C(h) = sill*(1 − 1.5r + 0.5r³) para r=h/range ≤ 1; 0 caso contrário
+    function cov(d) {
+        if (d <= 0)     return sill;
+        if (d >= range) return 0;
+        const r = d / range;
+        return sill * (1 - 1.5 * r + 0.5 * r * r * r);
+    }
+
+    // Matriz kriging (n+1)×(n+1) com multiplicador de Lagrange
+    const K = Array.from({ length: n + 1 }, (_, i) =>
+        Array.from({ length: n + 1 }, (_, j) => {
+            if (i === n && j === n) return 0;
+            if (i === n || j === n) return 1;
+            return cov(h[i][j]) + (i === j ? sill * 1e-6 : 0); // regularização diagonal
+        })
+    );
+
+    const Kinv = _matInvert(K);
+
+    return function predict(lat, lng) {
+        const k = pts.map(p => {
+            const dlat = p.lat - lat;
+            const dlng = (p.lng - lng) * cosL;
+            return cov(Math.sqrt(dlat * dlat + dlng * dlng));
+        });
+        k.push(1); // restrição de não-enviesamento
+        const w = _matVec(Kinv, k);
+        return pts.reduce((z, p, i) => z + w[i] * p.v, 0);
+    };
+}
+
+// ── Thin Plate Spline ─────────────────────────────────────────────────────────
+function buildTPS(pts) {
+    const n   = pts.length;
+    const sz  = n + 3;
+    const phi = r => (r < 1e-10 ? 0 : r * r * Math.log(r)); // φ(r) = r²·ln(r)
+
+    // Sistema [Φ P; Pᵀ 0]·[w; a₀ a₁ a₂] = [z; 0 0 0]
+    const M = Array.from({ length: sz }, (_, i) => {
+        const row = new Array(sz + 1).fill(0);
+        if (i < n) {
+            for (let j = 0; j < n; j++) {
+                const dlat = pts[i].lat - pts[j].lat;
+                const dlng = pts[i].lng - pts[j].lng;
+                row[j] = phi(Math.sqrt(dlat * dlat + dlng * dlng));
+            }
+            row[n] = 1; row[n + 1] = pts[i].lat; row[n + 2] = pts[i].lng;
+            row[sz] = pts[i].v;
+        } else {
+            const k = i - n; // 0→const, 1→lat, 2→lng
+            for (let j = 0; j < n; j++) {
+                row[j] = k === 0 ? 1 : k === 1 ? pts[j].lat : pts[j].lng;
+            }
+            // row[sz] = 0 (restrição de suavidade)
+        }
+        return row;
+    });
+
+    _gauss(M, sz);
+    const coeffs = M.map(row => row[sz]);
+    const w = coeffs.slice(0, n);
+    const [a0, a1, a2] = coeffs.slice(n);
+
+    return function predict(lat, lng) {
+        let z = a0 + a1 * lat + a2 * lng;
+        for (let i = 0; i < n; i++) {
+            const dlat = pts[i].lat - lat;
+            const dlng = pts[i].lng - lng;
+            z += w[i] * phi(Math.sqrt(dlat * dlat + dlng * dlng));
+        }
+        return z;
+    };
+}
+
 // ── Point-in-polygon (ray casting) ───────────────────────────────────────────
 function pip(lat, lng, poly) {
     let inside = false;
@@ -444,12 +588,20 @@ function removeInterpolation() {
 }
 
 // ── Gerar interpolação ────────────────────────────────────────────────────────
+const INTERP_METHOD_LABELS = {
+    idw:     'IDW (p=2)',
+    kriging: 'Kriging Ordinária',
+    tps:     'Thin Plate Spline',
+    nn:      'Vizinho mais próximo'
+};
+
 async function generateInterpolation() {
     const terrainId = document.getElementById('interp-terrain-sel').value;
     const param     = document.getElementById('interp-param').value;
     const colormap  = document.getElementById('interp-colormap').value;
     const resPx     = parseInt(document.getElementById('interp-res').value);
     const opacity   = parseInt(document.getElementById('interp-opacity').value) / 100;
+    const method    = document.getElementById('interp-method')?.value || 'idw';
     const power     = 2; // expoente IDW
 
     if (!terrainId) { setInterpStatus('⚠️ Selecione um campo (terreno).'); return; }
@@ -459,8 +611,9 @@ async function generateInterpolation() {
         .filter(m => m[param] !== null && m[param] !== '' && m.latitude && m.longitude)
         .map(m => ({ lat: parseFloat(m.latitude), lng: parseFloat(m.longitude), v: parseFloat(m[param]) }));
 
-    if (pts.length < 2) {
-        setInterpStatus(`⚠️ São necessárias ≥ 2 medições com "${param}" nos filtros actuais.`);
+    const minPts = (method === 'tps' || method === 'kriging') ? 3 : 2;
+    if (pts.length < minPts) {
+        setInterpStatus(`⚠️ São necessárias ≥ ${minPts} medições com "${param}" nos filtros actuais.`);
         return;
     }
 
@@ -483,10 +636,21 @@ async function generateInterpolation() {
     const minLat = Math.min(...lats), maxLat = Math.max(...lats);
     const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
 
-    setInterpStatus(`⏳ A calcular IDW (${pts.length} pontos, ${resPx}×${resPx} px)…`);
+    // ── Fase de setup (modelos que requerem pré-computação) ───────────────────
+    let predictor = null;
+    if (method === 'kriging' || method === 'tps') {
+        setInterpStatus(`⏳ A construir modelo ${INTERP_METHOD_LABELS[method]} (${pts.length} pontos)…`);
+        await new Promise(r => setTimeout(r, 30));
+        try {
+            predictor = method === 'kriging' ? buildKriging(pts) : buildTPS(pts);
+        } catch (err) {
+            setInterpStatus('❌ Erro ao construir modelo: ' + err.message);
+            return;
+        }
+    }
 
-    // Dar tempo ao browser para mostrar a mensagem antes do cálculo intensivo
-    await new Promise(r => setTimeout(r, 30));
+    setInterpStatus(`⏳ A calcular ${INTERP_METHOD_LABELS[method]} (${pts.length} pontos, ${resPx}×${resPx} px)…`);
+    await new Promise(r => setTimeout(r, 20));
 
     const minV = Math.min(...pts.map(p => p.v));
     const maxV = Math.max(...pts.map(p => p.v));
@@ -503,9 +667,17 @@ async function generateInterpolation() {
         for (let px = 0; px < resPx; px++) {
             const lng = minLng + (px / resPx) * (maxLng - minLng);
             if (!pip(lat, lng, poly)) continue;
-            const val = idw(pts, lat, lng, power);
+
+            let val;
+            if (method === 'idw')  val = idw(pts, lat, lng, power);
+            else if (method === 'nn') val = nnValue(pts, lat, lng);
+            else val = predictor(lat, lng);
+
             if (val === null) continue;
-            const t = maxV > minV ? (val - minV) / (maxV - minV) : 0.5;
+
+            // Clamp ao intervalo dos dados (kriging/tps podem extrapolar)
+            const vc = Math.max(minV, Math.min(maxV, val));
+            const t  = maxV > minV ? (vc - minV) / (maxV - minV) : 0.5;
             const [r, g, b] = colorRamp(t, colormap);
             const i = (py * resPx + px) * 4;
             img.data[i] = r; img.data[i+1] = g; img.data[i+2] = b; img.data[i+3] = alpha;
@@ -526,12 +698,12 @@ async function generateInterpolation() {
     const paramLabels = { conductivity:'EC (mS/cm)', ph:'pH', temperature:'Temp. (°C)', moisture:'Hum. (%)' };
     drawInterpLegend(minV, maxV, colormap, paramLabels[param] || param);
 
-    setInterpStatus(`✅ Interpolação concluída — ${pts.length} pontos · ${resPx}×${resPx} px · IDW (p=${power})`);
+    setInterpStatus(`✅ ${INTERP_METHOD_LABELS[method]} concluído — ${pts.length} pontos · ${resPx}×${resPx} px`);
 
     // ── Guardar resultado para posterior salvamento ────────────────────────────
     lastInterpDataUrl = canvas.toDataURL('image/png');
     lastInterpBounds  = { minLat, maxLat, minLng, maxLng };
-    lastInterpMeta    = { minV, maxV, param, colormap,
+    lastInterpMeta    = { minV, maxV, param, colormap, method,
                           terrainId: terrainId,
                           resolution: resPx, power };
 
@@ -682,6 +854,7 @@ function saveInterpolation() {
     fd.append('colormap',   lastInterpMeta.colormap);
     fd.append('resolution', lastInterpMeta.resolution);
     fd.append('power',      lastInterpMeta.power);
+    fd.append('method',     lastInterpMeta.method || 'idw');
     fd.append('min_lat',    lastInterpBounds.minLat);
     fd.append('max_lat',    lastInterpBounds.maxLat);
     fd.append('min_lng',    lastInterpBounds.minLng);

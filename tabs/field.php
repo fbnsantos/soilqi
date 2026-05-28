@@ -246,6 +246,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 $colormap   = $_POST['colormap']  ?? '';
                 $resolution = intval($_POST['resolution'] ?? 256);
                 $power      = floatval($_POST['power']    ?? 2);
+                $method     = sanitizeInput($_POST['method'] ?? 'idw');
                 $min_lat    = floatval($_POST['min_lat']  ?? 0);
                 $max_lat    = floatval($_POST['max_lat']  ?? 0);
                 $min_lng    = floatval($_POST['min_lng']  ?? 0);
@@ -257,6 +258,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 if (!$name)    { $response['message'] = 'Nome obrigatório.'; break; }
                 if (!$png_b64) { $response['message'] = 'Dados PNG em falta.'; break; }
 
+                // Auto-migração: adicionar coluna method se não existir
+                try {
+                    $pdo->exec("ALTER TABLE field_interpolations ADD COLUMN method VARCHAR(20) NOT NULL DEFAULT 'idw'");
+                } catch (PDOException $ignored) { /* já existe */ }
+
                 // Strip data URL prefix and decode
                 $png_b64    = preg_replace('#^data:image/\w+;base64,#', '', $png_b64);
                 $png_binary = base64_decode($png_b64, true);
@@ -264,13 +270,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
 
                 $stmt = $pdo->prepare("
                     INSERT INTO field_interpolations
-                        (user_id, terrain_id, name, param, colormap, resolution, power,
+                        (user_id, terrain_id, name, param, colormap, resolution, power, method,
                          min_lat, max_lat, min_lng, max_lng, min_val, max_val, png_data)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ");
                 $stmt->execute([
                     $currentUser['id'], $terrain_id, $name, $param, $colormap,
-                    $resolution, $power,
+                    $resolution, $power, $method,
                     $min_lat, $max_lat, $min_lng, $max_lng,
                     $min_val, $max_val,
                     $png_binary
@@ -290,6 +296,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
                 $stmt = $pdo->prepare("
                     SELECT fi.id, fi.name, fi.param, fi.colormap, fi.resolution, fi.power,
+                           COALESCE(fi.method, 'idw') AS method,
                            fi.min_lat, fi.max_lat, fi.min_lng, fi.max_lng,
                            fi.min_val, fi.max_val, fi.created_at,
                            t.name AS terrain_name,
@@ -797,12 +804,12 @@ try {
 <!-- Painel de Interpolação Espacial -->
 <div class="section interp-section">
     <div class="section-title" style="cursor:pointer; user-select:none;" onclick="toggleInterpPanel()">
-        <h3>🎨 Interpolação Espacial IDW</h3>
+        <h3>🎨 Interpolação Espacial</h3>
         <span id="interp-toggle-btn" class="btn btn-secondary btn-sm">▼ Expandir</span>
     </div>
     <div id="interp-panel" style="display:none; margin-top:16px;">
         <p style="color:#6b7280; font-size:13px; margin-bottom:14px;">
-            Selecione um campo e um parâmetro para gerar uma superfície interpolada (IDW) visível sobre o terreno no mapa.
+            Selecione um campo, um método e um parâmetro para gerar uma superfície interpolada visível sobre o terreno no mapa.
         </p>
         <div class="field-filters" style="flex-wrap:wrap;">
 
@@ -813,6 +820,16 @@ try {
                     <?php foreach ($filterTerrains as $t): ?>
                         <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); ?></option>
                     <?php endforeach; ?>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>Método</label>
+                <select id="interp-method">
+                    <option value="idw">IDW — Distância Inversa</option>
+                    <option value="kriging">Kriging Ordinária</option>
+                    <option value="tps">Thin Plate Spline</option>
+                    <option value="nn">Vizinho mais próximo</option>
                 </select>
             </div>
 
