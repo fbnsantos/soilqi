@@ -111,25 +111,52 @@ function circleLocalPts(cx, cy, r, n = 32) {
     return pts;
 }
 
-/** Amostra curva Bézier 2D (quadrática ou cúbica) em n pontos */
+/** Amostra curva Bézier 2D (quadrática ou cúbica) em n pontos.
+ *  Aceita pontos 2D [x,y] ou 3D [x,y,z] — neste caso ignora Z. */
 function sampleBezier2D(pts, n = 14) {
+    const p2 = pts.map(p => [p[0], p[1]]);   // projecção 2D
     const result = [];
     for (let i = 0; i <= n; i++) {
-        const t = i / n;
-        const u = 1 - t;
+        const t = i / n, u = 1 - t;
         let x = 0, y = 0;
-        if (pts.length === 2) {
-            x = u * pts[0][0] + t * pts[1][0];
-            y = u * pts[0][1] + t * pts[1][1];
-        } else if (pts.length === 3) {
-            x = u*u*pts[0][0] + 2*u*t*pts[1][0] + t*t*pts[2][0];
-            y = u*u*pts[0][1] + 2*u*t*pts[1][1] + t*t*pts[2][1];
+        if (p2.length === 2) {
+            x = u*p2[0][0] + t*p2[1][0];
+            y = u*p2[0][1] + t*p2[1][1];
+        } else if (p2.length === 3) {
+            x = u*u*p2[0][0] + 2*u*t*p2[1][0] + t*t*p2[2][0];
+            y = u*u*p2[0][1] + 2*u*t*p2[1][1] + t*t*p2[2][1];
         } else {
-            // Cúbica (4 pontos)
-            x = u*u*u*pts[0][0] + 3*u*u*t*pts[1][0] + 3*u*t*t*pts[2][0] + t*t*t*pts[3][0];
-            y = u*u*u*pts[0][1] + 3*u*u*t*pts[1][1] + 3*u*t*t*pts[2][1] + t*t*t*pts[3][1];
+            x = u*u*u*p2[0][0] + 3*u*u*t*p2[1][0] + 3*u*t*t*p2[2][0] + t*t*t*p2[3][0];
+            y = u*u*u*p2[0][1] + 3*u*u*t*p2[1][1] + 3*u*t*t*p2[2][1] + t*t*t*p2[3][1];
         }
         result.push([x, y]);
+    }
+    return result;
+}
+
+/** Amostra curva Bézier 3D (linear, quadrática ou cúbica) em n pontos.
+ *  Sistema local ROS: X=este, Y=norte, Z=cima (metros).
+ *  Aceita pontos 2D [x,y] — nesse caso Z é inferido como 0. */
+function sampleBezier3D(pts, n = 14) {
+    const p3 = pts.map(p => [p[0], p[1], p[2] ?? 0]);  // garantir 3D
+    const result = [];
+    for (let i = 0; i <= n; i++) {
+        const t = i / n, u = 1 - t;
+        let x = 0, y = 0, z = 0;
+        if (p3.length === 2) {
+            x = u*p3[0][0] + t*p3[1][0];
+            y = u*p3[0][1] + t*p3[1][1];
+            z = u*p3[0][2] + t*p3[1][2];
+        } else if (p3.length === 3) {
+            x = u*u*p3[0][0] + 2*u*t*p3[1][0] + t*t*p3[2][0];
+            y = u*u*p3[0][1] + 2*u*t*p3[1][1] + t*t*p3[2][1];
+            z = u*u*p3[0][2] + 2*u*t*p3[1][2] + t*t*p3[2][2];
+        } else {
+            x = u*u*u*p3[0][0] + 3*u*u*t*p3[1][0] + 3*u*t*t*p3[2][0] + t*t*t*p3[3][0];
+            y = u*u*u*p3[0][1] + 3*u*u*t*p3[1][1] + 3*u*t*t*p3[2][1] + t*t*t*p3[3][1];
+            z = u*u*u*p3[0][2] + 3*u*u*t*p3[1][2] + 3*u*t*t*p3[2][2] + t*t*t*p3[3][2];
+        }
+        result.push([x, y, z]);
     }
     return result;
 }
@@ -459,12 +486,19 @@ function _generateExampleMap() {
                 const len   = rng(0.5, canopyR * 0.85);
                 const midR  = rng(0.5, 0.8) * len;
                 const midA  = angle + rng(-0.3, 0.3);
+
+                // Z real: ramo parte do tronco a ~40-55% da altura
+                // e estende-se para fora com ligeira variação vertical
+                const zStart = height * rng(0.38, 0.55);         // junção ao tronco
+                const zMid   = zStart + len * rng(0.06, 0.28);   // ponto de controlo — ligeiro arco
+                const zEnd   = zStart + len * rng(-0.10, 0.32);  // ponta — pode descer ou subir
+
                 branches.push({
-                    type: 'bezier2',
+                    type: 'bezier3',
                     points: [
-                        [x, y],
-                        [x + Math.cos(midA) * midR, y + Math.sin(midA) * midR],
-                        [x + Math.cos(angle) * len,  y + Math.sin(angle) * len]
+                        [x,                           y,                           zStart],
+                        [x + Math.cos(midA) * midR,   y + Math.sin(midA) * midR,   zMid  ],
+                        [x + Math.cos(angle) * len,    y + Math.sin(angle) * len,    zEnd  ]
                     ],
                     radius: trunkR * rng(0.3, 0.5)
                 });
@@ -473,7 +507,7 @@ function _generateExampleMap() {
             trees.push({
                 id: `T${String(r * cols + c + 1).padStart(3,'0')}`,
                 species: 'olea_europaea',
-                position: [x, y],
+                position: [x, y, 0],   // [x, y, z] — z=0: árvore ao nível do solo
                 trunk: { height: parseFloat(height.toFixed(2)), radius_base: parseFloat(trunkR.toFixed(3)), radius_apex: parseFloat((trunkR*0.5).toFixed(3)) },
                 branches,
                 canopy_radius: parseFloat(canopyR.toFixed(2)),
@@ -865,45 +899,58 @@ function _fit3DCamera(mapData) {
 }
 
 // ── 3D: Árvores ───────────────────────────────────────────────────────────────
+// Sistema local ROS → Three.js:  local(x, y, z)  →  Three.js(x, z, -y)
+//   X local (este)  = X Three.js
+//   Y local (norte) = -Z Three.js
+//   Z local (cima)  =  Y Three.js
 function _render3DTrees(layer) {
     const MAT_TRUNK  = new THREE.MeshLambertMaterial({ color: 0x8B5E3C });
     const MAT_BRANCH = new THREE.MeshLambertMaterial({ color: 0x7B4F2E });
 
     for (const tree of (layer.data || [])) {
-        const [lx, ly] = tree.position || [0, 0];
-        // coord local (x,y) → Three.js: X=x, Z=-y  (Y=cima)
-        const tx = lx, tz = -ly;
+        // position pode ser [x,y] (legacy) ou [x,y,z] (3D)
+        const [lx, ly, lz = 0] = tree.position || [0, 0, 0];
 
         const trunk  = tree.trunk || {};
         const tH     = trunk.height      || 2.5;
         const rBase  = trunk.radius_base || 0.10;
         const rTop   = Math.max(0.025, rBase * 0.50);
 
+        // Grupo posicionado na base do tronco (converte local→Three.js)
         const grp = new THREE.Group();
-        grp.position.set(tx, 0, tz);
+        grp.position.set(lx, lz, -ly);   // local(x,y,z) → Three.js(X=x, Y=z, Z=-y)
         grp.userData.sem = true;
 
-        // Tronco (cilindro cónico)
+        // Tronco (cilindro cónico — em espaço local do grupo, Y é "cima")
         const tGeo  = new THREE.CylinderGeometry(rTop, rBase, tH, 8);
         const tMesh = new THREE.Mesh(tGeo, MAT_TRUNK);
         tMesh.position.y = tH / 2;
         tMesh.castShadow = tMesh.receiveShadow = true;
         grp.add(tMesh);
 
-        // Ramos (TubeGeometry ao longo da curva de Bézier, com arco de altura)
+        // Ramos — curvas Bézier 3D com posições reais de [x,y,z]
         for (const br of (tree.branches || [])) {
-            const pts2d = sampleBezier2D(br.points || [], 16);
-            if (pts2d.length < 2) continue;
-            const brR = Math.max(br.radius || 0.04, 0.018);
+            const brPts = br.points || [];
+            if (brPts.length < 2) continue;
+            const brR  = Math.max(br.radius || 0.04, 0.018);
 
-            const pts3d = pts2d.map(([bx, by]) => {
-                const relX = bx - lx;
-                const relZ = -(by - ly);
-                const dist = Math.sqrt(relX * relX + relZ * relZ);
-                // Arco: começa a ~40% da altura do tronco, sobe ligeiramente com a distância
-                const arcY = tH * 0.40 + dist * 0.38 - dist * dist * 0.045;
-                return new THREE.Vector3(relX, Math.max(arcY, tH * 0.22), relZ);
-            });
+            // Detecta se os pontos são 3D (têm componente Z)
+            const is3D = brPts[0].length >= 3;
+            let pts3d;
+            if (is3D) {
+                // Usar coordenadas Z reais — converter local→grupo Three.js
+                // ponto local (bx,by,bz) → grupo: (bx-lx, bz-lz, -(by-ly))
+                pts3d = sampleBezier3D(brPts, 16).map(([bx, by, bz]) =>
+                    new THREE.Vector3(bx - lx, bz - lz, -(by - ly))
+                );
+            } else {
+                // Compatibilidade com mapas antigos (2D) — arc sintético
+                pts3d = sampleBezier2D(brPts, 16).map(([bx, by]) => {
+                    const rx = bx - lx, rz = -(by - ly);
+                    const d  = Math.sqrt(rx*rx + rz*rz);
+                    return new THREE.Vector3(rx, Math.max(tH*0.40 + d*0.38 - d*d*0.045, tH*0.22), rz);
+                });
+            }
 
             try {
                 const curve   = new THREE.CatmullRomCurve3(pts3d, false, 'catmullrom', 0.5);

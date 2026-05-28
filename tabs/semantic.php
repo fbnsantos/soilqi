@@ -257,12 +257,13 @@ if ($isLoggedIn) {
       "type": "trees",
       "data": [{
         "id": "t001",
-        "position": [x, y],
+        "position": [x, y, z],
         "species": "olea_europaea",
         "trunk": { "height": 3.0,
           "radius_base": 0.10 },
         "branches": [{
-          "points": [[x0,y0],[x1,y1],[x2,y2]],
+          "type": "bezier3",
+          "points": [[x0,y0,z0],[x1,y1,z1],[x2,y2,z2]],
           "radius": 0.04
         }],
         "canopy_radius": 1.5,
