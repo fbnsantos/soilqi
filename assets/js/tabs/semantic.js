@@ -205,6 +205,9 @@ function renderSemanticMap(mapData) {
     }
 
     setSemStatus(`✅ Mapa "${mapData.name || 'sem nome'}" carregado — ${mapData.layers.length} camada(s).`);
+
+    // Se a vista 3D já está activa, actualizar a cena imediatamente
+    if (_3d.active) _render3DMap(mapData);
 }
 
 // ── Layer: Árvores ────────────────────────────────────────────────────────────
@@ -684,4 +687,381 @@ function setSemStatus(msg) {
 
 function _esc(s) {
     return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Vista 3D (Three.js) ───────────────────────────────────────────────────────
+
+const _3d = {
+    scene: null, renderer: null, camera: null, controls: null,
+    animId: null, active: false
+};
+
+/** Alterna entre vista 2D (MapLibre) e 3D (Three.js) */
+function toggle3DView() {
+    _3d.active = !_3d.active;
+
+    const map2d = document.getElementById('semantic-map');
+    const map3d = document.getElementById('semantic-3d');
+    const btn   = document.getElementById('sem-btn-3d');
+
+    if (map2d) map2d.style.display = _3d.active ? 'none'  : 'block';
+    if (map3d) map3d.style.display = _3d.active ? 'block' : 'none';
+    if (btn)   btn.textContent     = _3d.active ? '🗺️ Vista 2D' : '🧊 Vista 3D';
+
+    if (_3d.active) {
+        if (!_3d.scene) _init3D();
+        if (currentSemData) _render3DMap(currentSemData);
+        else setSemStatus('Carregue um mapa semântico para ver em 3D.');
+    } else {
+        if (_3d.animId) { cancelAnimationFrame(_3d.animId); _3d.animId = null; }
+    }
+}
+
+/** Inicializar cena Three.js */
+function _init3D() {
+    if (!window.THREE) { setSemStatus('❌ Three.js não disponível.'); return; }
+
+    const container = document.getElementById('semantic-3d');
+    const canvas    = document.getElementById('semantic-3d-canvas');
+    const W = container.clientWidth  || 800;
+    const H = container.clientHeight || 620;
+
+    // Cena
+    _3d.scene = new THREE.Scene();
+    _3d.scene.background = new THREE.Color(0x87CEEB);
+    _3d.scene.fog = new THREE.FogExp2(0x87CEEB, 0.005);
+
+    // Câmara
+    _3d.camera = new THREE.PerspectiveCamera(55, W / H, 0.05, 2000);
+    _3d.camera.position.set(18, 14, 24);
+    _3d.camera.lookAt(8, 0, -5);
+
+    // Renderer WebGL
+    _3d.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    _3d.renderer.setSize(W, H);
+    _3d.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    _3d.renderer.shadowMap.enabled = true;
+    _3d.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    // Orbit Controls
+    if (THREE.OrbitControls) {
+        _3d.controls = new THREE.OrbitControls(_3d.camera, _3d.renderer.domElement);
+        _3d.controls.enableDamping = true;
+        _3d.controls.dampingFactor = 0.05;
+        _3d.controls.minDistance   = 0.5;
+        _3d.controls.maxDistance   = 500;
+        _3d.controls.maxPolarAngle = Math.PI / 2.02;
+    }
+
+    // Luz ambiente
+    _3d.scene.add(new THREE.AmbientLight(0xfff4e0, 0.55));
+
+    // Sol (directional com sombras)
+    const sun = new THREE.DirectionalLight(0xfff8dc, 1.1);
+    sun.position.set(30, 60, 20);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.near   = 0.5;
+    sun.shadow.camera.far    = 300;
+    sun.shadow.camera.left   = sun.shadow.camera.bottom = -70;
+    sun.shadow.camera.right  = sun.shadow.camera.top    =  70;
+    _3d.scene.add(sun);
+
+    // Luz de céu + solo
+    _3d.scene.add(new THREE.HemisphereLight(0x87CEEB, 0x8B9B6A, 0.35));
+
+    // Chão
+    const groundMesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(500, 500),
+        new THREE.MeshLambertMaterial({ color: 0x8B9B6A })
+    );
+    groundMesh.rotation.x = -Math.PI / 2;
+    groundMesh.receiveShadow = true;
+    _3d.scene.add(groundMesh);
+
+    // Resize
+    window.addEventListener('resize', _on3DResize);
+
+    // Loop de animação
+    const animate = () => {
+        _3d.animId = requestAnimationFrame(animate);
+        if (_3d.controls) _3d.controls.update();
+        _3d.renderer.render(_3d.scene, _3d.camera);
+    };
+    animate();
+}
+
+function _on3DResize() {
+    if (!_3d.active || !_3d.renderer || !_3d.camera) return;
+    const c = document.getElementById('semantic-3d');
+    if (!c) return;
+    _3d.camera.aspect = c.clientWidth / c.clientHeight;
+    _3d.camera.updateProjectionMatrix();
+    _3d.renderer.setSize(c.clientWidth, c.clientHeight);
+}
+
+/** Remove todos os objectos semânticos da cena (mantém luzes e chão) */
+function _clear3DObjects() {
+    if (!_3d.scene) return;
+    const rem = [];
+    _3d.scene.traverse(o => { if (o.userData.sem) rem.push(o); });
+    rem.forEach(o => {
+        _3d.scene.remove(o);
+        if (o.geometry) o.geometry.dispose();
+        // materiais: não dispor se partilhados; GC trata do resto
+    });
+}
+
+/** Renderizar mapa semântico completo em 3D */
+function _render3DMap(mapData) {
+    if (!_3d.scene) _init3D();
+    if (!_3d.scene) return;
+    _clear3DObjects();
+
+    const layers  = mapData.layers || [];
+    let   hasElev = false;
+
+    layers.forEach(layer => {
+        try {
+            if (layer.type === 'elevation') { _render3DElev(layer);  hasElev = true; }
+            if (layer.type === 'occupancy') { _render3DOcc(layer);  }
+            if (layer.type === 'trees')     { _render3DTrees(layer); }
+        } catch (e) { console.warn('[3D] Erro na camada', layer.type, e); }
+    });
+
+    if (!hasElev) {
+        const grid = new THREE.GridHelper(100, 40, 0x777777, 0x444444);
+        grid.position.y = 0.01;
+        grid.userData.sem = true;
+        _3d.scene.add(grid);
+    }
+
+    // Eixos de origem
+    const ax = new THREE.AxesHelper(2.5);
+    ax.position.y = 0.03;
+    ax.userData.sem = true;
+    _3d.scene.add(ax);
+
+    _fit3DCamera(mapData);
+}
+
+/** Posicionar câmara para ver a área completa */
+function _fit3DCamera(mapData) {
+    let maxW = 15, cx = 0, cz = 0;
+    (mapData.layers || []).forEach(l => {
+        if (l.origin && l.width && l.resolution) {
+            const w = l.width  * l.resolution;
+            const h = l.height * l.resolution;
+            maxW = Math.max(maxW, w, h);
+            cx   = l.origin[0] + w / 2;
+            cz   = -(l.origin[1] + h / 2);
+        }
+    });
+    const d = maxW * 0.85;
+    _3d.camera.position.set(cx + d * 0.65, d * 0.55, cz + d * 0.65);
+    const target = new THREE.Vector3(cx, 0, cz);
+    _3d.camera.lookAt(target);
+    if (_3d.controls) { _3d.controls.target.copy(target); _3d.controls.update(); }
+}
+
+// ── 3D: Árvores ───────────────────────────────────────────────────────────────
+function _render3DTrees(layer) {
+    const MAT_TRUNK  = new THREE.MeshLambertMaterial({ color: 0x8B5E3C });
+    const MAT_BRANCH = new THREE.MeshLambertMaterial({ color: 0x7B4F2E });
+
+    for (const tree of (layer.data || [])) {
+        const [lx, ly] = tree.position || [0, 0];
+        // coord local (x,y) → Three.js: X=x, Z=-y  (Y=cima)
+        const tx = lx, tz = -ly;
+
+        const trunk  = tree.trunk || {};
+        const tH     = trunk.height      || 2.5;
+        const rBase  = trunk.radius_base || 0.10;
+        const rTop   = Math.max(0.025, rBase * 0.50);
+
+        const grp = new THREE.Group();
+        grp.position.set(tx, 0, tz);
+        grp.userData.sem = true;
+
+        // Tronco (cilindro cónico)
+        const tGeo  = new THREE.CylinderGeometry(rTop, rBase, tH, 8);
+        const tMesh = new THREE.Mesh(tGeo, MAT_TRUNK);
+        tMesh.position.y = tH / 2;
+        tMesh.castShadow = tMesh.receiveShadow = true;
+        grp.add(tMesh);
+
+        // Ramos (TubeGeometry ao longo da curva de Bézier, com arco de altura)
+        for (const br of (tree.branches || [])) {
+            const pts2d = sampleBezier2D(br.points || [], 16);
+            if (pts2d.length < 2) continue;
+            const brR = Math.max(br.radius || 0.04, 0.018);
+
+            const pts3d = pts2d.map(([bx, by]) => {
+                const relX = bx - lx;
+                const relZ = -(by - ly);
+                const dist = Math.sqrt(relX * relX + relZ * relZ);
+                // Arco: começa a ~40% da altura do tronco, sobe ligeiramente com a distância
+                const arcY = tH * 0.40 + dist * 0.38 - dist * dist * 0.045;
+                return new THREE.Vector3(relX, Math.max(arcY, tH * 0.22), relZ);
+            });
+
+            try {
+                const curve   = new THREE.CatmullRomCurve3(pts3d, false, 'catmullrom', 0.5);
+                const tubeGeo = new THREE.TubeGeometry(curve, 10, brR, 5, false);
+                const tMsh    = new THREE.Mesh(tubeGeo, MAT_BRANCH);
+                tMsh.castShadow = true;
+                grp.add(tMsh);
+            } catch (_) { /* Bézier degenerada */ }
+        }
+
+        // Copa (esfera — cor baseada em saúde + carga de fruto)
+        const canopyR   = tree.canopy_radius || 1.5;
+        const health    = tree.health  || 'good';
+        const fruitLoad = tree.fruit_load || 0;
+        const hue       = health === 'good' ? 0.32 : health === 'fair' ? 0.25 : 0.14;
+        const cColor    = new THREE.Color().setHSL(hue, 0.55 + fruitLoad * 0.18, 0.28 + fruitLoad * 0.06);
+
+        const cGeo  = new THREE.SphereGeometry(canopyR, 14, 10);
+        const cMat  = new THREE.MeshLambertMaterial({ color: cColor, transparent: true, opacity: 0.88 });
+        const cMesh = new THREE.Mesh(cGeo, cMat);
+        cMesh.position.y = tH + canopyR * 0.60;
+        cMesh.castShadow = cMesh.receiveShadow = true;
+        grp.add(cMesh);
+
+        // Azeitonas (esferas pequenas na copa se fruitLoad > 0.3)
+        if (fruitLoad > 0.3) {
+            const nFruits = Math.round(fruitLoad * 10);
+            const fGeo    = new THREE.SphereGeometry(0.075, 5, 4);
+            const fMat    = new THREE.MeshLambertMaterial({ color: 0x2E4A1A });
+            for (let f = 0; f < nFruits; f++) {
+                // distribuição de Fibonacci na esfera
+                const phi   = Math.acos(1 - 2 * (f + 0.5) / nFruits);
+                const theta = Math.PI * (1 + Math.sqrt(5)) * f;
+                const fr    = canopyR * 0.82;
+                const fMesh = new THREE.Mesh(fGeo, fMat);
+                fMesh.position.set(
+                    fr * Math.sin(phi) * Math.cos(theta),
+                    tH + canopyR * 0.60 + fr * Math.cos(phi),
+                    fr * Math.sin(phi) * Math.sin(theta)
+                );
+                grp.add(fMesh);
+            }
+        }
+
+        _3d.scene.add(grp);
+    }
+}
+
+// ── 3D: Mapa de Elevação (heightmap com cores de vértice) ────────────────────
+function _render3DElev(layer) {
+    const img = new Image();
+    img.onload = () => {
+        if (!_3d.scene) return;
+        const W    = layer.width  || 25;
+        const H    = layer.height || 20;
+        const res  = layer.resolution || 1.0;
+        const [ox, oy] = layer.origin || [0, 0];
+        const minE = layer.min_elevation || 0;
+        const maxE = layer.max_elevation || 15;
+        const VSCALE = 0.30;    // exageração vertical (ajustar ao gosto)
+
+        // Ler pixels da imagem
+        const cvs = document.createElement('canvas');
+        cvs.width = W; cvs.height = H;
+        const ctx = cvs.getContext('2d');
+        ctx.drawImage(img, 0, 0, W, H);
+        const px = ctx.getImageData(0, 0, W, H).data;
+
+        // PlaneGeometry W×H vértices → W-1 × H-1 segmentos, depois rodar para o chão
+        const geo = new THREE.PlaneGeometry(W * res, H * res, W - 1, H - 1);
+        geo.rotateX(-Math.PI / 2);
+
+        const pos  = geo.attributes.position;
+        const cols = [];
+
+        for (let i = 0; i < pos.count; i++) {
+            const row = Math.floor(i / W);
+            const col = i % W;
+            const idx = (row * W + col) * 4;
+            // Canal azul é monotónico no gradiente de exemplo (34→60→85)
+            const bv = px[idx + 2];
+            const t  = Math.max(0, Math.min(1, (bv - 34) / 51));
+            pos.setY(i, t * (maxE - minE) * VSCALE);
+
+            // Cor de vértice: verde escuro → castanho claro
+            const r = 0.13 + t * 0.40;
+            const g = 0.43 - t * 0.05;
+            const b = 0.10 + t * 0.14;
+            cols.push(r, g, b);
+        }
+
+        geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+        geo.computeVertexNormals();
+
+        const mat  = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+        const mesh = new THREE.Mesh(geo, mat);
+        // centrar o plano na área (origem = canto SW)
+        mesh.position.set(ox + (W * res) / 2, 0, -(oy + (H * res) / 2));
+        mesh.receiveShadow = true;
+        mesh.userData.sem  = true;
+        _3d.scene.add(mesh);
+    };
+    img.src = layer.data || '';
+}
+
+// ── 3D: Mapa de Ocupação (caixas InstancedMesh para obstáculos) ──────────────
+function _render3DOcc(layer) {
+    const img = new Image();
+    img.onload = () => {
+        if (!_3d.scene) return;
+        const W    = layer.width  || 200;
+        const H    = layer.height || 170;
+        const res  = layer.resolution || 0.1;
+        const [ox, oy] = layer.origin || [0, 0];
+        const OBH  = 0.25;  // altura dos obstáculos em metros
+
+        const cvs = document.createElement('canvas');
+        cvs.width = W; cvs.height = H;
+        const ctx = cvs.getContext('2d');
+        ctx.drawImage(img, 0, 0, W, H);
+        const px = ctx.getImageData(0, 0, W, H).data;
+
+        // Células ocupadas (brilho R < 50 → pixel escuro)
+        const occ = [];
+        for (let r = 0; r < H; r++) {
+            for (let c = 0; c < W; c++) {
+                if (px[(r * W + c) * 4] < 50) {
+                    // coord mundo: imagem linha 0 = norte (y alto), linha H-1 = sul (y baixo)
+                    occ.push(
+                        ox + (c + 0.5) * res,          // X
+                        -(oy + (H - 1 - r) * res)       // Z  (Y invertido → -Z)
+                    );
+                }
+            }
+        }
+        if (!occ.length) return;
+
+        // Cap para não bloquear a GPU: subamostrar se necessário
+        const MAX_INST = 10000;
+        const nPairs   = occ.length / 2;
+        const nInst    = Math.min(nPairs, MAX_INST);
+        const step     = Math.ceil(nPairs / nInst);
+
+        const boxGeo   = new THREE.BoxGeometry(res * 0.88, OBH, res * 0.88);
+        const boxMat   = new THREE.MeshLambertMaterial({ color: 0xCC3322 });
+        const instMesh = new THREE.InstancedMesh(boxGeo, boxMat, nInst);
+        instMesh.castShadow = instMesh.receiveShadow = true;
+        instMesh.userData.sem = true;
+
+        const mtx   = new THREE.Matrix4();
+        let   count = 0;
+        for (let i = 0; i < nPairs && count < nInst; i += step, count++) {
+            mtx.setPosition(occ[i * 2], OBH / 2, occ[i * 2 + 1]);
+            instMesh.setMatrixAt(count, mtx);
+        }
+        instMesh.count = count;
+        instMesh.instanceMatrix.needsUpdate = true;
+        _3d.scene.add(instMesh);
+    };
+    img.src = layer.data || '';
 }

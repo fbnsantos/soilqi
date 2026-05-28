@@ -119,9 +119,18 @@ if ($isLoggedIn) {
 <!-- MapLibre GL JS -->
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<!-- Three.js r128 + OrbitControls (vista 3D) -->
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
 <style>
-#semantic-map { width:100%; height:620px; border-radius:10px; }
+#semantic-map  { width:100%; height:620px; border-radius:10px; }
+#semantic-3d   { display:none; width:100%; height:620px; border-radius:10px;
+                 overflow:hidden; position:relative; background:#87CEEB; }
+#semantic-3d canvas { width:100% !important; height:100% !important; display:block; }
+#sem-3d-hint   { position:absolute; bottom:8px; left:50%; transform:translateX(-50%);
+                 font-size:11px; color:rgba(255,255,255,.85); background:rgba(0,0,0,.35);
+                 padding:3px 10px; border-radius:10px; pointer-events:none; white-space:nowrap; }
 .sem-panel { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:14px; margin-bottom:12px; }
 .sem-panel h4 { margin:0 0 10px; font-size:13px; font-weight:700; color:#374151; }
 .sem-layer-row {
@@ -148,12 +157,18 @@ if ($isLoggedIn) {
     </label>
     <button class="btn btn-secondary" onclick="exportSemanticMap()">⬇️ Exportar JSON</button>
     <button class="btn btn-secondary" onclick="clearSemanticMap()">🗑️ Limpar</button>
+    <button class="btn btn-secondary" id="sem-btn-3d" onclick="toggle3DView()">🧊 Vista 3D</button>
 </div>
 
 <div class="main-grid">
     <!-- Mapa -->
     <div class="map-section">
         <div id="semantic-map"></div>
+        <!-- Vista 3D Three.js -->
+        <div id="semantic-3d">
+            <canvas id="semantic-3d-canvas"></canvas>
+            <div id="sem-3d-hint">🖱️ arrastar: rodar &nbsp;|&nbsp; scroll: zoom &nbsp;|&nbsp; Shift+arrastar: deslocar</div>
+        </div>
         <div id="sem-status" style="font-size:12px; color:#6b7280; padding:6px 2px; min-height:18px;"></div>
     </div>
 
