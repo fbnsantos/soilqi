@@ -13,6 +13,7 @@ let tempMarker          = null;
 let fieldObjectsLayer   = null;
 let addObjectModeActive = false;
 let fieldObjectsList    = [];
+let _pendingPositions   = [];  // posições acumuladas no modal multi-ponto
 
 // Layers control reference (needed to add/remove saved interpolation overlays)
 let fieldLayersControl  = null;
@@ -1708,19 +1709,21 @@ function renderFieldObjectsOnMap(objects) {
 }
 
 function openAddObjectModal(lat, lng) {
-    // Reset form
-    document.getElementById('ao-lat').value     = lat != null ? lat : '';
-    document.getElementById('ao-lng').value     = lng != null ? lng : '';
+    // Resetar tudo, incluindo a lista de posições pendentes
+    _pendingPositions = [];
+    document.getElementById('ao-lat').value      = lat != null ? lat : '';
+    document.getElementById('ao-lng').value      = lng != null ? lng : '';
     document.getElementById('ao-altitude').value = '';
-    document.getElementById('ao-label').value   = '';
-    document.getElementById('ao-notes').value   = '';
-    document.getElementById('ao-species').value = 'oliveira';
+    document.getElementById('ao-label').value    = '';
+    document.getElementById('ao-notes').value    = '';
+    document.getElementById('ao-species').value  = 'oliveira';
     document.querySelector('input[name="ao-type"][value="tree"]').checked = true;
-    const hint = document.getElementById('ao-pick-hint');
-    if (hint) hint.textContent = '';
+    const hint   = document.getElementById('ao-pick-hint');
     const status = document.getElementById('ao-status');
+    if (hint)   hint.textContent   = '';
     if (status) status.textContent = '';
     onAoTypeChange();
+    renderPendingPositions();
 
     document.getElementById('add-obj-backdrop').style.display = 'block';
     document.getElementById('add-obj-modal').style.display    = 'block';
@@ -1730,74 +1733,167 @@ function closeAddObjectModal() {
     document.getElementById('add-obj-backdrop').style.display = 'none';
     document.getElementById('add-obj-modal').style.display    = 'none';
     addObjectModeActive = false;
+    _pendingPositions   = [];
     if (fieldMap) fieldMap.getContainer().style.cursor = '';
 }
 
 function onAoTypeChange() {
-    const isTree = document.querySelector('input[name="ao-type"]:checked')?.value === 'tree';
+    const isTree    = document.querySelector('input[name="ao-type"]:checked')?.value === 'tree';
     const speciesRow = document.getElementById('ao-species-row');
     if (speciesRow) speciesRow.style.display = isTree ? 'block' : 'none';
-    // Highlight selected type
-    document.getElementById('ao-type-tree-lbl').style.borderColor = isTree ? '#667eea' : '#e5e7eb';
-    document.getElementById('ao-type-tree-lbl').style.background  = isTree ? '#eef2ff' : '';
+    document.getElementById('ao-type-tree-lbl').style.borderColor = isTree  ? '#667eea' : '#e5e7eb';
+    document.getElementById('ao-type-tree-lbl').style.background  = isTree  ? '#eef2ff' : '';
     document.getElementById('ao-type-pole-lbl').style.borderColor = !isTree ? '#667eea' : '#e5e7eb';
     document.getElementById('ao-type-pole-lbl').style.background  = !isTree ? '#eef2ff' : '';
 }
 
+/** Adiciona as coordenadas actuais à lista de posições pendentes */
+function addToPositionsList() {
+    const lat = parseFloat(document.getElementById('ao-lat')?.value);
+    const lng = parseFloat(document.getElementById('ao-lng')?.value);
+    const alt = parseFloat(document.getElementById('ao-altitude')?.value) || 0;
+    const hint = document.getElementById('ao-pick-hint');
+
+    if (!lat || !lng) {
+        if (hint) { hint.textContent = '⚠️ Defina primeiro a posição GPS.'; hint.style.color = '#ef4444'; }
+        return;
+    }
+
+    _pendingPositions.push({ lat, lng, altitude: alt });
+
+    // Limpar campos de coordenadas para a próxima entrada
+    document.getElementById('ao-lat').value      = '';
+    document.getElementById('ao-lng').value      = '';
+    document.getElementById('ao-altitude').value = '';
+    if (hint) { hint.textContent = `✅ Posição ${_pendingPositions.length} adicionada.`; hint.style.color = '#16a34a'; }
+
+    renderPendingPositions();
+}
+
+/** Remove uma posição da lista pendente pelo índice */
+function removePendingPosition(idx) {
+    _pendingPositions.splice(idx, 1);
+    renderPendingPositions();
+}
+
+/** Actualiza o bloco visual de posições e o texto do botão de guardar */
+function renderPendingPositions() {
+    const listEl  = document.getElementById('ao-positions-list');
+    const saveBtn = document.getElementById('ao-save-btn');
+    const n       = _pendingPositions.length;
+
+    // Texto dinâmico no botão
+    if (saveBtn) {
+        saveBtn.textContent = n > 0
+            ? `💾 Guardar ${n} objecto${n !== 1 ? 's' : ''}`
+            : '💾 Guardar Objecto';
+    }
+
+    if (!listEl) return;
+
+    if (!n) {
+        listEl.style.display = 'none';
+        return;
+    }
+
+    listEl.style.display = 'block';
+    listEl.innerHTML =
+        `<div style="font-size:11px;font-weight:700;color:#166534;margin-bottom:6px;">
+            📋 ${n} posição(ões) na lista:
+         </div>` +
+        _pendingPositions.map((pos, i) => `
+            <div style="display:flex;align-items:center;gap:8px;padding:4px 0;
+                        border-bottom:1px solid #bbf7d0;font-size:12px;">
+                <span style="color:#16a34a;font-weight:700;flex-shrink:0;min-width:24px;">#${i+1}</span>
+                <span style="font-family:monospace;font-size:11px;color:#374151;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                    ${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}
+                    ${pos.altitude ? ` · ${pos.altitude.toFixed(1)} m` : ''}
+                </span>
+                <button onclick="removePendingPosition(${i})"
+                        style="background:#fee2e2;color:#dc2626;border:none;border-radius:5px;
+                               padding:2px 7px;cursor:pointer;font-size:12px;flex-shrink:0;">✕</button>
+            </div>`).join('');
+}
+
+/** Activa o modo de selecção no mapa (esconde modal temporariamente) */
 function activateObjectPickMode() {
-    // Hide modal temporarily, let user click on map
     document.getElementById('add-obj-backdrop').style.display = 'none';
     document.getElementById('add-obj-modal').style.display    = 'none';
     addObjectModeActive = true;
     if (fieldMap) fieldMap.getContainer().style.cursor = 'crosshair';
-    // Show a brief toast hint
     showAlert('🗺️ Clique no mapa para definir a posição do objecto.', 'info');
 }
 
-function saveFieldObject() {
-    const type     = document.querySelector('input[name="ao-type"]:checked')?.value || 'tree';
-    const species  = document.getElementById('ao-species')?.value   || '';
-    const label    = document.getElementById('ao-label')?.value     || '';
-    const lat      = parseFloat(document.getElementById('ao-lat')?.value);
-    const lng      = parseFloat(document.getElementById('ao-lng')?.value);
-    const altitude = parseFloat(document.getElementById('ao-altitude')?.value) || 0;
-    const notes    = document.getElementById('ao-notes')?.value     || '';
-    const tid      = document.getElementById('ao-terrain')?.value   || '';
+/** Guarda todos os objectos (lista pendente + coords actuais, se preenchidas) */
+async function saveFieldObject() {
+    const type    = document.querySelector('input[name="ao-type"]:checked')?.value || 'tree';
+    const species = document.getElementById('ao-species')?.value  || '';
+    const prefix  = (document.getElementById('ao-label')?.value  || '').trim();
+    const notes   = document.getElementById('ao-notes')?.value   || '';
+    const tid     = document.getElementById('ao-terrain')?.value || '';
 
-    if (!lat || !lng) {
+    // Juntar posições pendentes + coordenadas actuais (se preenchidas)
+    const curLat = parseFloat(document.getElementById('ao-lat')?.value);
+    const curLng = parseFloat(document.getElementById('ao-lng')?.value);
+    const curAlt = parseFloat(document.getElementById('ao-altitude')?.value) || 0;
+
+    const positions = [..._pendingPositions];
+    if (curLat && curLng) positions.push({ lat: curLat, lng: curLng, altitude: curAlt });
+
+    if (!positions.length) {
         const status = document.getElementById('ao-status');
-        if (status) { status.textContent = '⚠️ Defina a posição GPS.'; status.style.color = '#ef4444'; }
+        if (status) { status.textContent = '⚠️ Adicione pelo menos uma posição GPS.'; status.style.color = '#ef4444'; }
         return;
     }
 
-    const fd = new FormData();
-    fd.append('action',     'save_field_object');
-    fd.append('type',       type);
-    fd.append('species',    species);
-    fd.append('label',      label);
-    fd.append('lat',        lat);
-    fd.append('lng',        lng);
-    fd.append('altitude',   altitude);
-    fd.append('notes',      notes);
-    fd.append('terrain_id', tid);
-
     const status = document.getElementById('ao-status');
-    if (status) { status.textContent = '⏳'; status.style.color = '#6b7280'; }
+    const saveBtn = document.getElementById('ao-save-btn');
+    if (status)  { status.textContent = `⏳ A guardar ${positions.length}…`; status.style.color = '#6b7280'; }
+    if (saveBtn) saveBtn.disabled = true;
 
-    fetch('?tab=field', { method: 'POST', body: fd })
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                closeAddObjectModal();
-                showAlert('✅ Objecto guardado com sucesso!', 'success');
-                loadFieldObjects();
-            } else {
-                if (status) { status.textContent = '❌ ' + (data.message || 'Erro'); status.style.color = '#ef4444'; }
-            }
-        })
-        .catch(() => {
-            if (status) { status.textContent = '❌ Erro de rede.'; status.style.color = '#ef4444'; }
-        });
+    // Guardar todas as posições sequencialmente
+    let ok = 0;
+    for (let i = 0; i < positions.length; i++) {
+        const pos = positions[i];
+        // Gerar etiqueta: se há prefix e múltiplas posições → T001, T002...
+        //                 se há prefix e só uma → usa o prefix directamente
+        const label = prefix
+            ? (positions.length > 1 ? `${prefix}${String(i + 1).padStart(3, '0')}` : prefix)
+            : '';
+
+        const fd = new FormData();
+        fd.append('action',     'save_field_object');
+        fd.append('type',       type);
+        fd.append('species',    species);
+        fd.append('label',      label);
+        fd.append('lat',        pos.lat);
+        fd.append('lng',        pos.lng);
+        fd.append('altitude',   pos.altitude);
+        fd.append('notes',      notes);
+        fd.append('terrain_id', tid);
+
+        try {
+            const r    = await fetch('?tab=field', { method: 'POST', body: fd });
+            const data = await r.json();
+            if (data.success) ok++;
+        } catch (_) { /* continuar com os restantes */ }
+    }
+
+    if (saveBtn) saveBtn.disabled = false;
+    closeAddObjectModal();
+
+    const failed = positions.length - ok;
+    if (ok > 0) {
+        showAlert(
+            failed === 0
+                ? `✅ ${ok} objecto${ok !== 1 ? 's' : ''} guardado${ok !== 1 ? 's' : ''} com sucesso!`
+                : `⚠️ ${ok} guardado${ok !== 1 ? 's' : ''}, ${failed} com erro.`,
+            failed === 0 ? 'success' : 'warning'
+        );
+    } else {
+        showAlert('❌ Não foi possível guardar nenhum objecto.', 'error');
+    }
+    loadFieldObjects();
 }
 
 function deleteFieldObject(id, name) {

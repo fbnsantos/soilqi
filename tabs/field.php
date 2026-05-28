@@ -928,11 +928,17 @@ try {
             </select>
         </div>
 
-        <!-- Etiqueta -->
+        <!-- Prefixo / Etiqueta -->
         <div style="margin-bottom:12px;">
-            <label style="font-size:12px; color:#6b7280; display:block; margin-bottom:4px; font-weight:600;">Etiqueta / ID (opcional)</label>
-            <input id="ao-label" type="text" placeholder="Ex: T001, Poste Norte, Oliveira A3…"
+            <label style="font-size:12px; color:#6b7280; display:block; margin-bottom:4px; font-weight:600;">
+                Prefixo / Etiqueta
+                <span style="font-weight:400; color:#9ca3af;">(opcional)</span>
+            </label>
+            <input id="ao-label" type="text" placeholder="Ex: T, Oliveira, Poste Norte…"
                    style="width:100%; padding:9px 10px; border:1.5px solid #e5e7eb; border-radius:8px; font-size:14px; box-sizing:border-box;">
+            <div style="font-size:11px; color:#9ca3af; margin-top:3px;">
+                Com várias posições, são gerados T001, T002… automaticamente.
+            </div>
         </div>
 
         <!-- Posição GPS -->
@@ -957,12 +963,24 @@ try {
                            style="width:100%; padding:7px 9px; border:1.5px solid #e5e7eb; border-radius:7px; font-size:13px; font-family:monospace; box-sizing:border-box;">
                 </div>
             </div>
-            <button onclick="activateObjectPickMode()"
-                    style="font-size:12px; color:#0369a1; background:#e0f2fe; border:1px solid #bae6fd;
-                           border-radius:7px; padding:6px 12px; cursor:pointer; width:100%;">
-                🗺️ Clicar no mapa para definir posição
-            </button>
-            <div id="ao-pick-hint" style="font-size:11px; color:#0284c7; margin-top:5px; min-height:14px;"></div>
+            <div style="display:flex; gap:6px; margin-bottom:6px;">
+                <button onclick="activateObjectPickMode()"
+                        style="flex:1; font-size:12px; color:#0369a1; background:#e0f2fe; border:1px solid #bae6fd;
+                               border-radius:7px; padding:6px 10px; cursor:pointer;">
+                    🗺️ Clicar no mapa
+                </button>
+                <button onclick="addToPositionsList()"
+                        style="flex:1; font-size:12px; color:#fff; background:#667eea; border:none;
+                               border-radius:7px; padding:6px 10px; cursor:pointer; font-weight:600;">
+                    ➕ Adicionar à lista
+                </button>
+            </div>
+            <div id="ao-pick-hint" style="font-size:11px; color:#0284c7; min-height:14px;"></div>
+        </div>
+
+        <!-- Lista de posições acumuladas -->
+        <div id="ao-positions-list" style="display:none; background:#f0fdf4; border:1px solid #86efac;
+             border-radius:10px; padding:10px; margin-bottom:12px; max-height:180px; overflow-y:auto;">
         </div>
 
         <!-- Terreno -->
@@ -986,7 +1004,7 @@ try {
     </div>
 
     <div style="padding:12px 20px 18px; display:flex; gap:10px; border-top:1px solid #f3f4f6; align-items:center;">
-        <button onclick="saveFieldObject()" class="btn btn-primary" style="flex:1; padding:12px; font-size:15px;">
+        <button id="ao-save-btn" onclick="saveFieldObject()" class="btn btn-primary" style="flex:1; padding:12px; font-size:15px;">
             💾 Guardar Objecto
         </button>
         <button onclick="closeAddObjectModal()" class="btn btn-secondary" style="padding:12px 20px;">

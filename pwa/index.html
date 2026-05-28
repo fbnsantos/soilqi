@@ -126,6 +126,31 @@
                 </div>
             </div>
 
+            <!-- Objecto de Campo -->
+            <div class="form-card">
+                <div class="form-card-title">🌿 Objecto de Campo <span style="font-size:11px;font-weight:400;opacity:.65;">(opcional)</span></div>
+                <div class="form-field">
+                    <label for="inp-obj-species">Marcar como</label>
+                    <select id="inp-obj-species" name="obj_species" onchange="onPwaObjTypeChange()">
+                        <option value="">— Não registar —</option>
+                        <option value="oliveira">🫒 Oliveira</option>
+                        <option value="videira">🍇 Videira</option>
+                        <option value="macieira">🍎 Macieira</option>
+                        <option value="macieira_2d">🍎 Macieira 2D (espaleira)</option>
+                        <option value="pereira">🍐 Pereira</option>
+                        <option value="outro">🌳 Outra planta</option>
+                        <option value="__pole__">🪵 Poste</option>
+                    </select>
+                </div>
+                <div id="pwa-obj-extra" style="display:none; margin-top:8px;">
+                    <div class="form-field">
+                        <label for="inp-obj-label">Etiqueta / ID <span style="font-weight:400;opacity:.7;">(opcional)</span></label>
+                        <input id="inp-obj-label" name="obj_label" type="text"
+                               placeholder="Ex: T001, Oliveira Norte…" autocomplete="off">
+                    </div>
+                </div>
+            </div>
+
             <!-- Fotografia -->
             <div class="form-card">
                 <div class="form-card-title">📷 Fotografia (opcional)</div>
@@ -194,7 +219,7 @@
                z-index:100;background:transparent;border:none;padding:3px 5px;
                font-size:11px;color:#aaa;cursor:pointer;opacity:.6;
                font-family:inherit;letter-spacing:.3px;line-height:1;">
-    v15
+    v16
 </button>
 </body>
 </html>

@@ -5,7 +5,7 @@ const API        = 'api.php';
 const IDB_NAME   = 'soilqi_field';
 const IDB_VER    = 1;
 const TOKEN_KEY  = 'soilqi_api_token';   // localStorage key for persistent session
-const APP_VERSION = 'v15';               // deve coincidir com CACHE_VERSION no sw.js
+const APP_VERSION = 'v16';               // deve coincidir com CACHE_VERSION no sw.js
 
 // ── State ────────────────────────────────────────────────────────────────────
 let idb           = null;
@@ -420,6 +420,8 @@ async function handleSubmit(e) {
     if (isOnline) {
         const result = await postToServer(m);
         if (result.ok) {
+            // Guardar objecto de campo se seleccionado
+            await saveFieldObjectIfSelected(lat, lng);
             toast('Medição guardada! ✓', 'success');
             resetForm();
             // Recarregar histórico para mostrar foto correcta (photo_path vem do servidor)
@@ -442,6 +444,53 @@ async function handleSubmit(e) {
     await refreshPendingUI();
 }
 
+/** Regista o objecto de campo (se seleccionado no dropdown) */
+async function saveFieldObjectIfSelected(lat, lng) {
+    const speciesSel = document.getElementById('inp-obj-species');
+    if (!speciesSel) return;
+    const val = speciesSel.value;
+    if (!val) return;  // "— Não registar —"
+
+    const isTree = val !== '__pole__';
+    const species = isTree ? val : '';
+    const type    = isTree ? 'tree' : 'pole';
+    const label   = (document.getElementById('inp-obj-label')?.value || '').trim();
+    const tid     = document.getElementById('inp-terrain')?.value || null;
+
+    try {
+        const token   = getToken();
+        const headers = token ? { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+        const res  = await fetch(`${API}`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+                action:     'save_field_object',
+                type,
+                species,
+                label,
+                lat,
+                lng,
+                altitude:   gpsAccuracy ? 0 : 0,  // altitude GNSS se disponível
+                terrain_id: tid || null
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            toast(`🌿 ${isTree ? (species || 'Planta') : 'Poste'} registado! ✓`, 'success');
+        }
+    } catch (_) {
+        // Não bloquear o fluxo principal se falhar
+        toast('⚠️ Objecto de campo não guardado (offline?).', 'warning');
+    }
+}
+
+/** Mostra/esconde o campo de etiqueta conforme a selecção do dropdown */
+function onPwaObjTypeChange() {
+    const val   = document.getElementById('inp-obj-species')?.value || '';
+    const extra = document.getElementById('pwa-obj-extra');
+    if (extra) extra.style.display = val ? 'block' : 'none';
+}
+
 function numOrNull(id) {
     const v = parseFloat(document.getElementById(id).value);
     return isNaN(v) ? null : v;
@@ -452,6 +501,10 @@ function resetForm() {
         document.getElementById(id).value = '';
     });
     document.getElementById('inp-terrain').value = '';
+    // Objecto de campo: manter a espécie seleccionada (útil para registo em série)
+    // mas limpar a etiqueta para a próxima
+    const labelEl = document.getElementById('inp-obj-label');
+    if (labelEl) labelEl.value = '';
     clearPhoto();
 }
 

@@ -3,7 +3,7 @@
 // ── VERSÃO ────────────────────────────────────────────────────────────────────
 // Muda este número sempre que houver uma nova versão para forçar a actualização
 // nos telemóveis dos utilizadores.
-const CACHE_VERSION = 'v15'; // 2026-05-28 — fix photo display: htaccess repair + reload after save
+const CACHE_VERSION = 'v16'; // 2026-05-29 — add field object (tree/pole) dropdown to capture form
 const CACHE = `soilqi-field-${CACHE_VERSION}`;
 
 const STATIC = [

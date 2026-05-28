@@ -235,6 +235,38 @@ try {
             $response['terrains'] = $stmt->fetchAll();
             break;
 
+        case 'save_field_object':
+            $pdo->exec("
+                CREATE TABLE IF NOT EXISTS field_objects (
+                    id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL, terrain_id INT,
+                    type VARCHAR(50) NOT NULL DEFAULT 'tree', species VARCHAR(100),
+                    label VARCHAR(255), lat DOUBLE, lng DOUBLE, altitude DOUBLE DEFAULT 0,
+                    notes TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_fo_user (user_id), INDEX idx_fo_terrain (terrain_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            ");
+            $type     = sanitizeInput($body['type']      ?? 'tree');
+            $species  = sanitizeInput($body['species']   ?? '');
+            $label    = sanitizeInput($body['label']     ?? '');
+            $lat      = isset($body['lat'])      ? floatval($body['lat'])      : null;
+            $lng      = isset($body['lng'])      ? floatval($body['lng'])      : null;
+            $altitude = isset($body['altitude']) ? floatval($body['altitude']) : 0;
+            $notes    = sanitizeInput($body['notes']     ?? '');
+            $tid      = !empty($body['terrain_id']) ? intval($body['terrain_id']) : null;
+            if ($lat === null || $lng === null || ($lat == 0 && $lng == 0)) {
+                $response['message'] = 'Coordenadas GPS inválidas.';
+                break;
+            }
+            $stmt = $pdo->prepare("
+                INSERT INTO field_objects (user_id, terrain_id, type, species, label, lat, lng, altitude, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([$currentUser['id'], $tid, $type, $species, $label, $lat, $lng, $altitude, $notes]);
+            $response['success'] = true;
+            $response['id']      = (int)$pdo->lastInsertId();
+            $response['message'] = 'Objecto guardado.';
+            break;
+
         case 'delete_measurement':
             $id = intval($body['id'] ?? 0);
             if ($id <= 0) { $response['message'] = 'ID inválido.'; break; }
