@@ -14,6 +14,7 @@ let fieldObjectsLayer   = null;
 let addObjectModeActive = false;
 let fieldObjectsList    = [];
 let _pendingPositions   = [];  // posições acumuladas no modal multi-ponto
+let _pickOverlay        = null; // elemento flutuante no mapa durante o pick mode
 
 // Layers control reference (needed to add/remove saved interpolation overlays)
 let fieldLayersControl  = null;
@@ -97,20 +98,18 @@ function initFieldMap() {
         if (addModeActive) {
             openQuickModal(e.latlng.lat, e.latlng.lng);
         } else if (addObjectModeActive) {
-            // Preenche lat/lng no modal de objectos e desactiva o modo pick
-            const lat = e.latlng.lat.toFixed(7);
-            const lng = e.latlng.lng.toFixed(7);
-            const aoLat = document.getElementById('ao-lat');
-            const aoLng = document.getElementById('ao-lng');
-            if (aoLat) aoLat.value = lat;
-            if (aoLng) aoLng.value = lng;
-            addObjectModeActive = false;
-            fieldMap.getContainer().style.cursor = '';
-            // Re-open the modal
-            document.getElementById('add-obj-backdrop').style.display = 'block';
-            document.getElementById('add-obj-modal').style.display    = 'block';
-            const hint = document.getElementById('ao-pick-hint');
-            if (hint) hint.textContent = `✅ Posição definida: ${lat}, ${lng}`;
+            // Adiciona AUTOMATICAMENTE à lista sem precisar de nenhum botão extra
+            const lat = e.latlng.lat;
+            const lng = e.latlng.lng;
+            _pendingPositions.push({ lat, lng, altitude: 0 });
+            _updatePickModeOverlay();
+
+            // Pequeno marcador visual que desaparece após 1 s
+            const flash = L.circleMarker([lat, lng], {
+                radius: 11, color: '#667eea', fillColor: '#667eea',
+                fillOpacity: 0.55, weight: 2.5
+            }).addTo(fieldMap);
+            setTimeout(() => { try { fieldMap.removeLayer(flash); } catch(_){} }, 900);
         }
     });
 }
@@ -1711,16 +1710,23 @@ function renderFieldObjectsOnMap(objects) {
 function openAddObjectModal(lat, lng) {
     // Resetar tudo, incluindo a lista de posições pendentes
     _pendingPositions = [];
-    document.getElementById('ao-lat').value      = lat != null ? lat : '';
-    document.getElementById('ao-lng').value      = lng != null ? lng : '';
-    document.getElementById('ao-altitude').value = '';
-    document.getElementById('ao-label').value    = '';
-    document.getElementById('ao-notes').value    = '';
-    document.getElementById('ao-species').value  = 'oliveira';
+    _destroyPickOverlay();
+    addObjectModeActive = false;
+    if (fieldMap) fieldMap.getContainer().style.cursor = '';
+
+    // Pre-fill manual coords if provided (e.g. from an external source)
+    const latEl = document.getElementById('ao-lat');
+    const lngEl = document.getElementById('ao-lng');
+    if (latEl) latEl.value = lat != null ? lat : '';
+    if (lngEl) lngEl.value = lng != null ? lng : '';
+    const altEl = document.getElementById('ao-altitude');
+    if (altEl) altEl.value = '';
+
+    document.getElementById('ao-label').value   = '';
+    document.getElementById('ao-notes').value   = '';
+    document.getElementById('ao-species').value = 'oliveira';
     document.querySelector('input[name="ao-type"][value="tree"]').checked = true;
-    const hint   = document.getElementById('ao-pick-hint');
     const status = document.getElementById('ao-status');
-    if (hint)   hint.textContent   = '';
     if (status) status.textContent = '';
     onAoTypeChange();
     renderPendingPositions();
@@ -1734,6 +1740,7 @@ function closeAddObjectModal() {
     document.getElementById('add-obj-modal').style.display    = 'none';
     addObjectModeActive = false;
     _pendingPositions   = [];
+    _destroyPickOverlay();
     if (fieldMap) fieldMap.getContainer().style.cursor = '';
 }
 
@@ -1784,8 +1791,8 @@ function renderPendingPositions() {
 
     // Texto dinâmico no botão
     if (saveBtn) {
-        saveBtn.textContent = n > 0
-            ? `💾 Guardar ${n} objecto${n !== 1 ? 's' : ''}`
+        saveBtn.textContent = n > 1
+            ? `💾 Guardar ${n} objectos`
             : '💾 Guardar Objecto';
     }
 
@@ -1799,13 +1806,14 @@ function renderPendingPositions() {
     listEl.style.display = 'block';
     listEl.innerHTML =
         `<div style="font-size:11px;font-weight:700;color:#166534;margin-bottom:6px;">
-            📋 ${n} posição(ões) na lista:
+            📋 ${n} posição${n !== 1 ? 'ões' : ''} marcada${n !== 1 ? 's' : ''}:
          </div>` +
         _pendingPositions.map((pos, i) => `
-            <div style="display:flex;align-items:center;gap:8px;padding:4px 0;
+            <div style="display:flex;align-items:center;gap:8px;padding:5px 0;
                         border-bottom:1px solid #bbf7d0;font-size:12px;">
-                <span style="color:#16a34a;font-weight:700;flex-shrink:0;min-width:24px;">#${i+1}</span>
-                <span style="font-family:monospace;font-size:11px;color:#374151;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                <span style="color:#16a34a;font-weight:700;flex-shrink:0;min-width:22px;">#${i+1}</span>
+                <span style="font-family:monospace;font-size:11px;color:#374151;flex:1;
+                             overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
                     ${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}
                     ${pos.altitude ? ` · ${pos.altitude.toFixed(1)} m` : ''}
                 </span>
@@ -1815,13 +1823,81 @@ function renderPendingPositions() {
             </div>`).join('');
 }
 
-/** Activa o modo de selecção no mapa (esconde modal temporariamente) */
+/** Activa o modo multi-pick: esconde o modal, mostra overlay flutuante no mapa */
 function activateObjectPickMode() {
     document.getElementById('add-obj-backdrop').style.display = 'none';
     document.getElementById('add-obj-modal').style.display    = 'none';
     addObjectModeActive = true;
     if (fieldMap) fieldMap.getContainer().style.cursor = 'crosshair';
-    showAlert('🗺️ Clique no mapa para definir a posição do objecto.', 'info');
+    _createPickOverlay();
+}
+
+/** Cria o overlay flutuante sobre o mapa durante o modo pick */
+function _createPickOverlay() {
+    _destroyPickOverlay();
+    const container = fieldMap ? fieldMap.getContainer() : document.getElementById('field-map');
+    if (!container) return;
+
+    _pickOverlay = document.createElement('div');
+    _pickOverlay.id = 'obj-pick-overlay';
+    Object.assign(_pickOverlay.style, {
+        position:      'absolute',
+        top:           '12px',
+        left:          '50%',
+        transform:     'translateX(-50%)',
+        zIndex:        '1000',
+        background:    'rgba(20,20,40,.88)',
+        color:         '#fff',
+        borderRadius:  '24px',
+        padding:       '10px 18px',
+        display:       'flex',
+        alignItems:    'center',
+        gap:           '12px',
+        fontSize:      '14px',
+        boxShadow:     '0 4px 16px rgba(0,0,0,.45)',
+        backdropFilter:'blur(6px)',
+        whiteSpace:    'nowrap',
+        pointerEvents: 'auto'
+    });
+    _pickOverlay.innerHTML = `
+        <span style="font-size:20px;line-height:1;">🗺️</span>
+        <span id="pick-mode-label" style="font-size:13px;">Clique no mapa para marcar posições</span>
+        <button onclick="finishObjectPickMode()"
+                style="background:#667eea;color:#fff;border:none;border-radius:16px;
+                       padding:7px 18px;cursor:pointer;font-weight:700;font-size:13px;
+                       flex-shrink:0;transition:background .15s;">
+            ✅ Concluído
+        </button>`;
+    container.appendChild(_pickOverlay);
+}
+
+/** Actualiza o contador no overlay */
+function _updatePickModeOverlay() {
+    const el = document.getElementById('pick-mode-label');
+    if (!el) return;
+    const n = _pendingPositions.length;
+    el.textContent = n === 0
+        ? 'Clique no mapa para marcar posições'
+        : `${n} posição${n !== 1 ? 'ões' : ''} marcada${n !== 1 ? 's' : ''} — continue ou clique Concluído`;
+}
+
+/** Remove o overlay flutuante */
+function _destroyPickOverlay() {
+    if (_pickOverlay) { _pickOverlay.remove(); _pickOverlay = null; }
+    const old = document.getElementById('obj-pick-overlay');
+    if (old) old.remove();
+}
+
+/** Termina o modo pick e reabre o modal com a lista de posições */
+function finishObjectPickMode() {
+    addObjectModeActive = false;
+    _destroyPickOverlay();
+    if (fieldMap) fieldMap.getContainer().style.cursor = '';
+
+    // Reabrir modal
+    document.getElementById('add-obj-backdrop').style.display = 'block';
+    document.getElementById('add-obj-modal').style.display    = 'block';
+    renderPendingPositions();
 }
 
 /** Guarda todos os objectos (lista pendente + coords actuais, se preenchidas) */
