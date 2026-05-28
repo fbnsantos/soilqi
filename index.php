@@ -131,13 +131,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $showTab = !$tabInfo['requiresAuth'] || $isLoggedIn;
                 ?>
                 <?php if ($showTab): ?>
-                    <a href="?tab=<?php echo $tabKey; ?>" 
+                    <a href="?tab=<?php echo $tabKey; ?>"
                        class="nav-item <?php echo $activeTab === $tabKey ? 'active' : ''; ?>">
                         <span class="nav-icon"><?php echo $tabInfo['icon']; ?></span>
                         <span class="nav-text"><?php echo $tabInfo['title']; ?></span>
                     </a>
                 <?php endif; ?>
             <?php endforeach; ?>
+            <?php if ($isLoggedIn): ?>
+                <a href="pwa/" target="_blank" rel="noopener" class="nav-item"
+                   title="Abrir aplicação móvel de recolha de dados">
+                    <span class="nav-icon">📱</span>
+                    <span class="nav-text">PWA</span>
+                </a>
+            <?php endif; ?>
         </div>
     </div>
 
