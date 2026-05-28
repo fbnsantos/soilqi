@@ -467,6 +467,18 @@ function _generateExampleMap() {
     const rng = (a, b) => a + Math.random() * (b - a);
     const ref = { lat: 38.5180, lng: -8.1270, rotation: 12 };
 
+    // ── Parâmetros do DEM — definidos primeiro para poder amostrar nos troncos ─
+    const eW = 30, eH = 25;
+    const eMin = 100.0, eMax = 105.0;
+    const eOx = -1.5, eOy = -1.5, eRes = 1.0;
+    const _elevPx = (epx, epy) => eMin
+        + (epx / eW) * 2.5 + (epy / eH) * 1.5
+        + Math.sin(epx * 0.45) * 0.60 + Math.cos(epy * 0.38 + 0.5) * 0.35;
+    const elevAtWorld = (wx, wy) => _elevPx(
+        Math.max(0, Math.min(eW - 1, (wx - eOx) / eRes)),
+        Math.max(0, Math.min(eH - 1, eH - 1 - (wy - eOy) / eRes))
+    );
+
     // ── Oliveiras: grelha 4×3 com perturbação ────────────────────────────────
     const trees = [];
     const rows = 3, cols = 4, spacingX = 4.5, spacingY = 5.0;
@@ -474,6 +486,7 @@ function _generateExampleMap() {
         for (let c = 0; c < cols; c++) {
             const x = c * spacingX + rng(-0.2, 0.2);
             const y = r * spacingY + rng(-0.2, 0.2);
+            const zBase = elevAtWorld(x, y);   // altitude real do terreno nessa posição
             const height    = rng(2.2, 4.5);
             const trunkR    = rng(0.07, 0.13);
             const canopyR   = rng(0.9, 1.7);
@@ -487,11 +500,11 @@ function _generateExampleMap() {
                 const midR  = rng(0.5, 0.8) * len;
                 const midA  = angle + rng(-0.3, 0.3);
 
-                // Z real: ramo parte do tronco a ~40-55% da altura
-                // e estende-se para fora com ligeira variação vertical
-                const zStart = height * rng(0.38, 0.55);         // junção ao tronco
-                const zMid   = zStart + len * rng(0.06, 0.28);   // ponto de controlo — ligeiro arco
-                const zEnd   = zStart + len * rng(-0.10, 0.32);  // ponta — pode descer ou subir
+                // Z absoluto: o ramo nasce no tronco (zBase + fracção da altura)
+                // e estende-se para fora com ligeira variação vertical real
+                const zStart = zBase + height * rng(0.38, 0.55);        // junção ao tronco
+                const zMid   = zStart + len * rng(0.06, 0.28);          // controlo — arco suave
+                const zEnd   = zStart + len * rng(-0.10, 0.32);         // ponta — pode baixar ou subir
 
                 branches.push({
                     type: 'bezier3',
@@ -507,7 +520,7 @@ function _generateExampleMap() {
             trees.push({
                 id: `T${String(r * cols + c + 1).padStart(3,'0')}`,
                 species: 'olea_europaea',
-                position: [x, y, 0],   // [x, y, z] — z=0: árvore ao nível do solo
+                position: [x, y, zBase],  // z = altitude real do terreno
                 trunk: { height: parseFloat(height.toFixed(2)), radius_base: parseFloat(trunkR.toFixed(3)), radius_apex: parseFloat((trunkR*0.5).toFixed(3)) },
                 branches,
                 canopy_radius: parseFloat(canopyR.toFixed(2)),
@@ -519,19 +532,14 @@ function _generateExampleMap() {
     }
 
     // ── Mapa de elevação: 30×25 células, 1 m/célula ───────────────────────────
-    const eW = 30, eH = 25;
-    const eMin = 96.0, eMax = 112.0;
+    // (eW, eH, eMin, eMax, _elevPx, elevAtWorld foram definidos acima)
     const elevCanvas = document.createElement('canvas');
     elevCanvas.width = eW; elevCanvas.height = eH;
     const eCtx = elevCanvas.getContext('2d');
     const eImg = eCtx.createImageData(eW, eH);
     for (let py = 0; py < eH; py++) {
         for (let px = 0; px < eW; px++) {
-            const e = eMin
-                + (px / eW) * 9
-                + (py / eH) * 4
-                + Math.sin(px * 0.45) * 1.2
-                + Math.cos(py * 0.38 + 0.5) * 0.8;
+            const e = _elevPx(px, py);
             const t = Math.max(0, Math.min(1, (e - eMin) / (eMax - eMin)));
             // Gradiente terreno: verde escuro → amarelo-verde → castanho claro
             let rv, gv, bv;
@@ -852,14 +860,23 @@ function _render3DMap(mapData) {
     if (!_3d.scene) return;
     _clear3DObjects();
 
-    const layers  = mapData.layers || [];
-    let   hasElev = false;
+    const layers = mapData.layers || [];
+    let hasElev  = false;
+
+    // Recolher contexto de elevação — necessário para alinhar bases dos troncos
+    const elevCtx = { minE: 0, maxE: 0 };
+    layers.forEach(l => {
+        if (l.type === 'elevation') {
+            elevCtx.minE = l.min_elevation || 0;
+            elevCtx.maxE = l.max_elevation || 0;
+        }
+    });
 
     layers.forEach(layer => {
         try {
-            if (layer.type === 'elevation') { _render3DElev(layer);  hasElev = true; }
-            if (layer.type === 'occupancy') { _render3DOcc(layer);  }
-            if (layer.type === 'trees')     { _render3DTrees(layer); }
+            if (layer.type === 'elevation') { _render3DElev(layer);              hasElev = true; }
+            if (layer.type === 'occupancy') { _render3DOcc(layer);                              }
+            if (layer.type === 'trees')     { _render3DTrees(layer, elevCtx);                   }
         } catch (e) { console.warn('[3D] Erro na camada', layer.type, e); }
     });
 
@@ -876,11 +893,11 @@ function _render3DMap(mapData) {
     ax.userData.sem = true;
     _3d.scene.add(ax);
 
-    _fit3DCamera(mapData);
+    _fit3DCamera(mapData, elevCtx);
 }
 
 /** Posicionar câmara para ver a área completa */
-function _fit3DCamera(mapData) {
+function _fit3DCamera(mapData, elevCtx) {
     let maxW = 15, cx = 0, cz = 0;
     (mapData.layers || []).forEach(l => {
         if (l.origin && l.width && l.resolution) {
@@ -891,9 +908,11 @@ function _fit3DCamera(mapData) {
             cz   = -(l.origin[1] + h / 2);
         }
     });
-    const d = maxW * 0.85;
-    _3d.camera.position.set(cx + d * 0.65, d * 0.55, cz + d * 0.65);
-    const target = new THREE.Vector3(cx, 0, cz);
+    const d    = maxW * 0.85;
+    // Apontar para o centro médio do terreno (metade da amplitude de elevação)
+    const midH = elevCtx ? (elevCtx.maxE - elevCtx.minE) / 2 : 0;
+    _3d.camera.position.set(cx + d * 0.65, d * 0.55 + midH, cz + d * 0.65);
+    const target = new THREE.Vector3(cx, midH, cz);
     _3d.camera.lookAt(target);
     if (_3d.controls) { _3d.controls.target.copy(target); _3d.controls.update(); }
 }
@@ -903,12 +922,15 @@ function _fit3DCamera(mapData) {
 //   X local (este)  = X Three.js
 //   Y local (norte) = -Z Three.js
 //   Z local (cima)  =  Y Three.js
-function _render3DTrees(layer) {
+function _render3DTrees(layer, elevCtx) {
+    // minE: altitude mínima do terreno — subtrai para que o chão fique em y=0
+    const minE = elevCtx?.minE ?? 0;
+
     const MAT_TRUNK  = new THREE.MeshLambertMaterial({ color: 0x8B5E3C });
     const MAT_BRANCH = new THREE.MeshLambertMaterial({ color: 0x7B4F2E });
 
     for (const tree of (layer.data || [])) {
-        // position pode ser [x,y] (legacy) ou [x,y,z] (3D)
+        // position pode ser [x,y] (legacy) ou [x,y,z] (3D com altitude real)
         const [lx, ly, lz = 0] = tree.position || [0, 0, 0];
 
         const trunk  = tree.trunk || {};
@@ -916,9 +938,10 @@ function _render3DTrees(layer) {
         const rBase  = trunk.radius_base || 0.10;
         const rTop   = Math.max(0.025, rBase * 0.50);
 
-        // Grupo posicionado na base do tronco (converte local→Three.js)
+        // Grupo na base do tronco — Y = altitude relativa ao mínimo do terreno
+        // local(x, y, z)  →  Three.js(X=x, Y=z−minE, Z=−y)
         const grp = new THREE.Group();
-        grp.position.set(lx, lz, -ly);   // local(x,y,z) → Three.js(X=x, Y=z, Z=-y)
+        grp.position.set(lx, lz - minE, -ly);
         grp.userData.sem = true;
 
         // Tronco (cilindro cónico — em espaço local do grupo, Y é "cima")
@@ -1010,7 +1033,7 @@ function _render3DElev(layer) {
         const [ox, oy] = layer.origin || [0, 0];
         const minE = layer.min_elevation || 0;
         const maxE = layer.max_elevation || 15;
-        const VSCALE = 0.30;    // exageração vertical (ajustar ao gosto)
+        const VSCALE = 1.0;     // escala real — sem exageração vertical
 
         // Ler pixels da imagem
         const cvs = document.createElement('canvas');
