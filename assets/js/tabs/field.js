@@ -110,7 +110,7 @@ function ecClass(ec) {
     return 'ec-vhigh';
 }
 
-function updateMap(measurements) {
+function updateMap(measurements, skipZoom) {
     if (!fieldMap) return;
     markerLayer.clearLayers();
 
@@ -149,22 +149,26 @@ function updateMap(measurements) {
         markerLayer.addLayer(marker);
     });
 
-    // Ajusta zoom para caber todos os pontos
-    if (valid.length === 1) {
-        fieldMap.setView([parseFloat(valid[0].latitude), parseFloat(valid[0].longitude)], 14);
-    } else {
-        const bounds = L.latLngBounds(valid.map(m => [parseFloat(m.latitude), parseFloat(m.longitude)]));
-        fieldMap.fitBounds(bounds, { padding: [40, 40] });
+    // Ajusta zoom para caber todos os pontos (a menos que skipZoom esteja activo)
+    if (!skipZoom) {
+        if (valid.length === 1) {
+            fieldMap.setView([parseFloat(valid[0].latitude), parseFloat(valid[0].longitude)], 14);
+        } else {
+            const bounds = L.latLngBounds(valid.map(m => [parseFloat(m.latitude), parseFloat(m.longitude)]));
+            fieldMap.fitBounds(bounds, { padding: [40, 40] });
+        }
     }
 }
 
 // ── Filtros ───────────────────────────────────────────────────────────────────
 function applyFilters() {
+    const terrainId = document.getElementById('filter-terrain')?.value || '';
+
     const fd = new FormData();
     fd.append('action',     'get_field_measurements');
     fd.append('date_from',  document.getElementById('filter-date-from')?.value  || '');
     fd.append('date_to',    document.getElementById('filter-date-to')?.value    || '');
-    fd.append('terrain_id', document.getElementById('filter-terrain')?.value    || '');
+    fd.append('terrain_id', terrainId);
 
     const userSel = document.getElementById('filter-user');
     if (userSel) fd.append('user_id', userSel.value || '');
@@ -181,12 +185,36 @@ function applyFilters() {
             }
             allMeasurements = data.measurements || [];
             updateStats(data.stats);
-            updateMap(allMeasurements);
+            // Se há terreno selecionado, o zoom é feito pelo polígono (skipZoom=true aqui)
+            updateMap(allMeasurements, !!terrainId);
             renderTable(allMeasurements);
+            if (terrainId) _zoomToFilterTerrain(terrainId);
         })
         .catch(() => {
             wrap.innerHTML = '<div class="sql-error">❌ Erro ao carregar medições.</div>';
         });
+}
+
+// Centra o mapa no polígono do terreno selecionado no filtro
+function _zoomToFilterTerrain(terrainId) {
+    if (!fieldMap || !terrainId) return;
+    const fd = new FormData();
+    fd.append('action',     'get_terrain_geom');
+    fd.append('terrain_id', terrainId);
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success || !data.terrain) return;
+            const poly = JSON.parse(data.terrain.coordinates);
+            const lats = poly.map(c => c.lat !== undefined ? c.lat : c[0]);
+            const lngs = poly.map(c => c.lng !== undefined ? c.lng : c[1]);
+            fieldMap.fitBounds(
+                [[Math.min(...lats), Math.min(...lngs)],
+                 [Math.max(...lats), Math.max(...lngs)]],
+                { padding: [40, 40] }
+            );
+        })
+        .catch(() => {});
 }
 
 function clearFilters() {
