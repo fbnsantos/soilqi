@@ -65,6 +65,7 @@ function initSemanticMap() {
 
     semMap.on('load', function () {
         loadSemTerrains();
+        loadFieldObjectsForSem();
         setSemStatus('Mapa pronto. Carregue um exemplo ou importe um ficheiro JSON.');
     });
 }
@@ -1370,4 +1371,200 @@ function _render3DOcc(layer) {
         _3d.scene.add(instMesh);
     };
     img.src = layer.data || '';
+}
+
+// ── Gerar Mapa Semântico a partir de Objectos de Campo ───────────────────────
+
+let _semFieldData = null;  // { terrains: [...], objects: [...] }
+
+/** Carrega terrenos + objectos de campo do servidor */
+function loadFieldObjectsForSem() {
+    const el = document.getElementById('sem-field-terrains');
+    if (el) el.innerHTML = '<div style="color:#9ca3af;font-size:12px;text-align:center;padding:4px;">A carregar…</div>';
+
+    const fd = new FormData();
+    fd.append('action', 'get_field_objects_for_sem');
+    fetch('?tab=semantic', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                if (el) el.innerHTML = '<div style="color:#6b7280;font-size:12px;">Sem dados de campo.</div>';
+                return;
+            }
+            _semFieldData = data;
+            _renderSemFieldTerrains(data);
+        })
+        .catch(() => {
+            if (el) el.innerHTML = '<div style="color:#6b7280;font-size:12px;">Sem dados disponíveis.</div>';
+        });
+}
+
+/** Renderiza a lista de terrenos no painel lateral */
+function _renderSemFieldTerrains(data) {
+    const el = document.getElementById('sem-field-terrains');
+    if (!el) return;
+    const terrains = data.terrains || [];
+    if (!terrains.length) {
+        el.innerHTML = '<div style="color:#9ca3af;font-size:12px;text-align:center;">Sem terrenos definidos.</div>';
+        return;
+    }
+    el.innerHTML = terrains.map(t => {
+        const cnt   = parseInt(t.object_count) || 0;
+        const trees = parseInt(t.tree_count)   || 0;
+        const poles = parseInt(t.pole_count)   || 0;
+        return `
+            <div style="padding:6px 0; border-bottom:1px solid #f3f4f6;">
+                <div style="font-size:12px; font-weight:600; color:#374151;
+                            white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"
+                     title="${_esc(t.name)}">${_esc(t.name)}</div>
+                <div style="font-size:11px; color:#6b7280; margin-top:2px;">
+                    🌳 ${trees} árv. &nbsp; 🪵 ${poles} postes
+                </div>
+                ${cnt > 0 ? `
+                <button class="btn btn-primary btn-sm"
+                        onclick="generateSemFromField(${t.id})"
+                        style="margin-top:5px; width:100%; font-size:11px; padding:4px 8px;">
+                    🤖 Gerar Mapa Semântico
+                </button>` : `
+                <div style="font-size:11px; color:#9ca3af; margin-top:4px; font-style:italic;">
+                    Sem objectos registados
+                </div>`}
+            </div>`;
+    }).join('');
+}
+
+/**
+ * Converte GPS (lat, lng) para coordenadas locais (metros) relativas
+ * a um ponto de referência (refLat, refLng).
+ * Retorna [x_este_m, y_norte_m].
+ */
+function _gpsToLocal(lat, lng, refLat, refLng) {
+    const R    = 6371000;
+    const dLat = (lat - refLat) * Math.PI / 180;
+    const dLng = (lng - refLng) * Math.PI / 180;
+    const y    = dLat * R;
+    const x    = dLng * R * Math.cos(refLat * Math.PI / 180);
+    return [x, y];
+}
+
+/** Parâmetros por espécie: tronco, ramos, copa, frutos */
+const _SPECIES_DEFAULTS = {
+    oliveira:    { trunkH: 2.5, trunkR: 0.14, canopyR: 1.8, fruitColor: '#3B5A1A', fruitR: 0.018 },
+    videira:     { trunkH: 0.7, trunkR: 0.03, canopyR: 0.5, fruitColor: '#6B2FA0', fruitR: 0.012 },
+    macieira:    { trunkH: 2.0, trunkR: 0.10, canopyR: 1.5, fruitColor: '#c0392b', fruitR: 0.040 },
+    macieira_2d: { trunkH: 2.0, trunkR: 0.08, canopyR: 1.2, fruitColor: '#c0392b', fruitR: 0.035 },
+    pereira:     { trunkH: 2.5, trunkR: 0.09, canopyR: 1.4, fruitColor: '#d4a017', fruitR: 0.038 },
+    outro:       { trunkH: 2.0, trunkR: 0.10, canopyR: 1.4, fruitColor: '#2ecc71', fruitR: 0.020 }
+};
+
+/**
+ * Gera e carrega um mapa semântico a partir dos objectos de campo
+ * registados para o terreno com o id dado.
+ */
+function generateSemFromField(terrainId) {
+    if (!_semFieldData) { loadFieldObjectsForSem(); return; }
+
+    const terrain = (_semFieldData.terrains || []).find(t => String(t.id) === String(terrainId));
+    if (!terrain) { setSemStatus('❌ Terreno não encontrado.'); return; }
+
+    const objects = (_semFieldData.objects || []).filter(o => String(o.terrain_id) === String(terrainId));
+    if (!objects.length) { setSemStatus('⚠️ Sem objectos registados neste terreno.'); return; }
+
+    // Ponto de referência: centróide do polígono do terreno (ou 1.º objecto)
+    let refLat, refLng;
+    if (terrain.coordinates) {
+        try {
+            const coords = JSON.parse(terrain.coordinates);
+            if (Array.isArray(coords) && coords.length) {
+                refLat = coords.reduce((s, c) => s + (c.lat !== undefined ? c.lat : c[0]), 0) / coords.length;
+                refLng = coords.reduce((s, c) => s + (c.lng !== undefined ? c.lng : c[1]), 0) / coords.length;
+            }
+        } catch (e) { /* ignorar */ }
+    }
+    if (!refLat) {
+        refLat = parseFloat(objects[0].lat);
+        refLng = parseFloat(objects[0].lng);
+    }
+
+    const treeObjs = objects.filter(o => o.type === 'tree');
+    const poleObjs = objects.filter(o => o.type === 'pole');
+    const layers   = [];
+
+    // ── Camada de árvores ──────────────────────────────────────────────────────
+    if (treeObjs.length) {
+        const treesData = treeObjs.map(obj => {
+            const [lx, ly] = _gpsToLocal(parseFloat(obj.lat), parseFloat(obj.lng), refLat, refLng);
+            const alt  = parseFloat(obj.altitude) || 0;
+            const sp   = obj.species || 'outro';
+            const def  = _SPECIES_DEFAULTS[sp] || _SPECIES_DEFAULTS.outro;
+            const h    = def.trunkH;
+            const r    = def.trunkR;
+            const cr   = def.canopyR;
+
+            // 3 ramos simples distribuídos a 120°
+            const branchStartH = h * 0.65;
+            const branches = [0, 120, 240].map(deg => {
+                const rad = deg * Math.PI / 180;
+                const bz0 = alt + branchStartH;
+                const bx1 = lx + cr * 0.5 * Math.cos(rad);
+                const by1 = ly + cr * 0.5 * Math.sin(rad);
+                const bz1 = alt + branchStartH + h * 0.12;
+                const bx2 = lx + cr * Math.cos(rad);
+                const by2 = ly + cr * Math.sin(rad);
+                const bz2 = alt + branchStartH - h * 0.04;
+                return {
+                    type:   'bezier3',
+                    points: [[lx, ly, bz0], [bx1, by1, bz1], [bx2, by2, bz2]],
+                    taper:  { max: r * 1.4, a: r * 1.1 }
+                };
+            });
+
+            return {
+                id:            obj.label || String(obj.id),
+                position:      [lx, ly, alt],
+                species:       sp,
+                trunk:         { height: h, taper: { max: r * 2, a: r * 2 * 0.75 } },
+                branches,
+                canopy_radius: cr,
+                health:        'good',
+                fruit_spec:    { color: def.fruitColor, radius: def.fruitR }
+            };
+        });
+        layers.push({ type: 'trees', data: treesData });
+    }
+
+    // ── Camada de postes ───────────────────────────────────────────────────────
+    if (poleObjs.length) {
+        const polesData = poleObjs.map(obj => {
+            const [lx, ly] = _gpsToLocal(parseFloat(obj.lat), parseFloat(obj.lng), refLat, refLng);
+            const alt = parseFloat(obj.altitude) || 0;
+            return {
+                id:       obj.label || String(obj.id),
+                position: [lx, ly, alt],
+                height:   2.0,
+                shape:    'cylinder',
+                diameter: 0.12,
+                taper:    { max: 0.12, a: 0.04 },
+                color:    '#7B4F2E'
+            };
+        });
+        layers.push({ type: 'poles', data: polesData });
+    }
+
+    const mapData = {
+        type:      'semantic_map',
+        version:   '1.0',
+        name:      `Campo — ${terrain.name}`,
+        reference: { lat: refLat, lng: refLng, rotation: 0 },
+        layers
+    };
+
+    // Carregar no visualizador
+    currentSemData = mapData;
+    renderSemanticMap(mapData);
+    setSemStatus(`✅ Gerado: ${treeObjs.length} árv., ${poleObjs.length} postes — "${terrain.name}"`);
+
+    // Pré-preencher campo de gravação
+    const nameEl = document.getElementById('sem-save-name');
+    if (nameEl && !nameEl.value) nameEl.value = `Mapa Semântico — ${terrain.name}`;
 }

@@ -84,6 +84,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 $response['success']  = true;
                 $response['terrains'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 break;
+
+            case 'get_field_objects_for_sem':
+                // Garantir tabela field_objects
+                $pdo->exec("
+                    CREATE TABLE IF NOT EXISTS field_objects (
+                        id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL, terrain_id INT,
+                        type VARCHAR(50) NOT NULL DEFAULT 'tree', species VARCHAR(100),
+                        label VARCHAR(255), lat DOUBLE, lng DOUBLE, altitude DOUBLE DEFAULT 0,
+                        notes TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_fo_user (user_id), INDEX idx_fo_terrain (terrain_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                ");
+                // Terrenos do utilizador com contagem de objectos
+                $stmt = $pdo->prepare("
+                    SELECT t.id, t.name, t.coordinates, t.area,
+                           COUNT(o.id)              AS object_count,
+                           SUM(o.type = 'tree') + 0 AS tree_count,
+                           SUM(o.type = 'pole') + 0 AS pole_count
+                    FROM terrains t
+                    LEFT JOIN field_objects o ON o.terrain_id = t.id AND o.user_id = ?
+                    WHERE t.user_id = ?
+                    GROUP BY t.id
+                    ORDER BY t.name
+                ");
+                $stmt->execute([$currentUser['id'], $currentUser['id']]);
+                $terrains = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+                // Todos os objectos do utilizador
+                $stmt2 = $pdo->prepare("
+                    SELECT * FROM field_objects WHERE user_id = ?
+                    ORDER BY terrain_id, type, created_at
+                ");
+                $stmt2->execute([$currentUser['id']]);
+                $objects = $stmt2->fetchAll(PDO::FETCH_ASSOC);
+
+                $response['success']  = true;
+                $response['terrains'] = $terrains;
+                $response['objects']  = $objects;
+                break;
         }
     } catch (PDOException $e) {
         $response['message'] = 'Erro BD: ' . $e->getMessage();
@@ -236,6 +275,23 @@ if ($isLoggedIn) {
                 <input type="checkbox" id="sem-show-terrains" onchange="toggleSemTerrains(this.checked)" checked>
                 Mostrar polígonos de terreno
             </label>
+        </div>
+
+        <!-- Gerar de Objectos de Campo -->
+        <div class="sem-panel">
+            <h4>🤖 Gerar de Campo</h4>
+            <p style="font-size:11px; color:#6b7280; margin:0 0 8px; line-height:1.5;">
+                Converte árvores e postes registados no campo em mapa semântico 3D.
+            </p>
+            <div id="sem-field-terrains" style="margin-bottom:8px;">
+                <div style="color:#9ca3af; font-size:12px; text-align:center; padding:4px 0;">
+                    A carregar…
+                </div>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="loadFieldObjectsForSem()"
+                    style="width:100%; font-size:11px;">
+                🔄 Actualizar
+            </button>
         </div>
 
         <!-- Formato do ficheiro -->

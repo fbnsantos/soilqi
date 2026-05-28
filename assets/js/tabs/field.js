@@ -9,6 +9,11 @@ let interpolationOverlay = null;
 let addModeActive       = false;
 let tempMarker          = null;
 
+// Field objects (trees / poles)
+let fieldObjectsLayer   = null;
+let addObjectModeActive = false;
+let fieldObjectsList    = [];
+
 // Layers control reference (needed to add/remove saved interpolation overlays)
 let fieldLayersControl  = null;
 // Saved interpolations: id -> Leaflet imageOverlay currently on map
@@ -61,7 +66,8 @@ function initFieldMap() {
         { position: 'topright', collapsed: true }
     ).addTo(fieldMap);
 
-    markerLayer = L.layerGroup().addTo(fieldMap);
+    markerLayer       = L.layerGroup().addTo(fieldMap);
+    fieldObjectsLayer = L.layerGroup().addTo(fieldMap);
 
     // ── Controlo "Adicionar medição" ──────────────────────────────────────────
     const AddControl = L.Control.extend({
@@ -87,8 +93,24 @@ function initFieldMap() {
 
     // ── Listener de clique no mapa ────────────────────────────────────────────
     fieldMap.on('click', function (e) {
-        if (!addModeActive) return;
-        openQuickModal(e.latlng.lat, e.latlng.lng);
+        if (addModeActive) {
+            openQuickModal(e.latlng.lat, e.latlng.lng);
+        } else if (addObjectModeActive) {
+            // Preenche lat/lng no modal de objectos e desactiva o modo pick
+            const lat = e.latlng.lat.toFixed(7);
+            const lng = e.latlng.lng.toFixed(7);
+            const aoLat = document.getElementById('ao-lat');
+            const aoLng = document.getElementById('ao-lng');
+            if (aoLat) aoLat.value = lat;
+            if (aoLng) aoLng.value = lng;
+            addObjectModeActive = false;
+            fieldMap.getContainer().style.cursor = '';
+            // Re-open the modal
+            document.getElementById('add-obj-backdrop').style.display = 'block';
+            document.getElementById('add-obj-modal').style.display    = 'block';
+            const hint = document.getElementById('ao-pick-hint');
+            if (hint) hint.textContent = `✅ Posição definida: ${lat}, ${lng}`;
+        }
     });
 }
 
@@ -1529,6 +1551,274 @@ function deleteGeoJSONLayer(id, name) {
             }
         })
         .catch(() => showAlert('Erro de rede.', 'error'));
+}
+
+// ── Objectos de Campo (árvores, plantas, postes) ──────────────────────────────
+
+const SPECIES_ICON = {
+    oliveira:    '🫒',
+    videira:     '🍇',
+    macieira:    '🍎',
+    macieira_2d: '🍎',
+    pereira:     '🍐',
+    outro:       '🌳'
+};
+const SPECIES_COLOR = {
+    oliveira:    '#84cc16',
+    videira:     '#7c3aed',
+    macieira:    '#ef4444',
+    macieira_2d: '#f97316',
+    pereira:     '#eab308',
+    outro:       '#22c55e'
+};
+
+function toggleObjectsPanel() {
+    const panel = document.getElementById('objects-panel');
+    const btn   = document.getElementById('objects-toggle-btn');
+    if (!panel) return;
+    const open = panel.style.display === 'none';
+    panel.style.display = open ? 'block' : 'none';
+    if (btn) btn.textContent = open ? '▲ Recolher' : '▼ Expandir';
+    if (open && fieldObjectsList.length === 0) loadFieldObjects();
+}
+
+function loadFieldObjects() {
+    const tid = document.getElementById('obj-filter-terrain')?.value || '';
+    const listEl = document.getElementById('objects-list');
+    if (listEl) listEl.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;">A carregar…</div>';
+
+    const fd = new FormData();
+    fd.append('action', 'get_field_objects');
+    if (tid) fd.append('terrain_id', tid);
+
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                if (listEl) listEl.innerHTML = `<div style="color:#ef4444;font-size:13px;">⚠️ ${escHtml(data.message || 'Erro')}</div>`;
+                return;
+            }
+            fieldObjectsList = data.objects || [];
+            renderFieldObjectsList(fieldObjectsList);
+            renderFieldObjectsOnMap(fieldObjectsList);
+        })
+        .catch(() => {
+            if (listEl) listEl.innerHTML = '<div style="color:#ef4444;font-size:13px;">❌ Erro de rede.</div>';
+        });
+}
+
+function renderFieldObjectsList(objects) {
+    const listEl = document.getElementById('objects-list');
+    if (!listEl) return;
+
+    if (!objects.length) {
+        listEl.innerHTML = `
+            <div style="text-align:center; padding:30px; color:#9ca3af;">
+                <div style="font-size:36px; margin-bottom:8px;">🌱</div>
+                <p style="font-size:13px;">Ainda não foram registados objectos de campo.</p>
+                <p style="font-size:12px;">Clique em <strong>➕ Adicionar objecto</strong> para começar.</p>
+            </div>`;
+        return;
+    }
+
+    const rows = objects.map(obj => {
+        const icon    = obj.type === 'pole' ? '🪵' : (SPECIES_ICON[obj.species] || '🌳');
+        const species = obj.type === 'pole' ? 'Poste' : (obj.species || 'Outro');
+        const lat     = parseFloat(obj.lat).toFixed(6);
+        const lng     = parseFloat(obj.lng).toFixed(6);
+        const terrain = obj.terrain_name ? `<span style="color:#667eea;font-size:11px;">📍 ${escHtml(obj.terrain_name)}</span>` : '';
+        const label   = obj.label ? `<strong>${escHtml(obj.label)}</strong> · ` : '';
+        const dt      = new Date(obj.created_at).toLocaleDateString('pt-PT', { day:'2-digit', month:'2-digit', year:'2-digit' });
+
+        return `
+            <div style="display:flex; align-items:center; gap:10px; padding:8px 0;
+                        border-bottom:1px solid #f3f4f6; font-size:13px;">
+                <span style="font-size:22px; flex-shrink:0;">${icon}</span>
+                <div style="flex:1; min-width:0;">
+                    <div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                        ${label}<em>${escHtml(species)}</em>
+                    </div>
+                    <div style="font-family:monospace; font-size:11px; color:#9ca3af;">${lat}, ${lng}</div>
+                    <div>${terrain}</div>
+                </div>
+                <div style="font-size:10px; color:#d1d5db; flex-shrink:0;">${dt}</div>
+                <button onclick="deleteFieldObject(${obj.id}, '${escHtml(obj.label || species)}')"
+                        class="btn btn-danger btn-sm"
+                        style="padding:2px 7px; font-size:11px; flex-shrink:0;" title="Eliminar">🗑️</button>
+            </div>`;
+    }).join('');
+
+    listEl.innerHTML = `<div style="font-size:12px;color:#6b7280;margin-bottom:6px;">${objects.length} objecto(s)</div>` + rows;
+}
+
+function renderFieldObjectsOnMap(objects) {
+    if (!fieldObjectsLayer) return;
+    fieldObjectsLayer.clearLayers();
+
+    objects.forEach(obj => {
+        const lat = parseFloat(obj.lat);
+        const lng = parseFloat(obj.lng);
+        if (!lat && !lng) return;
+
+        const isTree = obj.type === 'tree';
+        const color  = isTree ? (SPECIES_COLOR[obj.species] || '#22c55e') : '#92400e';
+        const icon   = isTree ? (SPECIES_ICON[obj.species] || '🌳') : '🪵';
+        const shape  = isTree ? 'circle' : 'square';
+
+        // Use divIcon for distinctive markers
+        const divIcon = L.divIcon({
+            className: '',
+            html: `<div style="
+                width:${isTree ? 22 : 18}px; height:${isTree ? 22 : 18}px;
+                background:${color}; border:2.5px solid #fff;
+                border-radius:${isTree ? '50%' : '4px'};
+                box-shadow:0 1px 4px rgba(0,0,0,.4);
+                display:flex; align-items:center; justify-content:center;
+                font-size:11px; line-height:1;">
+                ${icon}
+            </div>`,
+            iconSize: [22, 22],
+            iconAnchor: [11, 11]
+        });
+
+        const marker = L.marker([lat, lng], { icon: divIcon });
+
+        const species = obj.type === 'pole' ? 'Poste' : (obj.species || 'Outro');
+        const label   = obj.label ? `<strong>${escHtml(obj.label)}</strong><br>` : '';
+        const alt     = parseFloat(obj.altitude) ? `<br>Alt: ${parseFloat(obj.altitude).toFixed(1)} m` : '';
+        const terrain = obj.terrain_name ? `<br><span style="color:#667eea">📍 ${escHtml(obj.terrain_name)}</span>` : '';
+        const notes   = obj.notes ? `<br><span style="color:#6b7280;font-size:11px;">💬 ${escHtml(obj.notes)}</span>` : '';
+
+        marker.bindPopup(`
+            <div style="font-size:13px; line-height:1.6; min-width:150px;">
+                ${label}
+                <strong>${icon} ${escHtml(species)}</strong>${terrain}${alt}${notes}
+                <br><span style="font-family:monospace;font-size:10px;color:#9ca3af;">
+                    ${parseFloat(obj.lat).toFixed(6)}, ${parseFloat(obj.lng).toFixed(6)}
+                </span>
+                <br><button onclick="deleteFieldObject(${obj.id}, '${escHtml(obj.label || species)}')"
+                            class="btn btn-danger btn-sm" style="margin-top:4px;font-size:11px;padding:2px 6px;">
+                    🗑️ Eliminar
+                </button>
+            </div>
+        `);
+
+        fieldObjectsLayer.addLayer(marker);
+    });
+}
+
+function openAddObjectModal(lat, lng) {
+    // Reset form
+    document.getElementById('ao-lat').value     = lat != null ? lat : '';
+    document.getElementById('ao-lng').value     = lng != null ? lng : '';
+    document.getElementById('ao-altitude').value = '';
+    document.getElementById('ao-label').value   = '';
+    document.getElementById('ao-notes').value   = '';
+    document.getElementById('ao-species').value = 'oliveira';
+    document.querySelector('input[name="ao-type"][value="tree"]').checked = true;
+    const hint = document.getElementById('ao-pick-hint');
+    if (hint) hint.textContent = '';
+    const status = document.getElementById('ao-status');
+    if (status) status.textContent = '';
+    onAoTypeChange();
+
+    document.getElementById('add-obj-backdrop').style.display = 'block';
+    document.getElementById('add-obj-modal').style.display    = 'block';
+}
+
+function closeAddObjectModal() {
+    document.getElementById('add-obj-backdrop').style.display = 'none';
+    document.getElementById('add-obj-modal').style.display    = 'none';
+    addObjectModeActive = false;
+    if (fieldMap) fieldMap.getContainer().style.cursor = '';
+}
+
+function onAoTypeChange() {
+    const isTree = document.querySelector('input[name="ao-type"]:checked')?.value === 'tree';
+    const speciesRow = document.getElementById('ao-species-row');
+    if (speciesRow) speciesRow.style.display = isTree ? 'block' : 'none';
+    // Highlight selected type
+    document.getElementById('ao-type-tree-lbl').style.borderColor = isTree ? '#667eea' : '#e5e7eb';
+    document.getElementById('ao-type-tree-lbl').style.background  = isTree ? '#eef2ff' : '';
+    document.getElementById('ao-type-pole-lbl').style.borderColor = !isTree ? '#667eea' : '#e5e7eb';
+    document.getElementById('ao-type-pole-lbl').style.background  = !isTree ? '#eef2ff' : '';
+}
+
+function activateObjectPickMode() {
+    // Hide modal temporarily, let user click on map
+    document.getElementById('add-obj-backdrop').style.display = 'none';
+    document.getElementById('add-obj-modal').style.display    = 'none';
+    addObjectModeActive = true;
+    if (fieldMap) fieldMap.getContainer().style.cursor = 'crosshair';
+    // Show a brief toast hint
+    showAlert('🗺️ Clique no mapa para definir a posição do objecto.', 'info');
+}
+
+function saveFieldObject() {
+    const type     = document.querySelector('input[name="ao-type"]:checked')?.value || 'tree';
+    const species  = document.getElementById('ao-species')?.value   || '';
+    const label    = document.getElementById('ao-label')?.value     || '';
+    const lat      = parseFloat(document.getElementById('ao-lat')?.value);
+    const lng      = parseFloat(document.getElementById('ao-lng')?.value);
+    const altitude = parseFloat(document.getElementById('ao-altitude')?.value) || 0;
+    const notes    = document.getElementById('ao-notes')?.value     || '';
+    const tid      = document.getElementById('ao-terrain')?.value   || '';
+
+    if (!lat || !lng) {
+        const status = document.getElementById('ao-status');
+        if (status) { status.textContent = '⚠️ Defina a posição GPS.'; status.style.color = '#ef4444'; }
+        return;
+    }
+
+    const fd = new FormData();
+    fd.append('action',     'save_field_object');
+    fd.append('type',       type);
+    fd.append('species',    species);
+    fd.append('label',      label);
+    fd.append('lat',        lat);
+    fd.append('lng',        lng);
+    fd.append('altitude',   altitude);
+    fd.append('notes',      notes);
+    fd.append('terrain_id', tid);
+
+    const status = document.getElementById('ao-status');
+    if (status) { status.textContent = '⏳'; status.style.color = '#6b7280'; }
+
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                closeAddObjectModal();
+                showAlert('✅ Objecto guardado com sucesso!', 'success');
+                loadFieldObjects();
+            } else {
+                if (status) { status.textContent = '❌ ' + (data.message || 'Erro'); status.style.color = '#ef4444'; }
+            }
+        })
+        .catch(() => {
+            if (status) { status.textContent = '❌ Erro de rede.'; status.style.color = '#ef4444'; }
+        });
+}
+
+function deleteFieldObject(id, name) {
+    if (!confirm(`Eliminar "${name}"?`)) return;
+    const fd = new FormData();
+    fd.append('action', 'delete_field_object');
+    fd.append('id',     id);
+
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showAlert('🗑️ Objecto eliminado.', 'info');
+                // Close any open popup
+                if (fieldMap) fieldMap.closePopup();
+                loadFieldObjects();
+            } else {
+                showAlert('❌ ' + (data.message || 'Erro'), 'error');
+            }
+        })
+        .catch(() => showAlert('❌ Erro de rede.', 'error'));
 }
 
 // ── Util ──────────────────────────────────────────────────────────────────────

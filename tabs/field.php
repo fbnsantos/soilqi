@@ -104,6 +104,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
     try {
         $pdo = getDBConnection();
 
+        // Auto-migração: objectos de campo (árvores, plantas, postes)
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS field_objects (
+                id          INT AUTO_INCREMENT PRIMARY KEY,
+                user_id     INT NOT NULL,
+                terrain_id  INT,
+                type        VARCHAR(50)  NOT NULL DEFAULT 'tree',
+                species     VARCHAR(100),
+                label       VARCHAR(255),
+                lat         DOUBLE,
+                lng         DOUBLE,
+                altitude    DOUBLE DEFAULT 0,
+                notes       TEXT,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_fo_user    (user_id),
+                INDEX idx_fo_terrain (terrain_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+
         switch ($action) {
 
             case 'get_field_measurements':
@@ -582,6 +601,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                     $response['message'] = 'Não encontrada ou sem permissão.';
                 }
                 break;
+
+            case 'save_field_object':
+                $type     = sanitizeInput($_POST['type']      ?? 'tree');
+                $species  = sanitizeInput($_POST['species']   ?? '');
+                $label    = sanitizeInput($_POST['label']     ?? '');
+                $lat      = floatval($_POST['lat']      ?? 0);
+                $lng      = floatval($_POST['lng']      ?? 0);
+                $altitude = floatval($_POST['altitude'] ?? 0);
+                $notes    = sanitizeInput($_POST['notes']     ?? '');
+                $tid      = intval($_POST['terrain_id'] ?? 0) ?: null;
+                if (!$lat && !$lng) { $response['message'] = 'Posição GPS obrigatória.'; break; }
+                $stmt = $pdo->prepare("
+                    INSERT INTO field_objects (user_id, terrain_id, type, species, label, lat, lng, altitude, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ");
+                $stmt->execute([$currentUser['id'], $tid, $type, $species, $label, $lat, $lng, $altitude, $notes]);
+                $response['success'] = true;
+                $response['id']      = (int)$pdo->lastInsertId();
+                $response['message'] = 'Objecto guardado.';
+                break;
+
+            case 'get_field_objects':
+                $tid    = intval($_POST['terrain_id'] ?? 0);
+                $where  = ['o.user_id = ?'];
+                $params = [$currentUser['id']];
+                if ($tid > 0) { $where[] = 'o.terrain_id = ?'; $params[] = $tid; }
+                $wc = 'WHERE ' . implode(' AND ', $where);
+                $stmt = $pdo->prepare("
+                    SELECT o.*, t.name AS terrain_name
+                    FROM field_objects o
+                    LEFT JOIN terrains t ON o.terrain_id = t.id
+                    $wc
+                    ORDER BY o.created_at DESC
+                ");
+                $stmt->execute($params);
+                $response['success'] = true;
+                $response['objects'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                break;
+
+            case 'delete_field_object':
+                $id   = intval($_POST['id'] ?? 0);
+                $stmt = $pdo->prepare("DELETE FROM field_objects WHERE id = ? AND user_id = ?");
+                $stmt->execute([$id, $currentUser['id']]);
+                $response['success'] = $stmt->rowCount() > 0;
+                $response['message'] = $response['success'] ? 'Eliminado.' : 'Não encontrado.';
+                break;
         }
 
     } catch (PDOException $e) {
@@ -607,6 +672,19 @@ $tableExists    = false;
 
 try {
     $pdo = getDBConnection();
+
+    // Garantir tabela field_objects
+    try {
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS field_objects (
+                id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL, terrain_id INT,
+                type VARCHAR(50) NOT NULL DEFAULT 'tree', species VARCHAR(100),
+                label VARCHAR(255), lat DOUBLE, lng DOUBLE, altitude DOUBLE DEFAULT 0,
+                notes TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_fo_user (user_id), INDEX idx_fo_terrain (terrain_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+    } catch (PDOException $e2) { /* silencioso */ }
 
     // Verificar se a tabela existe
     $chk = $pdo->query("SHOW TABLES LIKE 'field_measurements'");
@@ -798,6 +876,123 @@ try {
         <button onclick="closeQuickModal()" class="btn btn-secondary" style="padding:12px 20px;">
             Cancelar
         </button>
+    </div>
+</div>
+
+<!-- Modal: Adicionar Objecto de Campo (árvore / poste) -->
+<div id="add-obj-backdrop" onclick="closeAddObjectModal()"
+     style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:9000;"></div>
+
+<div id="add-obj-modal"
+     style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+            z-index:9001; background:#fff; border-radius:16px; box-shadow:0 20px 60px rgba(0,0,0,.3);
+            width:min(500px,96vw); max-height:90dvh; overflow-y:auto;">
+
+    <div style="padding:18px 20px 0; display:flex; align-items:center; justify-content:space-between;">
+        <h3 style="font-size:17px; color:#1f2937;" id="add-obj-title">🌿 Novo Objecto de Campo</h3>
+        <button onclick="closeAddObjectModal()"
+                style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;padding:4px;">✕</button>
+    </div>
+
+    <div style="padding:16px 20px;">
+        <!-- Tipo -->
+        <div style="margin-bottom:12px;">
+            <label style="font-size:12px; color:#6b7280; display:block; margin-bottom:4px; font-weight:600;">Tipo de Objecto</label>
+            <div style="display:flex; gap:8px;">
+                <label style="flex:1; cursor:pointer; padding:10px; border:2px solid #e5e7eb; border-radius:10px;
+                              display:flex; align-items:center; gap:8px; font-size:14px;"
+                       id="ao-type-tree-lbl">
+                    <input type="radio" name="ao-type" value="tree" id="ao-type-tree" onchange="onAoTypeChange()" checked>
+                    🌳 Árvore / Planta
+                </label>
+                <label style="flex:1; cursor:pointer; padding:10px; border:2px solid #e5e7eb; border-radius:10px;
+                              display:flex; align-items:center; gap:8px; font-size:14px;"
+                       id="ao-type-pole-lbl">
+                    <input type="radio" name="ao-type" value="pole" id="ao-type-pole" onchange="onAoTypeChange()">
+                    🪵 Poste
+                </label>
+            </div>
+        </div>
+
+        <!-- Espécie (só árvores) -->
+        <div id="ao-species-row" style="margin-bottom:12px;">
+            <label style="font-size:12px; color:#6b7280; display:block; margin-bottom:4px; font-weight:600;">Espécie</label>
+            <select id="ao-species"
+                    style="width:100%; padding:9px 10px; border:1.5px solid #e5e7eb; border-radius:8px; font-size:14px; appearance:none; background:#fff;">
+                <option value="oliveira">🫒 Oliveira</option>
+                <option value="videira">🍇 Videira</option>
+                <option value="macieira">🍎 Macieira</option>
+                <option value="macieira_2d">🍎 Macieira 2D (espaleira)</option>
+                <option value="pereira">🍐 Pereira</option>
+                <option value="outro">🌳 Outro</option>
+            </select>
+        </div>
+
+        <!-- Etiqueta -->
+        <div style="margin-bottom:12px;">
+            <label style="font-size:12px; color:#6b7280; display:block; margin-bottom:4px; font-weight:600;">Etiqueta / ID (opcional)</label>
+            <input id="ao-label" type="text" placeholder="Ex: T001, Poste Norte, Oliveira A3…"
+                   style="width:100%; padding:9px 10px; border:1.5px solid #e5e7eb; border-radius:8px; font-size:14px; box-sizing:border-box;">
+        </div>
+
+        <!-- Posição GPS -->
+        <div style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:10px; padding:12px; margin-bottom:12px;">
+            <div style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:#0369a1; margin-bottom:8px;">
+                📌 Posição GPS
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr 0.6fr; gap:8px; margin-bottom:8px;">
+                <div>
+                    <label style="font-size:11px; color:#6b7280; display:block; margin-bottom:3px;">Latitude</label>
+                    <input id="ao-lat" type="number" step="0.0000001" placeholder="38.5180"
+                           style="width:100%; padding:7px 9px; border:1.5px solid #e5e7eb; border-radius:7px; font-size:13px; font-family:monospace; box-sizing:border-box;">
+                </div>
+                <div>
+                    <label style="font-size:11px; color:#6b7280; display:block; margin-bottom:3px;">Longitude</label>
+                    <input id="ao-lng" type="number" step="0.0000001" placeholder="-8.1270"
+                           style="width:100%; padding:7px 9px; border:1.5px solid #e5e7eb; border-radius:7px; font-size:13px; font-family:monospace; box-sizing:border-box;">
+                </div>
+                <div>
+                    <label style="font-size:11px; color:#6b7280; display:block; margin-bottom:3px;">Alt. (m)</label>
+                    <input id="ao-altitude" type="number" step="0.1" placeholder="0"
+                           style="width:100%; padding:7px 9px; border:1.5px solid #e5e7eb; border-radius:7px; font-size:13px; font-family:monospace; box-sizing:border-box;">
+                </div>
+            </div>
+            <button onclick="activateObjectPickMode()"
+                    style="font-size:12px; color:#0369a1; background:#e0f2fe; border:1px solid #bae6fd;
+                           border-radius:7px; padding:6px 12px; cursor:pointer; width:100%;">
+                🗺️ Clicar no mapa para definir posição
+            </button>
+            <div id="ao-pick-hint" style="font-size:11px; color:#0284c7; margin-top:5px; min-height:14px;"></div>
+        </div>
+
+        <!-- Terreno -->
+        <div style="margin-bottom:12px;">
+            <label style="font-size:12px; color:#6b7280; display:block; margin-bottom:4px; font-weight:600;">Terreno associado</label>
+            <select id="ao-terrain"
+                    style="width:100%; padding:9px 10px; border:1.5px solid #e5e7eb; border-radius:8px; font-size:14px; appearance:none; background:#fff;">
+                <option value="">— Sem terreno —</option>
+                <?php foreach ($filterTerrains as $t): ?>
+                    <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); ?></option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+
+        <!-- Notas -->
+        <div>
+            <label style="font-size:12px; color:#6b7280; display:block; margin-bottom:4px; font-weight:600;">Notas (opcional)</label>
+            <textarea id="ao-notes" rows="2" placeholder="Estado, data de plantação, observações…"
+                      style="width:100%; padding:9px 10px; border:1.5px solid #e5e7eb; border-radius:8px; font-size:14px; resize:vertical; box-sizing:border-box;"></textarea>
+        </div>
+    </div>
+
+    <div style="padding:12px 20px 18px; display:flex; gap:10px; border-top:1px solid #f3f4f6; align-items:center;">
+        <button onclick="saveFieldObject()" class="btn btn-primary" style="flex:1; padding:12px; font-size:15px;">
+            💾 Guardar Objecto
+        </button>
+        <button onclick="closeAddObjectModal()" class="btn btn-secondary" style="padding:12px 20px;">
+            Cancelar
+        </button>
+        <div id="ao-status" style="font-size:12px; color:#6b7280; min-width:80px;"></div>
     </div>
 </div>
 
@@ -1022,6 +1217,40 @@ try {
 
         <!-- Lista de camadas guardadas -->
         <div id="geojson-layers-list">
+            <div style="text-align:center; padding:20px; color:#9ca3af;">A carregar…</div>
+        </div>
+    </div>
+</div>
+
+<!-- Objectos de Campo: Árvores, Plantas e Postes -->
+<div class="section interp-section">
+    <div class="section-title" style="cursor:pointer; user-select:none;" onclick="toggleObjectsPanel()">
+        <h3>🌿 Objectos de Campo</h3>
+        <span id="objects-toggle-btn" class="btn btn-secondary btn-sm">▼ Expandir</span>
+    </div>
+    <div id="objects-panel" style="display:none; margin-top:16px;">
+        <p style="color:#6b7280; font-size:13px; margin-bottom:14px;">
+            Registe a posição de árvores, plantas e postes ligados aos terrenos.
+            Estes objectos podem ser usados para gerar mapas semânticos automaticamente no separador <strong>🤖 Mapa Semântico</strong>.
+        </p>
+
+        <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-bottom:14px;">
+            <button class="btn btn-primary btn-sm" onclick="openAddObjectModal()" style="white-space:nowrap;">
+                ➕ Adicionar objecto
+            </button>
+            <div class="filter-group">
+                <label>Filtrar por terreno</label>
+                <select id="obj-filter-terrain" onchange="loadFieldObjects()">
+                    <option value="">Todos os terrenos</option>
+                    <?php foreach ($filterTerrains as $t): ?>
+                        <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="loadFieldObjects()">🔄 Actualizar</button>
+        </div>
+
+        <div id="objects-list">
             <div style="text-align:center; padding:20px; color:#9ca3af;">A carregar…</div>
         </div>
     </div>
