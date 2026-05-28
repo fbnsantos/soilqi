@@ -291,6 +291,17 @@ if ($isLoggedIn) {
                         <?php endforeach; ?>
                     </select>
                 </div>
+                <div class="form-group" style="margin-bottom:10px;">
+                    <label style="font-size:12px; font-weight:600; color:#6b7280;
+                                  display:flex; justify-content:space-between; align-items:center;
+                                  margin-bottom:4px;">
+                        <span>Opacidade</span>
+                        <span id="map-interp-opacity-val" style="font-weight:400; color:#9ca3af;">75%</span>
+                    </label>
+                    <input type="range" id="map-interp-opacity" min="0" max="100" value="75"
+                           oninput="setMapInterpOpacity(this.value)"
+                           style="width:100%; accent-color:#667eea; cursor:pointer; height:4px;">
+                </div>
                 <div id="map-interp-list" style="color:#9ca3af; font-size:13px; padding:2px 0;">
                     Selecione um terreno para ver as interpolações guardadas.
                 </div>

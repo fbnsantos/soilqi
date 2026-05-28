@@ -511,7 +511,7 @@ function toggleMapInterp(id) {
                 return;
             }
             const bounds  = [[data.min_lat, data.min_lng], [data.max_lat, data.max_lng]];
-            const overlay = L.imageOverlay(data.png, bounds, { opacity: 0.75 }).addTo(map);
+            const overlay = L.imageOverlay(data.png, bounds, { opacity: _mapInterpOpacity() }).addTo(map);
             mapInterpOverlays[id] = overlay;
             if (mapLayersControl) mapLayersControl.addOverlay(overlay, '🎨 ' + data.name);
             map.fitBounds(bounds, { padding: [40, 40] });
@@ -528,6 +528,22 @@ function toggleMapInterp(id) {
             showAlert('Erro de rede ao carregar interpolação.', 'error');
             _mapInterpBtnReset(id);
         });
+}
+
+// ── Opacidade das interpolações ───────────────────────────────────────────────
+function _mapInterpOpacity() {
+    const el = document.getElementById('map-interp-opacity');
+    return el ? (parseInt(el.value, 10) / 100) : 0.75;
+}
+
+function setMapInterpOpacity(val) {
+    const pct = parseInt(val, 10);
+    const lbl = document.getElementById('map-interp-opacity-val');
+    if (lbl) lbl.textContent = pct + '%';
+    const opacity = pct / 100;
+    Object.values(mapInterpOverlays).forEach(function(overlay) {
+        overlay.setOpacity(opacity);
+    });
 }
 
 function _mapInterpBtnReset(id) {
