@@ -39,6 +39,13 @@ $availableTabs = [
         'requiresAuth' => true,
         'requiresAdmin' => false
     ],
+    'semantic' => [
+        'title' => 'Mapa Semântico',
+        'icon'  => '🤖',
+        'file'  => 'tabs/semantic.php',
+        'requiresAuth'  => true,
+        'requiresAdmin' => false
+    ],
     'admin' => [
         'title' => 'Administração',
         'icon' => '⚙️',
