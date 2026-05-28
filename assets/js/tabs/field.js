@@ -625,11 +625,13 @@ function removeInterpolation() {
 
 // ── Gerar interpolação ────────────────────────────────────────────────────────
 const INTERP_METHOD_LABELS = {
-    idw:     'IDW (p=2)',
     kriging: 'Kriging Ordinária',
     tps:     'Thin Plate Spline',
     nn:      'Vizinho mais próximo'
 };
+function _interpLabel(method, power) {
+    return method === 'idw' ? `IDW (p=${power})` : (INTERP_METHOD_LABELS[method] || method);
+}
 
 async function generateInterpolation() {
     const terrainId = document.getElementById('interp-terrain-sel').value;
@@ -678,7 +680,7 @@ async function generateInterpolation() {
     // ── Fase de setup (modelos que requerem pré-computação) ───────────────────
     let predictor = null;
     if (method === 'kriging' || method === 'tps') {
-        setInterpStatus(`⏳ A construir modelo ${INTERP_METHOD_LABELS[method]} (${pts.length} pontos)…`);
+        setInterpStatus(`⏳ A construir modelo ${_interpLabel(method, power)} (${pts.length} pontos)…`);
         await new Promise(r => setTimeout(r, 30));
         try {
             predictor = method === 'kriging'
@@ -690,7 +692,7 @@ async function generateInterpolation() {
         }
     }
 
-    setInterpStatus(`⏳ A calcular ${INTERP_METHOD_LABELS[method]} (${pts.length} pontos, ${resPx}×${resPx} px)…`);
+    setInterpStatus(`⏳ A calcular ${_interpLabel(method, power)} (${pts.length} pontos, ${resPx}×${resPx} px)…`);
     await new Promise(r => setTimeout(r, 20));
 
     const minV = Math.min(...pts.map(p => p.v));
@@ -739,7 +741,7 @@ async function generateInterpolation() {
     const paramLabels = { conductivity:'EC (mS/cm)', ph:'pH', temperature:'Temp. (°C)', moisture:'Hum. (%)' };
     drawInterpLegend(minV, maxV, colormap, paramLabels[param] || param);
 
-    setInterpStatus(`✅ ${INTERP_METHOD_LABELS[method]} concluído — ${pts.length} pontos · ${resPx}×${resPx} px`);
+    setInterpStatus(`✅ ${_interpLabel(method, power)} concluído — ${pts.length} pontos · ${resPx}×${resPx} px`);
 
     // ── Guardar resultado para posterior salvamento ────────────────────────────
     lastInterpDataUrl = canvas.toDataURL('image/png');
