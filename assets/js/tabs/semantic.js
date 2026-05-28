@@ -178,11 +178,12 @@ function addSemLayer(layerDef, beforeId) {
 function clearSemanticMap() {
     // Remover layers e sources adicionadas pelo mapa semântico
     ['sem-canopy-fill','sem-canopy-line','sem-branches','sem-trunks',
-     'sem-elev-layer','sem-occ-layer','sem-occ-line'].forEach(id => {
+     'sem-elev-layer','sem-occ-layer','sem-occ-line',
+     'sem-poles'].forEach(id => {
         if (semMap && semMap.getLayer(id)) semMap.removeLayer(id);
     });
     ['sem-canopies','sem-branches-src','sem-trunks-src',
-     'sem-elev-img','sem-occ-img'].forEach(id => {
+     'sem-elev-img','sem-occ-img','sem-poles-src'].forEach(id => {
         if (semMap && semMap.getSource(id)) semMap.removeSource(id);
     });
     semActiveSrc.clear();
@@ -204,6 +205,7 @@ function renderSemanticMap(mapData) {
             if (layer.type === 'trees')     { renderTreeLayer(layer, ref);      layerItems.push({ type:'trees',     layer }); }
             if (layer.type === 'elevation') { renderElevationLayer(layer, ref); layerItems.push({ type:'elevation', layer }); }
             if (layer.type === 'occupancy') { renderOccupancyLayer(layer, ref); layerItems.push({ type:'occupancy', layer }); }
+            if (layer.type === 'poles')     { renderPoleLayer(layer, ref);      layerItems.push({ type:'poles',     layer }); }
         } catch (e) {
             console.warn('[SoilQI Semantic] Erro ao renderizar camada', layer.type, e);
         }
@@ -371,6 +373,54 @@ function renderOccupancyLayer(layer, ref) {
     });
 }
 
+// ── Layer: Postes ─────────────────────────────────────────────────────────────
+function renderPoleLayer(layer, ref) {
+    const features = (layer.data || []).map(pole => {
+        const [px, py] = pole.position || [0, 0];
+        const [lng, lat] = localToLngLat(px, py, ref);
+        return {
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [lng, lat] },
+            properties: {
+                id:       pole.id    || '?',
+                height:   pole.height   || 2.5,
+                shape:    pole.shape    || 'cylinder',
+                diameter: pole.diameter || 0.10,
+                color:    pole.color    || '#8B6914',
+                label:    pole.label    || pole.id || 'poste'
+            }
+        };
+    });
+    addSemSource('sem-poles-src', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features }
+    });
+    addSemLayer({
+        id: 'sem-poles', type: 'circle', source: 'sem-poles-src',
+        paint: {
+            'circle-radius':       6,
+            'circle-color':        ['get', 'color'],
+            'circle-stroke-color': '#333',
+            'circle-stroke-width': 1.5,
+            'circle-opacity':      0.9
+        }
+    });
+    semMap.on('click', 'sem-poles', e => {
+        const p = e.features[0].properties;
+        new maplibregl.Popup({ closeButton: true })
+            .setLngLat(e.lngLat)
+            .setHTML(`<strong>🪵 ${_esc(p.id)}</strong><br>
+                <table style="margin-top:4px;">
+                <tr><td>Forma</td><td>${_esc(p.shape)}</td></tr>
+                <tr><td>Diâmetro</td><td>${parseFloat(p.diameter).toFixed(3)} m</td></tr>
+                <tr><td>Altura</td><td>${parseFloat(p.height).toFixed(2)} m</td></tr>
+                </table>`)
+            .addTo(semMap);
+    });
+    semMap.on('mouseenter', 'sem-poles', () => { semMap.getCanvas().style.cursor = 'pointer'; });
+    semMap.on('mouseleave', 'sem-poles', () => { semMap.getCanvas().style.cursor = ''; });
+}
+
 // ── Terrenos da quinta ────────────────────────────────────────────────────────
 function loadSemTerrains() {
     const fd = new FormData();
@@ -422,11 +472,12 @@ function updateSemLayerList(items, mapData) {
     const el = document.getElementById('sem-layers-list');
     if (!el) return;
 
-    const COLORS = { trees:'#22c55e', elevation:'#f59e0b', occupancy:'#6b7280' };
-    const ICONS  = { trees:'🌳', elevation:'⛰️', occupancy:'🗺️' };
+    const COLORS = { trees:'#22c55e', elevation:'#f59e0b', occupancy:'#6b7280', poles:'#92400e' };
+    const ICONS  = { trees:'🌳', elevation:'⛰️', occupancy:'🗺️', poles:'🪵' };
 
     let html = items.map(({ type, layer }) => {
-        const n = type === 'trees' ? (layer.data?.length || 0) + ' árvores' :
+        const n = type === 'trees'     ? (layer.data?.length || 0) + ' árvores' :
+                  type === 'poles'     ? (layer.data?.length || 0) + ' postes' :
                   type === 'elevation' ? `${layer.width}×${layer.height} px · ${layer.resolution}m/cel` :
                   `${layer.width}×${layer.height} px · ${layer.resolution}m/cel`;
         return `<div class="sem-layer-row">
@@ -506,6 +557,7 @@ function _generateExampleMap() {
                 const zMid   = zStart + len * rng(0.06, 0.28);          // controlo — arco suave
                 const zEnd   = zStart + len * rng(-0.10, 0.32);         // ponta — pode baixar ou subir
 
+                const brMaxDiam = trunkR * rng(0.55, 0.85);  // ramo mais fino que o tronco
                 branches.push({
                     type: 'bezier3',
                     points: [
@@ -513,19 +565,31 @@ function _generateExampleMap() {
                         [x + Math.cos(midA) * midR,   y + Math.sin(midA) * midR,   zMid  ],
                         [x + Math.cos(angle) * len,    y + Math.sin(angle) * len,    zEnd  ]
                     ],
-                    radius: trunkR * rng(0.3, 0.5)
+                    // Taper do ramo: d(t) = max − a·t
+                    taper: {
+                        max: parseFloat((brMaxDiam * 2).toFixed(3)),
+                        a:   parseFloat((brMaxDiam * 2 * 0.80).toFixed(3))  // afila 80%
+                    }
                 });
             }
 
             trees.push({
                 id: `T${String(r * cols + c + 1).padStart(3,'0')}`,
                 species: 'olea_europaea',
-                position: [x, y, zBase],  // z = altitude real do terreno
-                trunk: { height: parseFloat(height.toFixed(2)), radius_base: parseFloat(trunkR.toFixed(3)), radius_apex: parseFloat((trunkR*0.5).toFixed(3)) },
+                position: [x, y, zBase],
+                trunk: {
+                    height: parseFloat(height.toFixed(2)),
+                    // Função de taper: d(t) = max − a·t
+                    taper: {
+                        max: parseFloat((trunkR * 2).toFixed(3)),          // diâmetro na base
+                        a:   parseFloat((trunkR * 2 * 0.75).toFixed(3))    // afilamento: topo ≈ 25% da base
+                    }
+                },
                 branches,
                 canopy_radius: parseFloat(canopyR.toFixed(2)),
                 health,
                 fruit_load: health === 'good' ? parseFloat(rng(0.3, 1.0).toFixed(2)) : parseFloat(rng(0, 0.3).toFixed(2)),
+                fruit_spec: { color: '#3B5A1A', radius: 0.055 },   // azeitona
                 last_measurement: '2026-05-10'
             });
         }
@@ -591,6 +655,38 @@ function _generateExampleMap() {
     }
     oCtx.putImageData(oImg, 0, 0);
 
+    // ── Postes de vedação perimetral ─────────────────────────────────────────
+    const groveW = (cols - 1) * spacingX;
+    const groveH = (rows - 1) * spacingY;
+    const poleH  = 1.6;
+    const poles  = [];
+    // 3 postes ao longo da borda norte (y=groveH), sul (y=0), este (x=groveW)
+    for (let i = 0; i <= 3; i++) {
+        const t  = i / 3;
+        const pz = elevAtWorld(t * groveW, 0);
+        poles.push({ id:`P${String(poles.length+1).padStart(3,'0')}`,
+            position: [t * groveW, 0, pz],
+            height: poleH, shape: 'cylinder',
+            taper: { max: 0.080, a: 0.030 },
+            color: '#7B4F2E', label: 'Poste de vedação' });
+    }
+    for (let i = 0; i <= 3; i++) {
+        const t  = i / 3;
+        const pz = elevAtWorld(t * groveW, groveH);
+        poles.push({ id:`P${String(poles.length+1).padStart(3,'0')}`,
+            position: [t * groveW, groveH, pz],
+            height: poleH, shape: 'cylinder',
+            taper: { max: 0.080, a: 0.030 },
+            color: '#7B4F2E', label: 'Poste de vedação' });
+    }
+    // Dois postes de irrigação (quadrado, metálico) junto a árvores centrais
+    [trees[5], trees[6]].forEach((tree, i) => {
+        const [tx, ty, tz] = tree.position;
+        poles.push({ id:`PI${i+1}`, position: [tx + 0.7, ty, tz],
+            height: 1.2, shape: 'square',
+            diameter: 0.04, color: '#888888', label: 'Poste de irrigação' });
+    });
+
     return {
         type: 'semantic_map',
         version: '1.0',
@@ -599,6 +695,12 @@ function _generateExampleMap() {
         coordinate_system: 'local',
         reference: ref,
         layers: [
+            {
+                id: 'poles',
+                type: 'poles',
+                label: `Postes (${poles.length})`,
+                data: poles
+            },
             {
                 id: 'trees',
                 type: 'trees',
@@ -877,6 +979,7 @@ function _render3DMap(mapData) {
             if (layer.type === 'elevation') { _render3DElev(layer);              hasElev = true; }
             if (layer.type === 'occupancy') { _render3DOcc(layer);                              }
             if (layer.type === 'trees')     { _render3DTrees(layer, elevCtx);                   }
+            if (layer.type === 'poles')     { _render3DPoles(layer, elevCtx);                   }
         } catch (e) { console.warn('[3D] Erro na camada', layer.type, e); }
     });
 
@@ -917,57 +1020,123 @@ function _fit3DCamera(mapData, elevCtx) {
     if (_3d.controls) { _3d.controls.target.copy(target); _3d.controls.update(); }
 }
 
+// ── 3D: Helper — tubo cónico ao longo de uma curva ───────────────────────────
+// Cria um BufferGeometry para um tubo com raio que varia de rStart a rEnd.
+// Usa as Frenet frames da curva para orientação correcta.
+function _taperTube(curve, tubSegs, rStart, rEnd, radSegs) {
+    tubSegs  = Math.max(tubSegs,  4);
+    radSegs  = Math.max(radSegs,  4);
+    rStart   = Math.max(rStart, 0.005);
+    rEnd     = Math.max(rEnd,   0.003);
+
+    const frames    = curve.computeFrenetFrames(tubSegs, false);
+    const pts       = curve.getPoints(tubSegs);
+    const nVerts    = (tubSegs + 1) * (radSegs + 1);
+    const positions = new Float32Array(nVerts * 3);
+    const normals   = new Float32Array(nVerts * 3);
+    const uvs       = new Float32Array(nVerts * 2);
+    let pi = 0, ni = 0, ui = 0;
+
+    for (let i = 0; i <= tubSegs; i++) {
+        const t  = i / tubSegs;
+        const r  = rStart + (rEnd - rStart) * t;
+        const c  = pts[i];
+        const N  = frames.normals[i];
+        const B  = frames.binormals[i];
+
+        for (let j = 0; j <= radSegs; j++) {
+            const ang = (j / radSegs) * Math.PI * 2;
+            const cos = Math.cos(ang), sin = Math.sin(ang);
+            const nx  = cos * N.x + sin * B.x;
+            const ny  = cos * N.y + sin * B.y;
+            const nz  = cos * N.z + sin * B.z;
+            positions[pi++] = c.x + r * nx;
+            positions[pi++] = c.y + r * ny;
+            positions[pi++] = c.z + r * nz;
+            normals[ni++] = nx; normals[ni++] = ny; normals[ni++] = nz;
+            uvs[ui++] = j / radSegs; uvs[ui++] = t;
+        }
+    }
+
+    const idx = [];
+    for (let i = 0; i < tubSegs; i++) {
+        for (let j = 0; j < radSegs; j++) {
+            const a = (radSegs + 1) * i + j;
+            const b = (radSegs + 1) * (i + 1) + j;
+            idx.push(a, b, a + 1, b, b + 1, a + 1);
+        }
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('normal',   new THREE.Float32BufferAttribute(normals,   3));
+    geo.setAttribute('uv',       new THREE.Float32BufferAttribute(uvs,       2));
+    geo.setIndex(idx);
+    return geo;
+}
+
 // ── 3D: Árvores ───────────────────────────────────────────────────────────────
-// Sistema local ROS → Three.js:  local(x, y, z)  →  Three.js(x, z, -y)
-//   X local (este)  = X Three.js
-//   Y local (norte) = -Z Three.js
-//   Z local (cima)  =  Y Three.js
+// Sistema local ROS → Three.js:  local(x, y, z)  →  Three.js(x, z−minE, −y)
 function _render3DTrees(layer, elevCtx) {
-    // minE: altitude mínima do terreno — subtrai para que o chão fique em y=0
     const minE = elevCtx?.minE ?? 0;
 
     const MAT_TRUNK  = new THREE.MeshLambertMaterial({ color: 0x8B5E3C });
     const MAT_BRANCH = new THREE.MeshLambertMaterial({ color: 0x7B4F2E });
 
     for (const tree of (layer.data || [])) {
-        // position pode ser [x,y] (legacy) ou [x,y,z] (3D com altitude real)
         const [lx, ly, lz = 0] = tree.position || [0, 0, 0];
 
-        const trunk  = tree.trunk || {};
-        const tH     = trunk.height      || 2.5;
-        const rBase  = trunk.radius_base || 0.10;
-        const rTop   = Math.max(0.025, rBase * 0.50);
+        const trunk = tree.trunk || {};
+        const tH    = trunk.height || 2.5;
 
-        // Grupo na base do tronco — Y = altitude relativa ao mínimo do terreno
-        // local(x, y, z)  →  Three.js(X=x, Y=z−minE, Z=−y)
+        // ── Raio do tronco com função de taper d = max − a·t ────────────────
+        // Se taper definido: rBase = max/2, rTop = (max−a)/2
+        // Caso contrário: usa radius_base / radius_apex do formato antigo
+        let rBase, rTop;
+        if (trunk.taper) {
+            rBase = (trunk.taper.max) / 2;
+            rTop  = Math.max(0.005, (trunk.taper.max - trunk.taper.a) / 2);
+        } else {
+            rBase = trunk.radius_base || 0.10;
+            rTop  = trunk.radius_apex != null
+                ? trunk.radius_apex
+                : Math.max(0.025, rBase * 0.50);
+        }
+
         const grp = new THREE.Group();
         grp.position.set(lx, lz - minE, -ly);
         grp.userData.sem = true;
 
-        // Tronco (cilindro cónico — em espaço local do grupo, Y é "cima")
+        // Tronco (cilindro cónico — taper linear entre rBase e rTop)
         const tGeo  = new THREE.CylinderGeometry(rTop, rBase, tH, 8);
         const tMesh = new THREE.Mesh(tGeo, MAT_TRUNK);
         tMesh.position.y = tH / 2;
         tMesh.castShadow = tMesh.receiveShadow = true;
         grp.add(tMesh);
 
-        // Ramos — curvas Bézier 3D com posições reais de [x,y,z]
+        // ── Ramos com taper ──────────────────────────────────────────────────
         for (const br of (tree.branches || [])) {
             const brPts = br.points || [];
             if (brPts.length < 2) continue;
-            const brR  = Math.max(br.radius || 0.04, 0.018);
 
-            // Detecta se os pontos são 3D (têm componente Z)
-            const is3D = brPts[0].length >= 3;
+            // Raio inicial e final com função d = max − a·t
+            let brStart, brEnd;
+            if (br.taper) {
+                brStart = Math.max(0.005, br.taper.max / 2);
+                brEnd   = Math.max(0.002, (br.taper.max - br.taper.a) / 2);
+            } else {
+                const r = Math.max(br.radius || 0.04, 0.015);
+                brStart = r;
+                brEnd   = r * 0.35;   // taper padrão: afila para ~35% no final
+            }
+
+            const is3D  = brPts[0].length >= 3;
             let pts3d;
             if (is3D) {
-                // Usar coordenadas Z reais — converter local→grupo Three.js
-                // ponto local (bx,by,bz) → grupo: (bx-lx, bz-lz, -(by-ly))
                 pts3d = sampleBezier3D(brPts, 16).map(([bx, by, bz]) =>
                     new THREE.Vector3(bx - lx, bz - lz, -(by - ly))
                 );
             } else {
-                // Compatibilidade com mapas antigos (2D) — arc sintético
                 pts3d = sampleBezier2D(brPts, 16).map(([bx, by]) => {
                     const rx = bx - lx, rz = -(by - ly);
                     const d  = Math.sqrt(rx*rx + rz*rz);
@@ -976,17 +1145,17 @@ function _render3DTrees(layer, elevCtx) {
             }
 
             try {
-                const curve   = new THREE.CatmullRomCurve3(pts3d, false, 'catmullrom', 0.5);
-                const tubeGeo = new THREE.TubeGeometry(curve, 10, brR, 5, false);
-                const tMsh    = new THREE.Mesh(tubeGeo, MAT_BRANCH);
-                tMsh.castShadow = true;
-                grp.add(tMsh);
+                const curve  = new THREE.CatmullRomCurve3(pts3d, false, 'catmullrom', 0.5);
+                const brGeo  = _taperTube(curve, 10, brStart, brEnd, 5);
+                const brMesh = new THREE.Mesh(brGeo, MAT_BRANCH);
+                brMesh.castShadow = true;
+                grp.add(brMesh);
             } catch (_) { /* Bézier degenerada */ }
         }
 
-        // Copa (esfera — cor baseada em saúde + carga de fruto)
+        // ── Copa ─────────────────────────────────────────────────────────────
         const canopyR   = tree.canopy_radius || 1.5;
-        const health    = tree.health  || 'good';
+        const health    = tree.health || 'good';
         const fruitLoad = tree.fruit_load || 0;
         const hue       = health === 'good' ? 0.32 : health === 'fair' ? 0.25 : 0.14;
         const cColor    = new THREE.Color().setHSL(hue, 0.55 + fruitLoad * 0.18, 0.28 + fruitLoad * 0.06);
@@ -998,20 +1167,40 @@ function _render3DTrees(layer, elevCtx) {
         cMesh.castShadow = cMesh.receiveShadow = true;
         grp.add(cMesh);
 
-        // Azeitonas (esferas pequenas na copa se fruitLoad > 0.3)
-        if (fruitLoad > 0.3) {
+        // ── Fruta ─────────────────────────────────────────────────────────────
+        // Explícita: tree.fruits = [{position,radius,color}, ...]
+        if (tree.fruits && tree.fruits.length) {
+            for (const fr of tree.fruits) {
+                const [fx, fy, fz = lz] = fr.position || [lx, ly, lz];
+                const fR  = fr.radius || 0.06;
+                const fC  = fr.color  ? parseInt(fr.color.replace('#',''), 16) : 0x2E4A1A;
+                const fGeo  = new THREE.SphereGeometry(fR, 6, 5);
+                const fMat  = new THREE.MeshLambertMaterial({ color: fC });
+                const fMesh = new THREE.Mesh(fGeo, fMat);
+                // posição em espaço de grupo
+                fMesh.position.set(fx - lx, fz - lz, -(fy - ly));
+                fMesh.userData.sem = true;
+                grp.add(fMesh);
+            }
+        } else if (fruitLoad > 0.3) {
+            // Paramétrica: distribuição de Fibonacci na copa com fruit_spec
+            const spec    = tree.fruit_spec || {};
+            const fR      = spec.radius || 0.06;
+            const fC      = spec.color
+                ? parseInt(spec.color.replace('#',''), 16) : 0x2E4A1A;
             const nFruits = Math.round(fruitLoad * 10);
-            const fGeo    = new THREE.SphereGeometry(0.075, 5, 4);
-            const fMat    = new THREE.MeshLambertMaterial({ color: 0x2E4A1A });
+            const fGeo    = new THREE.SphereGeometry(fR, 6, 5);
+            const fMat    = new THREE.MeshLambertMaterial({ color: fC });
+            const cY      = tH + canopyR * 0.60;
+
             for (let f = 0; f < nFruits; f++) {
-                // distribuição de Fibonacci na esfera
                 const phi   = Math.acos(1 - 2 * (f + 0.5) / nFruits);
                 const theta = Math.PI * (1 + Math.sqrt(5)) * f;
                 const fr    = canopyR * 0.82;
                 const fMesh = new THREE.Mesh(fGeo, fMat);
                 fMesh.position.set(
                     fr * Math.sin(phi) * Math.cos(theta),
-                    tH + canopyR * 0.60 + fr * Math.cos(phi),
+                    cY + fr * Math.cos(phi),
                     fr * Math.sin(phi) * Math.sin(theta)
                 );
                 grp.add(fMesh);
@@ -1019,6 +1208,53 @@ function _render3DTrees(layer, elevCtx) {
         }
 
         _3d.scene.add(grp);
+    }
+}
+
+// ── 3D: Postes ────────────────────────────────────────────────────────────────
+function _render3DPoles(layer, elevCtx) {
+    const minE = elevCtx?.minE ?? 0;
+
+    for (const pole of (layer.data || [])) {
+        const [px, py, pz = 0] = pole.position || [0, 0, 0];
+        const h     = pole.height   || 2.5;
+        const diam  = pole.diameter || 0.10;
+        const shape = pole.shape    || 'cylinder';
+
+        // Cor hexadecimal string → inteiro
+        const colorInt = pole.color
+            ? parseInt(String(pole.color).replace('#',''), 16)
+            : 0x8B6914;
+
+        // Taper opcional: d = max − a·t (se definido, base mais larga)
+        let geo;
+        if (shape === 'square') {
+            if (pole.taper) {
+                // Caixa com altura total; taper aproximado via ScaleY não trivial
+                // Usa BoxGeometry base com tamanho médio (simplificação)
+                const d0 = pole.taper.max;
+                const d1 = Math.max(0.01, pole.taper.max - pole.taper.a);
+                // Aproximação: cria dois cubos empilhados
+                geo = new THREE.BoxGeometry((d0 + d1) / 2, h, (d0 + d1) / 2);
+            } else {
+                geo = new THREE.BoxGeometry(diam, h, diam);
+            }
+        } else {
+            // Cilindro — taper directo com CylinderGeometry
+            let rBase = diam / 2, rTop = diam / 2;
+            if (pole.taper) {
+                rBase = pole.taper.max / 2;
+                rTop  = Math.max(0.003, (pole.taper.max - pole.taper.a) / 2);
+            }
+            geo = new THREE.CylinderGeometry(rTop, rBase, h, 8);
+        }
+
+        const mat  = new THREE.MeshLambertMaterial({ color: colorInt });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(px, pz - minE + h / 2, -py);
+        mesh.castShadow = mesh.receiveShadow = true;
+        mesh.userData.sem = true;
+        _3d.scene.add(mesh);
     }
 }
 

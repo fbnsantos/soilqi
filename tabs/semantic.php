@@ -254,21 +254,39 @@ if ($isLoggedIn) {
   },
   "layers": [
     {
+      "type": "poles",
+      "data": [{
+        "id": "P001",
+        "position": [x, y, z],
+        "height": 1.8,
+        "shape": "cylinder",
+        "diameter": 0.08,
+        "taper": { "max": 0.08, "a": 0.03 },
+        "color": "#7B4F2E"
+      }]
+    },
+    {
       "type": "trees",
       "data": [{
         "id": "t001",
         "position": [x, y, z],
         "species": "olea_europaea",
-        "trunk": { "height": 3.0,
-          "radius_base": 0.10 },
+        "trunk": {
+          "height": 3.0,
+          "taper": { "max": 0.20, "a": 0.15 }
+        },
         "branches": [{
           "type": "bezier3",
           "points": [[x0,y0,z0],[x1,y1,z1],[x2,y2,z2]],
-          "radius": 0.04
+          "taper": { "max": 0.08, "a": 0.06 }
         }],
         "canopy_radius": 1.5,
         "health": "good",
-        "fruit_load": 0.8
+        "fruit_load": 0.8,
+        "fruit_spec": { "color": "#3B5A1A", "radius": 0.055 },
+        "fruits": [
+          { "position": [x,y,z], "radius": 0.055, "color": "#3B5A1A" }
+        ]
       }]
     },
     {
