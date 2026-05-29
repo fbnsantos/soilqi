@@ -178,6 +178,65 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                     $response['message'] = 'Tabela não existe. Aplique a migração 005 em Admin → Migrações.';
                 }
                 break;
+
+            // ── Rasters de satélite ────────────────────────────────────────────
+
+            case 'get_raster_layers':
+                $terrain_id = intval($_POST['terrain_id'] ?? 0);
+                try {
+                    if ($terrain_id > 0) {
+                        $stmt = $pdo->prepare("
+                            SELECT id, name, raster_type, date_from, date_to,
+                                   min_lat, max_lat, min_lng, max_lng, created_at
+                            FROM raster_results
+                            WHERE user_id = ? AND terrain_id = ? AND status = 'done'
+                            ORDER BY created_at DESC
+                        ");
+                        $stmt->execute([$currentUser['id'], $terrain_id]);
+                    } else {
+                        $stmt = $pdo->prepare("
+                            SELECT r.id, r.name, r.raster_type, r.date_from, r.date_to,
+                                   r.min_lat, r.max_lat, r.min_lng, r.max_lng, r.created_at,
+                                   t.name AS terrain_name
+                            FROM raster_results r
+                            LEFT JOIN terrains t ON t.id = r.terrain_id
+                            WHERE r.user_id = ? AND r.status = 'done'
+                            ORDER BY r.created_at DESC LIMIT 60
+                        ");
+                        $stmt->execute([$currentUser['id']]);
+                    }
+                    $response['success'] = true;
+                    $response['rasters'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                } catch (PDOException $e2) {
+                    $response['success'] = true;
+                    $response['rasters'] = [];
+                }
+                break;
+
+            case 'get_raster_png':
+                $id = intval($_POST['id'] ?? 0);
+                if ($id <= 0) { $response['message'] = 'ID inválido.'; break; }
+                try {
+                    $stmt = $pdo->prepare("
+                        SELECT png_data, min_lat, max_lat, min_lng, max_lng, name, raster_type
+                        FROM raster_results
+                        WHERE id = ? AND user_id = ? AND status = 'done'
+                    ");
+                    $stmt->execute([$id, $currentUser['id']]);
+                    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$row || !$row['png_data']) { $response['message'] = 'Raster não encontrado.'; break; }
+                    $response['success']     = true;
+                    $response['png']         = 'data:image/png;base64,' . base64_encode($row['png_data']);
+                    $response['min_lat']     = (float)$row['min_lat'];
+                    $response['max_lat']     = (float)$row['max_lat'];
+                    $response['min_lng']     = (float)$row['min_lng'];
+                    $response['max_lng']     = (float)$row['max_lng'];
+                    $response['name']        = $row['name'];
+                    $response['raster_type'] = $row['raster_type'];
+                } catch (PDOException $e2) {
+                    $response['message'] = 'Erro: ' . $e2->getMessage();
+                }
+                break;
         }
     } catch (PDOException $e) {
         $response['message'] = 'Erro no sistema: ' . $e->getMessage();
@@ -316,6 +375,43 @@ if ($isLoggedIn) {
                 </p>
                 <div id="map-geojson-list" style="font-size:13px; color:#9ca3af; padding:2px 0;">
                     <div style="text-align:center; padding:10px;">A carregar…</div>
+                </div>
+            </div>
+
+            <!-- Rasters de Satélite -->
+            <div class="section">
+                <h3>🛰️ Imagens de Satélite</h3>
+                <p style="font-size:12px; color:#9ca3af; margin:-4px 0 10px;">
+                    Rasters gerados pelo Sentinel.py (NDVI, NDMI, LST…).
+                    Gere novos rasters no separador <strong>📊 Medições de Campo</strong>.
+                </p>
+                <div class="form-group" style="margin-bottom:10px;">
+                    <label style="font-size:12px; font-weight:600; color:#6b7280;
+                                  display:block; margin-bottom:4px;">Terreno</label>
+                    <select id="map-raster-terrain" onchange="loadMapRasterLayers(this.value)"
+                            style="width:100%; padding:7px 10px; border:1.5px solid #e5e7eb;
+                                   border-radius:7px; font-size:13px; background:#fff;">
+                        <option value="">— Selecione um terreno —</option>
+                        <?php foreach ($mapTerrains as $t): ?>
+                            <option value="<?php echo (int)$t['id']; ?>">
+                                <?php echo htmlspecialchars($t['name']); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-bottom:10px;">
+                    <label style="font-size:12px; font-weight:600; color:#6b7280;
+                                  display:flex; justify-content:space-between; align-items:center;
+                                  margin-bottom:4px;">
+                        <span>Opacidade</span>
+                        <span id="map-raster-opacity-val" style="font-weight:400; color:#9ca3af;">80%</span>
+                    </label>
+                    <input type="range" id="map-raster-opacity" min="0" max="100" value="80"
+                           oninput="setMapRasterOpacity(this.value)"
+                           style="width:100%; accent-color:#0ea5e9; cursor:pointer; height:4px;">
+                </div>
+                <div id="map-raster-list" style="color:#9ca3af; font-size:13px; padding:2px 0;">
+                    Selecione um terreno para ver os rasters disponíveis.
                 </div>
             </div>
         </div>

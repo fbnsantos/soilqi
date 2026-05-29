@@ -647,6 +647,231 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 $response['success'] = $stmt->rowCount() > 0;
                 $response['message'] = $response['success'] ? 'Eliminado.' : 'Não encontrado.';
                 break;
+
+            // ── Rasters de satélite (Sentinel Hub via MQTT) ───────────────────
+
+            case 'request_raster':
+                $terrainId  = intval($_POST['terrain_id']  ?? 0);
+                $rasterType = trim($_POST['raster_type']   ?? '');
+                $dateFrom   = trim($_POST['date_from']     ?? '');
+                $dateTo     = trim($_POST['date_to']       ?? '');
+                $dateFrom2  = trim($_POST['date_from2']    ?? '');
+                $dateTo2    = trim($_POST['date_to2']      ?? '');
+
+                $allowed = ['ndvi','ndvi_anomaly','ndvi_diff','ndmi','lst'];
+                if (!$terrainId || !in_array($rasterType, $allowed, true) || !$dateFrom || !$dateTo) {
+                    $response['message'] = 'Dados em falta ou tipo de raster inválido.';
+                    break;
+                }
+                if (in_array($rasterType, ['ndvi_anomaly','ndvi_diff'], true) && (!$dateFrom2 || !$dateTo2)) {
+                    $response['message'] = 'Para este tipo de raster é necessário definir o período de referência.';
+                    break;
+                }
+
+                // Obter geometria do terreno e calcular bbox
+                $stmt = $pdo->prepare("SELECT id, name, coordinates FROM terrains WHERE id = ? AND user_id = ?");
+                $stmt->execute([$terrainId, $currentUser['id']]);
+                $terrain = $stmt->fetch(PDO::FETCH_ASSOC);
+                if (!$terrain) { $response['message'] = 'Terreno não encontrado.'; break; }
+
+                $coords  = json_decode($terrain['coordinates'], true) ?? [];
+                $lats    = array_map(fn($c) => isset($c['lat']) ? (float)$c['lat'] : (float)$c[0], $coords);
+                $lngs    = array_map(fn($c) => isset($c['lng']) ? (float)$c['lng'] : (float)$c[1], $coords);
+                if (!$lats || !$lngs) { $response['message'] = 'Geometria do terreno inválida.'; break; }
+
+                $bbox = [min($lngs), min($lats), max($lngs), max($lats)]; // [minLon, minLat, maxLon, maxLat]
+
+                // Gerar UUID
+                $requestId = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+                    mt_rand(0,0xffff), mt_rand(0,0xffff), mt_rand(0,0xffff),
+                    mt_rand(0,0x0fff)|0x4000, mt_rand(0,0x3fff)|0x8000,
+                    mt_rand(0,0xffff), mt_rand(0,0xffff), mt_rand(0,0xffff));
+
+                // Labels amigáveis
+                $typeLabels = [
+                    'ndvi'          => 'NDVI Atual',
+                    'ndvi_anomaly'  => 'NDVI Anomalia',
+                    'ndvi_diff'     => 'NDVI Diferença',
+                    'ndmi'          => 'NDMI Humidade',
+                    'lst'           => 'LST Temperatura',
+                ];
+                $name = ($typeLabels[$rasterType] ?? $rasterType)
+                      . ' · ' . $terrain['name']
+                      . ' · ' . date('d/m/Y', strtotime($dateFrom));
+
+                // Auto-migrar tabela se não existir
+                $pdo->exec("
+                    CREATE TABLE IF NOT EXISTS raster_results (
+                        id INT NOT NULL AUTO_INCREMENT,
+                        user_id INT NOT NULL, terrain_id INT NULL,
+                        request_id VARCHAR(36) NOT NULL,
+                        raster_type VARCHAR(50) NOT NULL,
+                        name VARCHAR(255) NOT NULL,
+                        status ENUM('pending','processing','done','error') NOT NULL DEFAULT 'pending',
+                        png_data MEDIUMBLOB NULL,
+                        min_lat DECIMAL(10,7) NULL, max_lat DECIMAL(10,7) NULL,
+                        min_lng DECIMAL(10,7) NULL, max_lng DECIMAL(10,7) NULL,
+                        date_from DATE NULL, date_to DATE NULL,
+                        date_from2 DATE NULL, date_to2 DATE NULL,
+                        error_msg TEXT NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        PRIMARY KEY (id),
+                        UNIQUE KEY uidx_request (request_id),
+                        INDEX idx_rr_user (user_id), INDEX idx_rr_terrain (terrain_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                ");
+
+                // Inserir registo pendente
+                $ins = $pdo->prepare("
+                    INSERT INTO raster_results
+                        (user_id, terrain_id, request_id, raster_type, name,
+                         date_from, date_to, date_from2, date_to2,
+                         min_lat, max_lat, min_lng, max_lng)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ");
+                $ins->execute([
+                    $currentUser['id'], $terrainId, $requestId, $rasterType, $name,
+                    $dateFrom ?: null, $dateTo ?: null,
+                    $dateFrom2 ?: null, $dateTo2 ?: null,
+                    $bbox[1], $bbox[3], $bbox[0], $bbox[2],
+                ]);
+
+                // Publicar via MQTT
+                $mqttError = null;
+                if (defined('MQTT_HOST') && MQTT_HOST !== '' && MQTT_HOST !== '{{MQTT_HOST}}') {
+                    try {
+                        require_once __DIR__ . '/../lib/MqttPublisher.php';
+                        $mqtt = new MqttPublisher(
+                            MQTT_HOST,
+                            defined('MQTT_PORT') ? (int)MQTT_PORT : 1883,
+                            'soilqi_web_' . substr($requestId, 0, 8),
+                            defined('MQTT_USER') ? MQTT_USER : '',
+                            defined('MQTT_PASS') ? MQTT_PASS : ''
+                        );
+                        $payload = json_encode([
+                            'request_id'   => $requestId,
+                            'user_id'      => $currentUser['id'],
+                            'terrain_id'   => $terrainId,
+                            'terrain_name' => $terrain['name'],
+                            'bbox'         => $bbox,
+                            'raster_type'  => $rasterType,
+                            'date_from'    => $dateFrom,
+                            'date_to'      => $dateTo,
+                            'date_from2'   => $dateFrom2 ?: null,
+                            'date_to2'     => $dateTo2  ?: null,
+                            'callback_url' => (defined('SITE_URL') ? rtrim(SITE_URL,'/') : '') . '/api/raster_result.php',
+                            'api_key'      => defined('RASTER_API_KEY') ? RASTER_API_KEY : '',
+                        ]);
+                        $mqtt->publish(defined('MQTT_TOPIC') ? MQTT_TOPIC : '/soilqi/request', $payload, 1, false);
+                        $mqtt->disconnect();
+                    } catch (Throwable $mqttEx) {
+                        $mqttError = $mqttEx->getMessage();
+                    }
+                } else {
+                    $mqttError = 'MQTT não configurado — verifique config.php.';
+                }
+
+                $response['success']    = true;
+                $response['request_id'] = $requestId;
+                $response['name']       = $name;
+                if ($mqttError) {
+                    $response['mqtt_warning'] = $mqttError;
+                }
+                break;
+
+            case 'get_raster_status':
+                $requestId = trim($_POST['request_id'] ?? '');
+                if (!$requestId) { $response['message'] = 'request_id em falta.'; break; }
+                try {
+                    $stmt = $pdo->prepare("
+                        SELECT id, status, error_msg, name, raster_type,
+                               min_lat, max_lat, min_lng, max_lng,
+                               UNIX_TIMESTAMP(updated_at) as updated_ts
+                        FROM raster_results
+                        WHERE request_id = ? AND user_id = ?
+                    ");
+                    $stmt->execute([$requestId, $currentUser['id']]);
+                    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$row) { $response['message'] = 'Pedido não encontrado.'; break; }
+                    $response['success'] = true;
+                    $response['status']  = $row['status'];
+                    $response['name']    = $row['name'];
+                    $response['error']   = $row['error_msg'];
+                    $response['id']      = (int)$row['id'];
+                } catch (PDOException $e2) {
+                    $response['message'] = 'Tabela não existe — aplique a migração 006.';
+                }
+                break;
+
+            case 'get_rasters':
+                $tid = intval($_POST['terrain_id'] ?? 0);
+                try {
+                    if ($tid > 0) {
+                        $stmt = $pdo->prepare("
+                            SELECT id, request_id, raster_type, name, status,
+                                   date_from, date_to, date_from2, date_to2,
+                                   error_msg, created_at
+                            FROM raster_results
+                            WHERE user_id = ? AND terrain_id = ?
+                            ORDER BY created_at DESC LIMIT 50
+                        ");
+                        $stmt->execute([$currentUser['id'], $tid]);
+                    } else {
+                        $stmt = $pdo->prepare("
+                            SELECT r.id, r.request_id, r.raster_type, r.name, r.status,
+                                   r.date_from, r.date_to, r.error_msg, r.created_at,
+                                   t.name AS terrain_name
+                            FROM raster_results r
+                            LEFT JOIN terrains t ON t.id = r.terrain_id
+                            WHERE r.user_id = ?
+                            ORDER BY r.created_at DESC LIMIT 50
+                        ");
+                        $stmt->execute([$currentUser['id']]);
+                    }
+                    $response['success'] = true;
+                    $response['rasters'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                } catch (PDOException $e2) {
+                    $response['success'] = true;
+                    $response['rasters'] = [];
+                }
+                break;
+
+            case 'delete_raster':
+                $id = intval($_POST['id'] ?? 0);
+                try {
+                    $stmt = $pdo->prepare("DELETE FROM raster_results WHERE id = ? AND user_id = ?");
+                    $stmt->execute([$id, $currentUser['id']]);
+                    $response['success'] = $stmt->rowCount() > 0;
+                    $response['message'] = $response['success'] ? 'Eliminado.' : 'Não encontrado.';
+                } catch (PDOException $e2) {
+                    $response['message'] = 'Erro: ' . $e2->getMessage();
+                }
+                break;
+
+            case 'get_raster_png':
+                $id = intval($_POST['id'] ?? 0);
+                try {
+                    $stmt = $pdo->prepare("
+                        SELECT png_data, min_lat, max_lat, min_lng, max_lng, name, raster_type
+                        FROM raster_results
+                        WHERE id = ? AND user_id = ? AND status = 'done'
+                    ");
+                    $stmt->execute([$id, $currentUser['id']]);
+                    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$row || !$row['png_data']) { $response['message'] = 'Raster não encontrado.'; break; }
+                    $response['success']     = true;
+                    $response['png']         = 'data:image/png;base64,' . base64_encode($row['png_data']);
+                    $response['min_lat']     = (float)$row['min_lat'];
+                    $response['max_lat']     = (float)$row['max_lat'];
+                    $response['min_lng']     = (float)$row['min_lng'];
+                    $response['max_lng']     = (float)$row['max_lng'];
+                    $response['name']        = $row['name'];
+                    $response['raster_type'] = $row['raster_type'];
+                } catch (PDOException $e2) {
+                    $response['message'] = 'Erro: ' . $e2->getMessage();
+                }
+                break;
         }
 
     } catch (PDOException $e) {
@@ -1348,6 +1573,123 @@ try {
 
         <div id="objects-list">
             <div style="text-align:center; padding:20px; color:#9ca3af;">A carregar…</div>
+        </div>
+    </div>
+</div>
+
+<!-- ══ Imagens de Satélite (Sentinel Hub) ══════════════════════════════════ -->
+<div class="section interp-section">
+    <div class="section-title" style="cursor:pointer; user-select:none;" onclick="toggleRasterPanel()">
+        <h3>🛰️ Imagens de Satélite</h3>
+        <span id="raster-toggle-btn" class="btn btn-secondary btn-sm">▼ Expandir</span>
+    </div>
+    <div id="raster-panel" style="display:none; margin-top:16px;">
+
+        <p style="color:#6b7280; font-size:13px; margin-bottom:16px;">
+            Gera rasters de satélite (Sentinel-2 / Landsat) para os seus terrenos através do
+            <strong>Sentinel Hub (Copernicus)</strong>. O pedido é enviado via MQTT ao serviço
+            <code>Sentinel.py</code> que processa e devolve o resultado automaticamente.
+        </p>
+
+        <!-- Formulário de pedido -->
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:16px; margin-bottom:18px;">
+            <div style="font-weight:700; font-size:14px; color:#1e293b; margin-bottom:14px;">
+                📡 Novo pedido de raster
+            </div>
+
+            <div class="field-filters" style="margin-bottom:12px;">
+                <!-- Terreno -->
+                <div class="filter-group" style="flex:1.5; min-width:160px;">
+                    <label>Terreno *</label>
+                    <select id="raster-terrain">
+                        <option value="">— Selecionar —</option>
+                        <?php foreach ($filterTerrains as $t): ?>
+                            <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <!-- Tipo -->
+                <div class="filter-group" style="flex:2; min-width:180px;">
+                    <label>Tipo de raster *</label>
+                    <select id="raster-type" onchange="onRasterTypeChange()">
+                        <option value="ndvi">🌿 NDVI Atual</option>
+                        <option value="ndmi">💧 NDMI / Humidade vegetativa</option>
+                        <option value="lst">🌡️ LST / Temperatura de superfície</option>
+                        <option value="ndvi_anomaly">📊 NDVI Anomalia (vs. ano anterior)</option>
+                        <option value="ndvi_diff">📈 NDVI Diferença entre datas</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Período principal -->
+            <div class="field-filters" style="margin-bottom:8px;">
+                <div class="filter-group">
+                    <label id="raster-date-from-lbl">Data início *</label>
+                    <input type="date" id="raster-date-from">
+                </div>
+                <div class="filter-group">
+                    <label>Data fim *</label>
+                    <input type="date" id="raster-date-to">
+                </div>
+            </div>
+
+            <!-- Período de referência (ndvi_anomaly / ndvi_diff) -->
+            <div id="raster-ref-period" style="display:none; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:10px; margin-bottom:10px;">
+                <div style="font-size:12px; font-weight:600; color:#1d4ed8; margin-bottom:8px;">
+                    📅 Período de referência
+                </div>
+                <div class="field-filters">
+                    <div class="filter-group">
+                        <label>Início referência *</label>
+                        <input type="date" id="raster-date-from2">
+                    </div>
+                    <div class="filter-group">
+                        <label>Fim referência *</label>
+                        <input type="date" id="raster-date-to2">
+                    </div>
+                </div>
+                <div id="raster-ref-hint" style="font-size:11px; color:#3b82f6; margin-top:4px;"></div>
+            </div>
+
+            <div style="display:flex; gap:10px; align-items:center;">
+                <button id="raster-submit-btn" class="btn btn-primary" onclick="submitRasterRequest()"
+                        style="padding:10px 20px; font-size:14px;">
+                    🚀 Gerar Raster
+                </button>
+                <div id="raster-submit-status" style="font-size:13px; color:#6b7280;"></div>
+            </div>
+        </div>
+
+        <!-- Progresso do pedido actual -->
+        <div id="raster-progress-box" style="display:none; background:#fefce8; border:1px solid #fde047;
+             border-radius:10px; padding:14px; margin-bottom:16px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+                <span id="raster-progress-spinner" style="font-size:22px;">⏳</span>
+                <div>
+                    <div id="raster-progress-name" style="font-weight:700; font-size:13px; color:#713f12;"></div>
+                    <div id="raster-progress-msg"  style="font-size:12px; color:#92400e; margin-top:2px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Lista de rasters existentes -->
+        <div style="font-weight:700; font-size:13px; color:#374151; margin-bottom:8px;">
+            📋 Rasters gerados
+            <button class="btn btn-secondary btn-sm" onclick="loadRastersList()" style="margin-left:8px;">🔄</button>
+        </div>
+        <div class="filter-group" style="max-width:280px; margin-bottom:10px;">
+            <label>Filtrar por terreno</label>
+            <select id="raster-list-terrain" onchange="loadRastersList()">
+                <option value="">Todos os terrenos</option>
+                <?php foreach ($filterTerrains as $t): ?>
+                    <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); ?></option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <div id="rasters-list">
+            <div style="text-align:center; padding:20px; color:#9ca3af; font-size:13px;">
+                Expanda para ver os rasters disponíveis.
+            </div>
         </div>
     </div>
 </div>

@@ -20,6 +20,23 @@ define('SITE_NAME', 'Farm Management Information Systems');
 define('SITE_VERSION', '1.0');
 define('TIMEZONE', 'Europe/Lisbon');
 
+// URL pública da aplicação (sem slash final) — usada como callback pelo Sentinel.py
+define('SITE_URL', '{{SITE_URL}}');           // ex: 'https://soilqi.com'
+
+// ── MQTT Broker (para pedidos de imagens de satélite) ─────────────────────────
+// O PHP publica pedidos no broker; o Sentinel.py (Python) subscreve e processa.
+// As credenciais Sentinel Hub ficam APENAS no módulo soilqi (Python).
+define('MQTT_HOST',  '{{MQTT_HOST}}');        // ex: 'localhost' ou 'broker.hivemq.com'
+define('MQTT_PORT',  {{MQTT_PORT}});          // ex: 1883
+define('MQTT_USER',  '{{MQTT_USER}}');        // deixar '' se sem autenticação
+define('MQTT_PASS',  '{{MQTT_PASS}}');        // deixar '' se sem autenticação
+define('MQTT_TOPIC', '/soilqi/request');      // tópico de pedidos
+
+// ── Chave partilhada PHP ↔ Sentinel.py ───────────────────────────────────────
+// Gerar com: php -r "echo bin2hex(random_bytes(32));"
+// Deve ser igual ao RASTER_API_KEY definido no módulo soilqi (Python).
+define('RASTER_API_KEY', '{{RASTER_API_KEY}}');
+
 // Configurar timezone
 date_default_timezone_set(TIMEZONE);
 

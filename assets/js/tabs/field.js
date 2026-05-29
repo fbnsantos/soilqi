@@ -2365,6 +2365,276 @@ function deleteFieldObject(id, name) {
         .catch(() => showAlert('❌ Erro de rede.', 'error'));
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// IMAGENS DE SATÉLITE (Sentinel Hub via MQTT)
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _rasterPollTimer   = null;  // interval de polling
+let _rasterPollSeconds = 0;     // segundos decorridos desde o pedido
+
+function toggleRasterPanel() {
+    const panel = document.getElementById('raster-panel');
+    const btn   = document.getElementById('raster-toggle-btn');
+    if (!panel) return;
+    const open = panel.style.display === 'none';
+    panel.style.display = open ? 'block' : 'none';
+    if (btn) btn.textContent = open ? '▲ Recolher' : '▼ Expandir';
+    if (open) loadRastersList();
+}
+
+/** Mostra/oculta período de referência e actualiza hint */
+function onRasterTypeChange() {
+    const type    = document.getElementById('raster-type')?.value || 'ndvi';
+    const refBox  = document.getElementById('raster-ref-period');
+    const hint    = document.getElementById('raster-ref-hint');
+    const fromLbl = document.getElementById('raster-date-from-lbl');
+    const needsRef = type === 'ndvi_anomaly' || type === 'ndvi_diff';
+
+    if (refBox) refBox.style.display = needsRef ? 'block' : 'none';
+
+    if (fromLbl) {
+        fromLbl.textContent = needsRef ? 'Início período actual *' : 'Data início *';
+    }
+
+    if (hint && type === 'ndvi_anomaly') {
+        hint.textContent = 'Sugestão: mesmo mês do ano anterior. Ex: 2025-05-01 → 2025-05-31';
+    } else if (hint) {
+        hint.textContent = '';
+    }
+}
+
+/** Submete o pedido de raster ao servidor (que publica no MQTT) */
+function submitRasterRequest() {
+    const terrain  = document.getElementById('raster-terrain')?.value    || '';
+    const type     = document.getElementById('raster-type')?.value       || '';
+    const dateFrom = document.getElementById('raster-date-from')?.value  || '';
+    const dateTo   = document.getElementById('raster-date-to')?.value    || '';
+    const dateFrom2= document.getElementById('raster-date-from2')?.value || '';
+    const dateTo2  = document.getElementById('raster-date-to2')?.value   || '';
+
+    if (!terrain) { showAlert('Selecione um terreno.', 'error'); return; }
+    if (!dateFrom || !dateTo) { showAlert('Defina o período de datas.', 'error'); return; }
+    if ((type === 'ndvi_anomaly' || type === 'ndvi_diff') && (!dateFrom2 || !dateTo2)) {
+        showAlert('Defina o período de referência.', 'error'); return;
+    }
+
+    const btn    = document.getElementById('raster-submit-btn');
+    const status = document.getElementById('raster-submit-status');
+    if (btn)    { btn.disabled = true; btn.textContent = '⏳ A enviar…'; }
+    if (status) status.textContent = '';
+
+    const fd = new FormData();
+    fd.append('action',      'request_raster');
+    fd.append('terrain_id',  terrain);
+    fd.append('raster_type', type);
+    fd.append('date_from',   dateFrom);
+    fd.append('date_to',     dateTo);
+    fd.append('date_from2',  dateFrom2);
+    fd.append('date_to2',    dateTo2);
+
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (btn) { btn.disabled = false; btn.textContent = '🚀 Gerar Raster'; }
+
+            if (!data.success) {
+                if (status) status.textContent = '❌ ' + (data.message || 'Erro');
+                showAlert('❌ ' + (data.message || 'Erro ao submeter pedido.'), 'error');
+                return;
+            }
+
+            if (data.mqtt_warning) {
+                showAlert('⚠️ Pedido criado mas MQTT falhou: ' + data.mqtt_warning, 'warning');
+            }
+
+            // Iniciar polling de estado
+            _startRasterPolling(data.request_id, data.name);
+            loadRastersList();
+        })
+        .catch(() => {
+            if (btn) { btn.disabled = false; btn.textContent = '🚀 Gerar Raster'; }
+            if (status) status.textContent = '❌ Erro de rede.';
+        });
+}
+
+/** Inicia o polling de estado do pedido */
+function _startRasterPolling(requestId, name) {
+    _stopRasterPolling();
+    _rasterPollSeconds = 0;
+
+    const box     = document.getElementById('raster-progress-box');
+    const spinner = document.getElementById('raster-progress-spinner');
+    const nameEl  = document.getElementById('raster-progress-name');
+    const msgEl   = document.getElementById('raster-progress-msg');
+
+    if (box)     box.style.display = 'block';
+    if (nameEl)  nameEl.textContent = name || 'A processar…';
+    if (msgEl)   msgEl.textContent  = '⏳ A aguardar Sentinel.py…';
+    if (spinner) spinner.textContent = '⏳';
+
+    _rasterPollTimer = setInterval(() => {
+        _rasterPollSeconds += 2;
+        _pollRasterStatus(requestId, name);
+    }, 2000);
+}
+
+function _stopRasterPolling() {
+    if (_rasterPollTimer) { clearInterval(_rasterPollTimer); _rasterPollTimer = null; }
+}
+
+function _pollRasterStatus(requestId, name) {
+    const fd = new FormData();
+    fd.append('action',     'get_raster_status');
+    fd.append('request_id', requestId);
+
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            const spinner = document.getElementById('raster-progress-spinner');
+            const msgEl   = document.getElementById('raster-progress-msg');
+
+            if (!data.success) {
+                _stopRasterPolling();
+                _hideRasterProgress();
+                showAlert('❌ ' + (data.message || 'Erro'), 'error');
+                return;
+            }
+
+            const st = data.status;
+
+            if (st === 'done') {
+                _stopRasterPolling();
+                if (spinner) spinner.textContent = '✅';
+                if (msgEl)   msgEl.textContent  = '✅ Concluído! Disponível na tab 🗺️ Mapa.';
+                showAlert(`✅ Raster "${name}" gerado com sucesso! Abra a tab Mapa para o visualizar.`, 'success');
+                loadRastersList();
+                setTimeout(_hideRasterProgress, 4000);
+                return;
+            }
+
+            if (st === 'error') {
+                _stopRasterPolling();
+                if (spinner) spinner.textContent = '❌';
+                if (msgEl)   msgEl.textContent   = '❌ Erro: ' + (data.error || 'falha desconhecida');
+                showAlert('❌ Erro ao gerar raster: ' + (data.error || '?'), 'error');
+                loadRastersList();
+                return;
+            }
+
+            if (st === 'processing') {
+                if (spinner) spinner.textContent = '🔄';
+                if (msgEl)   msgEl.textContent   = `🔄 Sentinel.py a processar… (${_rasterPollSeconds}s)`;
+            } else {
+                // pending
+                if (_rasterPollSeconds >= 20) {
+                    if (msgEl) msgEl.textContent = `⚠️ Sentinel.py ainda não respondeu (${_rasterPollSeconds}s) — verifique se está em execução.`;
+                } else {
+                    if (msgEl) msgEl.textContent = `⏳ A aguardar Sentinel.py… (${_rasterPollSeconds}s)`;
+                }
+            }
+
+            // Parar polling após 120 s
+            if (_rasterPollSeconds >= 120) {
+                _stopRasterPolling();
+                if (spinner) spinner.textContent = '🕒';
+                if (msgEl)   msgEl.textContent   = 'A processar em segundo plano. Verifique os Rasters gerados mais tarde.';
+                loadRastersList();
+            }
+        })
+        .catch(() => { /* rede instável — tentar novamente no próximo tick */ });
+}
+
+function _hideRasterProgress() {
+    const box = document.getElementById('raster-progress-box');
+    if (box) box.style.display = 'none';
+}
+
+/** Carrega lista de rasters gerados */
+function loadRastersList() {
+    const tid   = document.getElementById('raster-list-terrain')?.value || '';
+    const listEl = document.getElementById('rasters-list');
+    if (!listEl) return;
+    listEl.innerHTML = '<div style="text-align:center;padding:16px;color:#9ca3af;font-size:13px;">A carregar…</div>';
+
+    const fd = new FormData();
+    fd.append('action',     'get_rasters');
+    fd.append('terrain_id', tid);
+
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) { listEl.innerHTML = `<div style="color:#ef4444;font-size:13px;">⚠️ ${escHtml(data.message||'Erro')}</div>`; return; }
+            _renderRastersList(data.rasters || []);
+        })
+        .catch(() => { listEl.innerHTML = '<div style="color:#ef4444;font-size:13px;">❌ Erro de rede.</div>'; });
+}
+
+const RASTER_TYPE_LABELS = {
+    ndvi:         '🌿 NDVI Atual',
+    ndvi_anomaly: '📊 NDVI Anomalia',
+    ndvi_diff:    '📈 NDVI Diferença',
+    ndmi:         '💧 NDMI Humidade',
+    lst:          '🌡️ LST Temperatura',
+};
+const RASTER_STATUS_ICON = { pending:'⏳', processing:'🔄', done:'✅', error:'❌' };
+
+function _renderRastersList(rasters) {
+    const listEl = document.getElementById('rasters-list');
+    if (!listEl) return;
+
+    if (!rasters.length) {
+        listEl.innerHTML = `
+            <div style="text-align:center;padding:24px;color:#9ca3af;font-size:13px;">
+                <div style="font-size:32px;margin-bottom:8px;">🛰️</div>
+                Nenhum raster gerado ainda. Use o formulário acima para criar o primeiro.
+            </div>`;
+        return;
+    }
+
+    const rows = rasters.map(r => {
+        const dt      = new Date(r.created_at).toLocaleString('pt-PT', { dateStyle:'short', timeStyle:'short' });
+        const icon    = RASTER_STATUS_ICON[r.status] || '?';
+        const label   = RASTER_TYPE_LABELS[r.raster_type] || r.raster_type;
+        const isDone  = r.status === 'done';
+        const terrain = r.terrain_name ? `<span style="color:#667eea;font-size:11px;">📍 ${escHtml(r.terrain_name)}</span><br>` : '';
+
+        return `
+            <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;
+                        border-bottom:1px solid #f3f4f6;font-size:13px;">
+                <span style="font-size:20px;flex-shrink:0;line-height:1.4;">${icon}</span>
+                <div style="flex:1;min-width:0;">
+                    ${terrain}
+                    <div style="font-weight:600;color:#1f2937;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                        ${escHtml(r.name)}
+                    </div>
+                    <div style="font-size:11px;color:#9ca3af;margin-top:2px;">${label} · ${dt}</div>
+                    ${r.error_msg ? `<div style="font-size:11px;color:#ef4444;margin-top:2px;">❌ ${escHtml(r.error_msg.substring(0,120))}</div>` : ''}
+                </div>
+                <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;">
+                    ${isDone ? `<a href="?tab=map" class="btn btn-primary btn-sm" style="font-size:11px;padding:3px 8px;text-decoration:none;">🗺️ Ver no Mapa</a>` : ''}
+                    <button onclick="deleteRaster(${r.id}, '${escHtml(r.name.replace(/'/g,''))}')"
+                            class="btn btn-danger btn-sm" style="font-size:11px;padding:3px 8px;">🗑️</button>
+                </div>
+            </div>`;
+    }).join('');
+
+    listEl.innerHTML = `<div style="font-size:12px;color:#6b7280;margin-bottom:6px;">${rasters.length} raster(s)</div>` + rows;
+}
+
+function deleteRaster(id, name) {
+    if (!confirm(`Eliminar raster "${name}"?`)) return;
+    const fd = new FormData();
+    fd.append('action', 'delete_raster');
+    fd.append('id',     id);
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) { showAlert('🗑️ Raster eliminado.', 'info'); loadRastersList(); }
+            else showAlert('❌ ' + (data.message || 'Erro'), 'error');
+        })
+        .catch(() => showAlert('❌ Erro de rede.', 'error'));
+}
+
 // ── Util ──────────────────────────────────────────────────────────────────────
 function escHtml(s) {
     return String(s)
