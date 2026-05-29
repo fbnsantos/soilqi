@@ -8,6 +8,12 @@
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
+//ini_set('display_errors', 1);
+//error_reporting(E_ALL);
+require_once 'config.php';
+echo "config.php OK\n";
+echo "MQTT_HOST: " . (defined('MQTT_HOST') ? MQTT_HOST : 'NÃO DEFINIDO') . "\n";
+phpinfo(INFO_GENERAL | INFO_CONFIGURATION);
 echo "<h1>🔍 Debug - Sistema de Gestão de Terrenos</h1>";
 echo "<style>
     body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
