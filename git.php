@@ -56,71 +56,86 @@ echo "<hr>";
 $method = $_SERVER['REQUEST_METHOD'];
 $params = ($method === 'POST') ? $_POST : $_GET;
 
-$dbParams = [
-    'dbhost' => $params['dbhost'] ?? null,
-    'dbuser' => $params['dbuser'] ?? null, 
-    'dbpass' => $params['dbpass'] ?? null,
-    'dbname' => $params['dbname'] ?? null
+$allParams = [
+    // Base de dados
+    'dbhost'         => $params['dbhost']         ?? null,
+    'dbuser'         => $params['dbuser']         ?? null,
+    'dbpass'         => $params['dbpass']         ?? null,
+    'dbname'         => $params['dbname']         ?? null,
+    // Aplicação
+    'site_url'       => $params['site_url']       ?? null,
+    // MQTT
+    'mqtt_host'      => $params['mqtt_host']      ?? null,
+    'mqtt_port'      => $params['mqtt_port']      ?? null,
+    'mqtt_user'      => $params['mqtt_user']      ?? null,
+    'mqtt_pass'      => $params['mqtt_pass']      ?? null,
+    // Sentinel
+    'raster_api_key' => $params['raster_api_key'] ?? null,
 ];
 
 // Filtrar apenas parâmetros que foram passados
-$dbParams = array_filter($dbParams, function($value) {
+$allParams = array_filter($allParams, function($value) {
     return $value !== null && $value !== '';
 });
 
-if (!empty($dbParams)) {
+// Compat: $dbParams mantido para não quebrar lógica abaixo
+$dbParams = array_filter($allParams, function($v, $k) {
+    return in_array($k, ['dbhost','dbuser','dbpass','dbname']);
+}, ARRAY_FILTER_USE_BOTH);
+
+if (!empty($allParams)) {
     echo "<h3>⚙️ Gerando config.php a partir do template</h3>";
-    
-    // Mostrar parâmetros recebidos (mascarar password)
-    foreach ($dbParams as $key => $value) {
-        $displayValue = ($key === 'dbpass') ? str_repeat('*', strlen($value)) : $value;
+
+    // Campos sensíveis a mascarar no output
+    $secretKeys = ['dbpass', 'mqtt_pass', 'raster_api_key'];
+
+    // Mostrar parâmetros recebidos (mascarar secrets)
+    foreach ($allParams as $key => $value) {
+        $displayValue = in_array($key, $secretKeys) ? str_repeat('*', strlen($value)) : $value;
         echo "<p><strong>" . strtoupper($key) . ":</strong> <code>$displayValue</code></p>";
     }
-    
+
     $templateFile = 'config_template.php';
     $configFile = 'config.php';
 
-    if (unlink($configFile)) {
-                 echo "✅ Ficheiro eliminado com sucesso!";
+    if (file_exists($configFile) && !unlink($configFile)) {
+        echo "❌ Erro ao eliminar o ficheiro config.php antigo!";
     } else {
-                echo "❌ Erro ao eliminar o ficheiro!";
+        echo "✅ config.php anterior removido.";
     }
-    
+
     if (file_exists($templateFile)) {
- 
-        // Fazer backup do config atual se existir
-        //if (file_exists($configFile)) {
-        //    $backupFile = 'config.php.backup.' . date('Y-m-d_H-i-s');
-        //    if (copy($configFile, $backupFile)) {
-         //       echo "<p>✅ Backup do config atual criado: <code>$backupFile</code></p>";
-         //   }
-       /// }
-        
+
         // Ler conteúdo do template
         $templateContent = file_get_contents($templateFile);
-        
+
         if ($templateContent !== false) {
             echo "<p>✅ Template carregado com sucesso</p>";
-            
-            // Mapear parâmetros para placeholders
+
+            // Mapear parâmetros → placeholders do template
             $paramToPlaceholder = [
-                'dbhost' => '{{DB_HOST}}',
-                'dbuser' => '{{DB_USER}}', 
-                'dbpass' => '{{DB_PASS}}',
-                'dbname' => '{{DB_NAME}}'
+                'dbhost'         => '{{DB_HOST}}',
+                'dbuser'         => '{{DB_USER}}',
+                'dbpass'         => '{{DB_PASS}}',
+                'dbname'         => '{{DB_NAME}}',
+                'site_url'       => '{{SITE_URL}}',
+                'mqtt_host'      => '{{MQTT_HOST}}',
+                'mqtt_port'      => '{{MQTT_PORT}}',   // numérico — sem aspas no template
+                'mqtt_user'      => '{{MQTT_USER}}',
+                'mqtt_pass'      => '{{MQTT_PASS}}',
+                'raster_api_key' => '{{RASTER_API_KEY}}',
             ];
-            
+
             // Substituir placeholders pelos valores reais
             $configContent = $templateContent;
             $replacements = 0;
-            
-            foreach ($dbParams as $param => $value) {
+
+            foreach ($allParams as $param => $value) {
                 if (isset($paramToPlaceholder[$param])) {
                     $placeholder = $paramToPlaceholder[$param];
-                    
-                    // Escapar valor para uso em PHP
-                    $escapedValue = addslashes($value);
-                    
+                    // mqtt_port é numérico no template (sem aspas) — não escapar
+                    $escapedValue = ($param === 'mqtt_port') ? intval($value) : addslashes($value);
+
                     if (strpos($configContent, $placeholder) !== false) {
                         $configContent = str_replace($placeholder, $escapedValue, $configContent);
                         $replacements++;
@@ -128,7 +143,7 @@ if (!empty($dbParams)) {
                     }
                 }
             }
-            
+
             // Verificar se ainda existem placeholders não substituídos
             $remainingPlaceholders = [];
             foreach ($paramToPlaceholder as $placeholder) {
@@ -136,18 +151,24 @@ if (!empty($dbParams)) {
                     $remainingPlaceholders[] = $placeholder;
                 }
             }
-            
+
             if (!empty($remainingPlaceholders)) {
                 echo "<p>⚠️ Placeholders não substituídos (usar valores padrão): <code>" . implode(', ', $remainingPlaceholders) . "</code></p>";
-                
-                // Substituir placeholders restantes por valores padrão
+
+                // Valores padrão para placeholders não fornecidos
                 $defaults = [
-                    '{{DB_HOST}}' => 'localhost',
-                    '{{DB_USER}}' => 'root',
-                    '{{DB_PASS}}' => '',
-                    '{{DB_NAME}}' => 'terrain_mapper'
+                    '{{DB_HOST}}'        => 'localhost',
+                    '{{DB_USER}}'        => 'root',
+                    '{{DB_PASS}}'        => '',
+                    '{{DB_NAME}}'        => 'terrain_mapper',
+                    '{{SITE_URL}}'       => '',
+                    '{{MQTT_HOST}}'      => 'localhost',
+                    '{{MQTT_PORT}}'      => '1883',
+                    '{{MQTT_USER}}'      => '',
+                    '{{MQTT_PASS}}'      => '',
+                    '{{RASTER_API_KEY}}' => '',
                 ];
-                
+
                 foreach ($remainingPlaceholders as $placeholder) {
                     if (isset($defaults[$placeholder])) {
                         $configContent = str_replace($placeholder, $defaults[$placeholder], $configContent);
@@ -189,33 +210,18 @@ if (!empty($dbParams)) {
     
     echo "<hr>";
 } else {
-    echo "<p>ℹ️ Nenhum parâmetro de base de dados foi passado.</p>";
-    
-    // Verificar se config.php existe, senão tentar gerar com valores padrão do template
-    if (!file_exists('config.php') && file_exists('config_template.php')) {
-        echo "<p>⚠️ config.php não encontrado. Gerando com valores padrão do template...</p>";
-        
-        $templateContent = file_get_contents('config_template.php');
-        if ($templateContent !== false) {
-            $defaults = [
-                '{{DB_HOST}}' => 'localhost',
-                '{{DB_USER}}' => 'root',
-                '{{DB_PASS}}' => '',
-                '{{DB_NAME}}' => 'terrain_mapper'
-            ];
-            
-            $configContent = $templateContent;
-            foreach ($defaults as $placeholder => $value) {
-                $configContent = str_replace($placeholder, $value, $configContent);
-            }
-            
-            if (file_put_contents('config.php', $configContent)) {
-                echo "<p>✅ config.php gerado com valores padrão</p>";
-            }
-        }
+    echo "<p>ℹ️ Nenhum parâmetro foi passado — apenas git pull executado.</p>";
+
+    if (!file_exists('config.php')) {
+        echo "<p>⚠️ config.php não existe no servidor. Chama este script com os parâmetros para o gerar.</p>";
+    } else {
+        echo "<p>✅ config.php já existe — não foi alterado.</p>";
     }
-    
-    echo "<p><strong>Parâmetros disponíveis:</strong> <code>dbhost, dbuser, dbpass, dbname</code></p>";
+
+    echo "<p><strong>Parâmetros disponíveis:</strong><br>
+        <code>dbhost, dbuser, dbpass, dbname</code> (base de dados)<br>
+        <code>site_url, mqtt_host, mqtt_port, mqtt_user, mqtt_pass, raster_api_key</code> (app)
+    </p>";
     echo "<hr>";
 }
 
@@ -340,17 +346,23 @@ echo "<p><strong>Timestamp:</strong> " . date('Y-m-d H:i:s') . "</p>";
     <p><strong>URL Base (apenas git + npm):</strong></p>
     <code>http://criis-projects.inesctec.pt/pikachu/pikachuPM/git.php</code>
     
-    <p><strong>Com geração de config.php:</strong></p>
-    <code>
-        git.php?dbhost=localhost&dbuser=myuser&dbpass=mypass&dbname=mydatabase
+    <p><strong>Com geração de config.php (todos os parâmetros):</strong></p>
+    <code style="word-break:break-all;">
+        git.php?dbhost=localhost&dbuser=USER&dbpass=PASS&dbname=DB
+        &site_url=https://soilqi.com
+        &mqtt_host=mqtt.vifield.com&mqtt_port=8883&mqtt_user=vifield&mqtt_pass=PASS
+        &raster_api_key=CHAVE
     </code>
-    
+
     <p><strong>Para usar com GitHub Secrets:</strong></p>
-    <code>
+    <code style="word-break:break-all;">
         git.php?dbhost=${{ secrets.DB_HOST }}&dbuser=${{ secrets.DB_USER }}&dbpass=${{ secrets.DB_PASS }}&dbname=${{ secrets.DB_NAME }}
+        &site_url=${{ secrets.SITE_URL }}
+        &mqtt_host=${{ secrets.MQTT_HOST }}&mqtt_port=${{ secrets.MQTT_PORT }}&mqtt_user=${{ secrets.MQTT_USER }}&mqtt_pass=${{ secrets.MQTT_PASS }}
+        &raster_api_key=${{ secrets.RASTER_API_KEY }}
     </code>
-    
-    <p><em>💡 O config.php é gerado a partir do config_template.php, substituindo os placeholders {{DB_HOST}}, {{DB_USER}}, etc.</em></p>
+
+    <p><em>💡 Se um parâmetro não for passado, o placeholder fica com o valor padrão (ex: mqtt_host → localhost).</em></p>
 </div>
 
 <div style="background:#f3e5f5; padding:15px; border-radius:8px; margin-top:15px;">

@@ -31,7 +31,7 @@ try {
     // Aceitar tanto POST form-data como JSON no body
     $input = [];
     $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
-    if (str_contains($contentType, 'application/json')) {
+    if (strpos($contentType, 'application/json') !== false) {
         $input = json_decode(file_get_contents('php://input'), true) ?? [];
     } else {
         $input = $_POST;

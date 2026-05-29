@@ -111,7 +111,7 @@ log = logging.getLogger("Sentinel")
 _EVALSCRIPT_NDVI = """
 //VERSION=3
 function setup() {
-  return { input: ["B04","B08","SCL","dataMask"], output: { bands:4, sampleType:"FLOAT32" } };
+  return { input: ["B04","B08","SCL","dataMask"], output: { bands:4, sampleType:"AUTO" } };
 }
 const ramp=[[-1,[0.2,0.1,0.05,1]],[-0.1,[0.6,0.4,0.2,1]],[0,[0.85,0.8,0.4,1]],
             [0.15,[0.7,0.9,0.2,1]],[0.35,[0.2,0.75,0.1,1]],[0.6,[0.0,0.5,0.0,1]],[1,[0,0.3,0,1]]];
@@ -127,7 +127,7 @@ function evaluatePixel(s){
 
 _EVALSCRIPT_NDMI = """
 //VERSION=3
-function setup(){return{input:["B08","B11","SCL","dataMask"],output:{bands:4,sampleType:"FLOAT32"}};}
+function setup(){return{input:["B08","B11","SCL","dataMask"],output:{bands:4,sampleType:"AUTO"}};}
 const ramp=[[-1,[0.6,0.4,0.1,1]],[-0.3,[0.95,0.95,0.7,1]],[0,[0.6,0.85,0.95,1]],[0.4,[0.1,0.5,0.9,1]],[1,[0,0.1,0.7,1]]];
 function lerp(a,b,t){return a+t*(b-a);}
 function col(v){for(let i=1;i<ramp.length;i++){if(v<=ramp[i][0]){const t=(v-ramp[i-1][0])/(ramp[i][0]-ramp[i-1][0]);return ramp[i-1][1].map((a,j)=>lerp(a,ramp[i][1][j],t));}}return ramp[ramp.length-1][1];}
@@ -142,7 +142,7 @@ function evaluatePixel(s){
 # LST usa Landsat 8/9 L2 — colecção diferente
 _EVALSCRIPT_LST = """
 //VERSION=3
-function setup(){return{input:["ST_B10","QA_PIXEL","dataMask"],output:{bands:4,sampleType:"FLOAT32"}};}
+function setup(){return{input:["ST_B10","QA_PIXEL","dataMask"],output:{bands:4,sampleType:"AUTO"}};}
 function evaluatePixel(s){
   if(s.dataMask===0)return[0,0,0,0];
   if((s.QA_PIXEL&8)!==0)return[0,0,0,0]; // nuvem
@@ -166,7 +166,7 @@ function setup(){
       {datasource:"p1",bands:["B04","B08","SCL","dataMask"]},
       {datasource:"p2",bands:["B04","B08","SCL","dataMask"]}
     ],
-    output:{bands:4,sampleType:"FLOAT32"}
+    output:{bands:4,sampleType:"AUTO"}
   };
 }
 const BAD=new Set([3,8,9,10,11]);
@@ -356,7 +356,7 @@ def generate_raster(job: dict) -> bytes:
         def _fetch_ndvi_tiff(df: str, dt: str) -> np.ndarray:
             es = """
 //VERSION=3
-function setup(){return{input:["B04","B08","SCL","dataMask"],output:{bands:1,sampleType:"FLOAT32"}};}
+function setup(){return{input:["B04","B08","SCL","dataMask"],output:{bands:1,sampleType:"AUTO"}};}
 const BAD=new Set([3,8,9,10,11]);
 function evaluatePixel(s){
   if(s.dataMask===0||BAD.has(s.SCL))return[NaN];
@@ -416,7 +416,7 @@ def post_result(job: dict, png_bytes: Optional[bytes], error_msg: Optional[str] 
         }
 
     try:
-        r = requests.post(url, data=payload, timeout=30)
+        r = requests.post(url, json=payload, timeout=30)
         if r.status_code == 200 and r.json().get("success"):
             log.info("Resultado entregue (%s).", job["request_id"])
         else:

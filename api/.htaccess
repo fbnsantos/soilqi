@@ -1,0 +1,8 @@
+# Desactivar ModSecurity para callbacks do Sentinel.py
+# (POST com PNG em base64 pode disparar regras WAF)
+<IfModule mod_security.c>
+    SecRuleEngine Off
+</IfModule>
+<IfModule mod_security2.c>
+    SecRuleEngine Off
+</IfModule>
