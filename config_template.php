@@ -248,47 +248,4 @@ function verifyPassword($password, $hash) {
     return password_verify($password, $hash);
 }
 
-/**
- * Scripts SQL para criar/atualizar as tabelas
- * Executar manualmente no phpMyAdmin ou cliente MySQL
- */
-/*
--- Criar base de dados (se não existir)
-CREATE DATABASE IF NOT EXISTS terrain_mapper CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-USE terrain_mapper;
-
--- Criar tabela de utilizadores
-CREATE TABLE IF NOT EXISTS users (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    username VARCHAR(50) NOT NULL UNIQUE,
-    email VARCHAR(100) NOT NULL UNIQUE,
-    password VARCHAR(255) NOT NULL,
-    role VARCHAR(20) DEFAULT 'user',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_role (role)
-) ENGINE=InnoDB;
-
--- Criar tabela de terrenos
-CREATE TABLE IF NOT EXISTS terrains (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    user_id INT NOT NULL,
-    name VARCHAR(100) NOT NULL,
-    description TEXT,
-    coordinates JSON NOT NULL,
-    area DECIMAL(10,2) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    INDEX idx_user_id (user_id)
-) ENGINE=InnoDB;
-
--- Se estiver a atualizar uma base de dados existente, adicionar coluna role:
--- ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'user' AFTER password;
--- CREATE INDEX idx_role ON users(role);
-
--- Opcional: Definir o primeiro utilizador como admin
--- UPDATE users SET role = 'admin' WHERE id = 1 LIMIT 1;
-*/
-?>
+// Nota: ficheiro sem tag PHP de fecho (?>) para evitar output acidental de whitespace.
