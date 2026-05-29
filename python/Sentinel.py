@@ -44,6 +44,7 @@ import logging
 import io
 import signal
 import threading
+from typing import Optional
 
 import numpy as np
 import requests
@@ -214,7 +215,7 @@ def get_access_token() -> str:
 # PROCESSAMENTO POR TIPO
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _build_s2_data(date_from: str, date_to: str, ds_id: str | None = None) -> dict:
+def _build_s2_data(date_from: str, date_to: str, ds_id: Optional[str] = None) -> dict:
     """Bloco de dados Sentinel-2 L2A para o corpo do pedido."""
     entry = {
         "type": "sentinel-2-l2a",
@@ -385,7 +386,7 @@ function evaluatePixel(s){
 # ENVIAR RESULTADO AO PHP
 # ─────────────────────────────────────────────────────────────────────────────
 
-def post_result(job: dict, png_bytes: bytes | None, error_msg: str | None = None) -> None:
+def post_result(job: dict, png_bytes: Optional[bytes], error_msg: Optional[str] = None) -> None:
     # Preferência: URL/chave que vêm no pedido MQTT; fallback para soilqi / env
     url     = job.get("callback_url") or CFG["CALLBACK_URL"]
     api_key = job.get("api_key")      or CFG["API_KEY"]
