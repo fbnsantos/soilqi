@@ -14,7 +14,7 @@ import soilqi
 # 1. CREDENCIAIS
 # ==========================
 # Criar OAuth client no Copernicus Data Space / Sentinel Hub dashboard
-print(soilqi.COPERNICUS_CLIENT_ID)
+print(soilqi.CLIENT_ID)
 TOKEN_URL = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
 PROCESS_URL = "https://sh.dataspace.copernicus.eu/api/v1/process"
 
@@ -85,7 +85,7 @@ function evaluatePixel(sample) {
 # ==========================
 # 5. AUTENTICAÇÃO
 # ==========================
-client = BackendApplicationClient(client_id=CLIENT_ID)
+client = BackendApplicationClient(client_id=soilqi.CLIENT_ID)
 oauth = OAuth2Session(client=client)
 
 token = oauth.fetch_token(
