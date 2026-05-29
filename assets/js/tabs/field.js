@@ -16,6 +16,13 @@ let fieldObjectsList    = [];
 let _pendingPositions   = [];  // posições acumuladas no modal multi-ponto
 let _pickOverlay        = null; // elemento flutuante no mapa durante o pick mode
 
+// Line / spline draw mode
+let _lineDrawMode    = false;  // modo de desenho de linha activo
+let _linePoints      = [];     // vértices da linha desenhada pelo utilizador
+let _lineLayer       = null;   // Leaflet polyline activa
+let _lineMarkers     = [];     // marcadores de vértice
+let _linePickOverlay = null;   // overlay flutuante durante o desenho de linha
+
 // Layers control reference (needed to add/remove saved interpolation overlays)
 let fieldLayersControl  = null;
 // Saved interpolations: id -> Leaflet imageOverlay currently on map
@@ -110,6 +117,13 @@ function initFieldMap() {
                 fillOpacity: 0.55, weight: 2.5
             }).addTo(fieldMap);
             setTimeout(() => { try { fieldMap.removeLayer(flash); } catch(_){} }, 900);
+        } else if (_lineDrawMode) {
+            // Adiciona vértice à linha em desenho
+            const lat = e.latlng.lat;
+            const lng = e.latlng.lng;
+            _linePoints.push({ lat, lng });
+            _updateLineOnMap();
+            _updateLinePickOverlay();
         }
     });
 }
@@ -1708,11 +1722,19 @@ function renderFieldObjectsOnMap(objects) {
 }
 
 function openAddObjectModal(lat, lng) {
-    // Resetar tudo, incluindo a lista de posições pendentes
+    // Resetar tudo, incluindo a lista de posições pendentes e estado de linha
     _pendingPositions = [];
     _destroyPickOverlay();
     addObjectModeActive = false;
+    _lineDrawMode = false;
+    _linePoints   = [];
+    _destroyLinePickOverlay();
+    _updateLineOnMap(); // limpa a polyline do mapa
     if (fieldMap) fieldMap.getContainer().style.cursor = '';
+
+    // Repor modo para "pontos" (primeiro radio)
+    const ptRadio = document.querySelector('input[name="ao-mode"][value="points"]');
+    if (ptRadio) ptRadio.checked = true;
 
     // Pre-fill manual coords if provided (e.g. from an external source)
     const latEl = document.getElementById('ao-lat');
@@ -1728,7 +1750,13 @@ function openAddObjectModal(lat, lng) {
     document.querySelector('input[name="ao-type"][value="tree"]').checked = true;
     const status = document.getElementById('ao-status');
     if (status) status.textContent = '';
+
+    // Esconder ao-line-config (aparece só depois de desenhar)
+    const lineCfg = document.getElementById('ao-line-config');
+    if (lineCfg) lineCfg.style.display = 'none';
+
     onAoTypeChange();
+    onAoModeChange();
     renderPendingPositions();
 
     document.getElementById('add-obj-backdrop').style.display = 'block';
@@ -1741,6 +1769,10 @@ function closeAddObjectModal() {
     addObjectModeActive = false;
     _pendingPositions   = [];
     _destroyPickOverlay();
+    _lineDrawMode = false;
+    _linePoints   = [];
+    _destroyLinePickOverlay();
+    _updateLineOnMap(); // remove polyline do mapa
     if (fieldMap) fieldMap.getContainer().style.cursor = '';
 }
 
@@ -1752,6 +1784,36 @@ function onAoTypeChange() {
     document.getElementById('ao-type-tree-lbl').style.background  = isTree  ? '#eef2ff' : '';
     document.getElementById('ao-type-pole-lbl').style.borderColor = !isTree ? '#667eea' : '#e5e7eb';
     document.getElementById('ao-type-pole-lbl').style.background  = !isTree ? '#eef2ff' : '';
+}
+
+/** Alterna entre secção de pontos avulso e linha/espaldeira no modal */
+function onAoModeChange() {
+    const isLine = document.querySelector('input[name="ao-mode"]:checked')?.value === 'line';
+
+    const pts  = document.getElementById('ao-section-points');
+    const line = document.getElementById('ao-section-line');
+    if (pts)  pts.style.display  = isLine ? 'none'  : 'block';
+    if (line) line.style.display = isLine ? 'block' : 'none';
+
+    // Estilo visual dos botões de modo
+    const ptsLbl  = document.getElementById('ao-mode-pts-lbl');
+    const lineLbl = document.getElementById('ao-mode-line-lbl');
+    if (ptsLbl) {
+        ptsLbl.style.borderColor = !isLine ? '#667eea' : '#e5e7eb';
+        ptsLbl.style.background  = !isLine ? '#eef2ff' : '';
+    }
+    if (lineLbl) {
+        lineLbl.style.borderColor = isLine ? '#0ea5e9' : '#e5e7eb';
+        lineLbl.style.background  = isLine ? '#e0f2fe' : '';
+    }
+
+    // Adaptar texto do prefixo conforme o modo
+    const labelLbl = document.getElementById('ao-label-lbl');
+    if (labelLbl) {
+        labelLbl.innerHTML = isLine
+            ? 'Prefixo <span style="font-weight:400;color:#9ca3af;">(opcional — combinado com ID da linha, ex: T → Linha A - T001)</span>'
+            : 'Prefixo <span style="font-weight:400;color:#9ca3af;">(opcional — ex: T → T001, T002…)</span>';
+    }
 }
 
 /** Adiciona as coordenadas actuais à lista de posições pendentes */
@@ -1900,6 +1962,288 @@ function finishObjectPickMode() {
     renderPendingPositions();
 }
 
+// ── Linha / Espaldeira: desenhar spline no mapa ───────────────────────────────
+
+/** Activa o modo de desenho de linha: esconde o modal, configura cursor e overlay */
+function activateLineDrawMode() {
+    // Limpar linha anterior ao re-desenhar
+    _linePoints = [];
+    _updateLineOnMap();
+
+    // Esconder modal
+    document.getElementById('add-obj-backdrop').style.display = 'none';
+    document.getElementById('add-obj-modal').style.display    = 'none';
+
+    _lineDrawMode = true;
+    if (fieldMap) fieldMap.getContainer().style.cursor = 'crosshair';
+    _createLinePickOverlay();
+}
+
+/** Cria o overlay flutuante sobre o mapa durante o desenho de linha */
+function _createLinePickOverlay() {
+    _destroyLinePickOverlay();
+    const container = fieldMap ? fieldMap.getContainer() : document.getElementById('field-map');
+    if (!container) return;
+
+    _linePickOverlay = document.createElement('div');
+    _linePickOverlay.id = 'line-pick-overlay';
+    Object.assign(_linePickOverlay.style, {
+        position:       'absolute',
+        top:            '12px',
+        left:           '50%',
+        transform:      'translateX(-50%)',
+        zIndex:         '1000',
+        background:     'rgba(3,105,161,.92)',
+        color:          '#fff',
+        borderRadius:   '24px',
+        padding:        '10px 18px',
+        display:        'flex',
+        alignItems:     'center',
+        gap:            '12px',
+        fontSize:       '14px',
+        boxShadow:      '0 4px 16px rgba(0,0,0,.45)',
+        backdropFilter: 'blur(6px)',
+        whiteSpace:     'nowrap',
+        pointerEvents:  'auto'
+    });
+    _linePickOverlay.innerHTML = `
+        <span style="font-size:20px;line-height:1;">📏</span>
+        <span id="line-pick-label" style="font-size:13px;">Clique no mapa para adicionar vértices da linha</span>
+        <button onclick="finishLineDrawMode()"
+                style="background:#0ea5e9;color:#fff;border:none;border-radius:16px;
+                       padding:7px 18px;cursor:pointer;font-weight:700;font-size:13px;
+                       flex-shrink:0;transition:background .15s;">
+            ✅ Concluído
+        </button>`;
+    container.appendChild(_linePickOverlay);
+}
+
+/** Actualiza o contador de vértices no overlay */
+function _updateLinePickOverlay() {
+    const el = document.getElementById('line-pick-label');
+    if (!el) return;
+    const n = _linePoints.length;
+    el.textContent = n === 0
+        ? 'Clique no mapa para adicionar vértices da linha'
+        : `${n} vértice${n !== 1 ? 's' : ''} — continue ou clique Concluído`;
+}
+
+/** Remove o overlay de desenho de linha */
+function _destroyLinePickOverlay() {
+    if (_linePickOverlay) { _linePickOverlay.remove(); _linePickOverlay = null; }
+    const old = document.getElementById('line-pick-overlay');
+    if (old) old.remove();
+}
+
+/** Redesenha a polyline e os marcadores de vértice no mapa */
+function _updateLineOnMap() {
+    // Remover polyline anterior
+    if (_lineLayer) {
+        try { fieldMap.removeLayer(_lineLayer); } catch (_) {}
+        _lineLayer = null;
+    }
+    // Remover marcadores de vértice anteriores
+    _lineMarkers.forEach(m => { try { fieldMap.removeLayer(m); } catch (_) {} });
+    _lineMarkers = [];
+
+    if (!fieldMap || _linePoints.length < 1) return;
+
+    // Polyline (só se houver ≥2 vértices)
+    if (_linePoints.length >= 2) {
+        _lineLayer = L.polyline(
+            _linePoints.map(p => [p.lat, p.lng]),
+            { color: '#0ea5e9', weight: 3, opacity: 0.9, dashArray: '7 5' }
+        ).addTo(fieldMap);
+    }
+
+    // Marcadores de vértice
+    _linePoints.forEach((p, i) => {
+        const m = L.circleMarker([p.lat, p.lng], {
+            radius: 7, color: '#0369a1', fillColor: '#7dd3fc',
+            fillOpacity: 0.9, weight: 2
+        }).addTo(fieldMap);
+        m.bindTooltip(`V${i + 1}`, { permanent: false, direction: 'top', offset: [0, -8] });
+        _lineMarkers.push(m);
+    });
+}
+
+/** Termina o modo de desenho de linha e volta ao modal */
+function finishLineDrawMode() {
+    _lineDrawMode = false;
+    _destroyLinePickOverlay();
+    if (fieldMap) fieldMap.getContainer().style.cursor = '';
+
+    // Reabrir modal
+    document.getElementById('add-obj-backdrop').style.display = 'block';
+    document.getElementById('add-obj-modal').style.display    = 'block';
+
+    if (_linePoints.length < 2) {
+        const status = document.getElementById('ao-status');
+        if (status) {
+            status.textContent = '⚠️ Desenhe pelo menos 2 vértices para definir uma linha.';
+            status.style.color = '#ef4444';
+        }
+        return;
+    }
+
+    // Mostrar painel de configuração
+    const cfg = document.getElementById('ao-line-config');
+    if (cfg) cfg.style.display = 'block';
+
+    // Actualizar rótulo com o comprimento da linha
+    const lenM   = _lineLength(_linePoints);
+    const lenLbl = document.getElementById('ao-line-length-label');
+    if (lenLbl) {
+        lenLbl.textContent = `📏 Linha: ${lenM.toFixed(1)} m  (${_linePoints.length} vértices)`;
+    }
+
+    previewLineObjects();
+}
+
+// ── Geometria de linha ────────────────────────────────────────────────────────
+
+/** Distância Haversine em metros entre dois pontos {lat, lng} */
+function _haversineM(p1, p2) {
+    const R  = 6371000;
+    const φ1 = p1.lat * Math.PI / 180;
+    const φ2 = p2.lat * Math.PI / 180;
+    const Δφ = (p2.lat - p1.lat) * Math.PI / 180;
+    const Δλ = (p2.lng - p1.lng) * Math.PI / 180;
+    const a  = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/** Comprimento total da polyline em metros */
+function _lineLength(points) {
+    let total = 0;
+    for (let i = 1; i < points.length; i++) {
+        total += _haversineM(points[i - 1], points[i]);
+    }
+    return total;
+}
+
+/** Ponto a distância `d` metros desde o início da linha (interpolação linear de lat/lng) */
+function _interpolateOnLine(points, d) {
+    let remaining = d;
+    for (let i = 1; i < points.length; i++) {
+        const segLen = _haversineM(points[i - 1], points[i]);
+        if (remaining <= segLen || i === points.length - 1) {
+            const t = segLen > 0 ? Math.min(1, remaining / segLen) : 0;
+            return {
+                lat: points[i - 1].lat + t * (points[i].lat - points[i - 1].lat),
+                lng: points[i - 1].lng + t * (points[i].lng - points[i - 1].lng)
+            };
+        }
+        remaining -= segLen;
+    }
+    return { lat: points[points.length - 1].lat, lng: points[points.length - 1].lng };
+}
+
+/** Distribui posições ao longo da linha com espaçamento `spacing` e offset inicial `offset` */
+function _distributeAlongLine(points, spacing, offset) {
+    const total     = _lineLength(points);
+    const positions = [];
+    if (spacing <= 0) return positions;
+    let d = offset < 0 ? 0 : offset;
+    while (d <= total + 1e-6) {
+        positions.push(_interpolateOnLine(points, d));
+        d += spacing;
+    }
+    return positions;
+}
+
+/** Calcula e mostra a pré-visualização do número de objectos gerados */
+function previewLineObjects() {
+    const spacing = parseFloat(document.getElementById('ao-spacing')?.value)     || 5;
+    const offset  = parseFloat(document.getElementById('ao-line-offset')?.value) || 0;
+    const preview = document.getElementById('ao-line-preview');
+    if (!preview) return;
+
+    if (_linePoints.length < 2) { preview.textContent = '—'; return; }
+
+    const positions = _distributeAlongLine(_linePoints, spacing, offset);
+    const n         = positions.length;
+    const lenM      = _lineLength(_linePoints);
+    preview.textContent = n > 0
+        ? `→ ${n} objecto${n !== 1 ? 's' : ''} distribuídos ao longo de ${lenM.toFixed(1)} m`
+        : '⚠️ Nenhum objecto — espaçamento maior que a linha';
+}
+
+/** Gera e guarda os objectos distribuídos ao longo da linha desenhada */
+async function saveLineObjects() {
+    const type    = document.querySelector('input[name="ao-type"]:checked')?.value || 'tree';
+    const species = document.getElementById('ao-species')?.value || '';
+    const prefix  = (document.getElementById('ao-label')?.value   || '').trim();
+    const rowId   = (document.getElementById('ao-row-id')?.value  || '').trim();
+    const notes   = document.getElementById('ao-notes')?.value    || '';
+    const tid     = document.getElementById('ao-terrain')?.value  || '';
+    const spacing = parseFloat(document.getElementById('ao-spacing')?.value)     || 5;
+    const offset  = parseFloat(document.getElementById('ao-line-offset')?.value) || 0;
+
+    if (_linePoints.length < 2) {
+        const status = document.getElementById('ao-status');
+        if (status) { status.textContent = '⚠️ Desenhe uma linha primeiro.'; status.style.color = '#ef4444'; }
+        return;
+    }
+
+    const positions = _distributeAlongLine(_linePoints, spacing, offset);
+    if (!positions.length) {
+        const status = document.getElementById('ao-status');
+        if (status) { status.textContent = '⚠️ Nenhuma posição gerada — verifique o espaçamento.'; status.style.color = '#ef4444'; }
+        return;
+    }
+
+    const status  = document.getElementById('ao-status');
+    const saveBtn = document.getElementById('ao-save-btn');
+    if (status)  { status.textContent = `⏳ A guardar ${positions.length}…`; status.style.color = '#6b7280'; }
+    if (saveBtn) saveBtn.disabled = true;
+
+    let ok = 0;
+    for (let i = 0; i < positions.length; i++) {
+        const pos = positions[i];
+        const idx = String(i + 1).padStart(3, '0');
+
+        // Gerar etiqueta: "Linha A - T001"  /  "Linha A - 001"  /  "T001"  /  ""
+        let label = '';
+        if (rowId && prefix)  label = `${rowId} - ${prefix}${idx}`;
+        else if (rowId)        label = `${rowId} - ${idx}`;
+        else if (prefix)       label = `${prefix}${idx}`;
+
+        const fd = new FormData();
+        fd.append('action',     'save_field_object');
+        fd.append('type',       type);
+        fd.append('species',    species);
+        fd.append('label',      label);
+        fd.append('lat',        pos.lat);
+        fd.append('lng',        pos.lng);
+        fd.append('altitude',   0);
+        fd.append('notes',      notes);
+        fd.append('terrain_id', tid);
+
+        try {
+            const r    = await fetch('?tab=field', { method: 'POST', body: fd });
+            const data = await r.json();
+            if (data.success) ok++;
+        } catch (_) { /* continua com os restantes */ }
+    }
+
+    if (saveBtn) saveBtn.disabled = false;
+    closeAddObjectModal();
+
+    const failed = positions.length - ok;
+    if (ok > 0) {
+        showAlert(
+            failed === 0
+                ? `✅ ${ok} objecto${ok !== 1 ? 's' : ''} guardado${ok !== 1 ? 's' : ''} ao longo da linha!`
+                : `⚠️ ${ok} guardado${ok !== 1 ? 's' : ''}, ${failed} com erro.`,
+            failed === 0 ? 'success' : 'warning'
+        );
+    } else {
+        showAlert('❌ Não foi possível guardar nenhum objecto.', 'error');
+    }
+    loadFieldObjects();
+}
+
 /** Guarda todos os objectos (lista pendente + coords actuais, se preenchidas) */
 async function saveFieldObject() {
     const type    = document.querySelector('input[name="ao-type"]:checked')?.value || 'tree';
@@ -1970,6 +2314,16 @@ async function saveFieldObject() {
         showAlert('❌ Não foi possível guardar nenhum objecto.', 'error');
     }
     loadFieldObjects();
+}
+
+/** Despachador: chama saveFieldObject (pontos) ou saveLineObjects (linha) */
+function saveObjects() {
+    const mode = document.querySelector('input[name="ao-mode"]:checked')?.value || 'points';
+    if (mode === 'line') {
+        saveLineObjects();
+    } else {
+        saveFieldObject();
+    }
 }
 
 function deleteFieldObject(id, name) {

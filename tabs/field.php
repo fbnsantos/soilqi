@@ -928,76 +928,142 @@ try {
             </select>
         </div>
 
-        <!-- Prefixo / Etiqueta -->
-        <div style="margin-bottom:12px;">
-            <label style="font-size:12px; color:#6b7280; display:block; margin-bottom:4px; font-weight:600;">
-                Prefixo / Etiqueta
-                <span style="font-weight:400; color:#9ca3af;">(opcional)</span>
-            </label>
-            <input id="ao-label" type="text" placeholder="Ex: T, Oliveira, Poste Norte…"
-                   style="width:100%; padding:9px 10px; border:1.5px solid #e5e7eb; border-radius:8px; font-size:14px; box-sizing:border-box;">
-            <div style="font-size:11px; color:#9ca3af; margin-top:3px;">
-                Com várias posições, são gerados T001, T002… automaticamente.
+        <!-- Modo de colocação -->
+        <div style="margin-bottom:14px;">
+            <label style="font-size:12px; color:#6b7280; font-weight:600; display:block; margin-bottom:6px;">Modo de colocação</label>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+                <label id="ao-mode-pts-lbl"
+                       style="cursor:pointer; padding:10px; border:2px solid #667eea; border-radius:9px;
+                              background:#eef2ff; display:flex; align-items:center; gap:7px; font-size:13px;">
+                    <input type="radio" name="ao-mode" value="points" onchange="onAoModeChange()" checked>
+                    📍 Pontos avulso
+                </label>
+                <label id="ao-mode-line-lbl"
+                       style="cursor:pointer; padding:10px; border:2px solid #e5e7eb; border-radius:9px;
+                              display:flex; align-items:center; gap:7px; font-size:13px;">
+                    <input type="radio" name="ao-mode" value="line" onchange="onAoModeChange()">
+                    📏 Linha / Espaldeira
+                </label>
             </div>
         </div>
 
-        <!-- Posição GPS -->
-        <div style="margin-bottom:12px;">
-            <button onclick="activateObjectPickMode()"
+        <!-- Prefixo / Etiqueta (pontos) ou só etiqueta (linha) -->
+        <div id="ao-label-row" style="margin-bottom:12px;">
+            <label id="ao-label-lbl" style="font-size:12px; color:#6b7280; display:block; margin-bottom:4px; font-weight:600;">
+                Prefixo <span style="font-weight:400; color:#9ca3af;">(opcional — ex: T → T001, T002…)</span>
+            </label>
+            <input id="ao-label" type="text" placeholder="Ex: T, O, P…"
+                   style="width:100%; padding:9px 10px; border:1.5px solid #e5e7eb; border-radius:8px; font-size:14px; box-sizing:border-box;">
+        </div>
+
+        <!-- ── SECÇÃO: Pontos avulso ── -->
+        <div id="ao-section-points">
+            <div style="margin-bottom:12px;">
+                <button onclick="activateObjectPickMode()"
+                        style="width:100%; padding:13px; font-size:15px; font-weight:700;
+                               background:linear-gradient(135deg,#667eea,#764ba2); color:#fff;
+                               border:none; border-radius:10px; cursor:pointer;
+                               display:flex; align-items:center; justify-content:center; gap:8px;
+                               box-shadow:0 2px 8px rgba(102,126,234,.4);">
+                    🗺️ Marcar posições no mapa
+                </button>
+                <div style="font-size:11px; color:#9ca3af; text-align:center; margin-top:5px;">
+                    Cada clique no mapa adiciona uma posição automaticamente.
+                </div>
+            </div>
+            <details style="margin-bottom:12px;">
+                <summary style="font-size:12px; color:#667eea; cursor:pointer; user-select:none;">
+                    ✏️ Adicionar posição manualmente
+                </summary>
+                <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px; margin-top:6px;">
+                    <div style="display:grid; grid-template-columns:1fr 1fr 0.6fr; gap:6px; margin-bottom:8px;">
+                        <div>
+                            <label style="font-size:11px; color:#6b7280; display:block; margin-bottom:3px;">Latitude</label>
+                            <input id="ao-lat" type="number" step="0.0000001" placeholder="38.5180"
+                                   style="width:100%; padding:6px 8px; border:1.5px solid #e5e7eb; border-radius:6px; font-size:12px; font-family:monospace; box-sizing:border-box;">
+                        </div>
+                        <div>
+                            <label style="font-size:11px; color:#6b7280; display:block; margin-bottom:3px;">Longitude</label>
+                            <input id="ao-lng" type="number" step="0.0000001" placeholder="-8.1270"
+                                   style="width:100%; padding:6px 8px; border:1.5px solid #e5e7eb; border-radius:6px; font-size:12px; font-family:monospace; box-sizing:border-box;">
+                        </div>
+                        <div>
+                            <label style="font-size:11px; color:#6b7280; display:block; margin-bottom:3px;">Alt. (m)</label>
+                            <input id="ao-altitude" type="number" step="0.1" placeholder="0"
+                                   style="width:100%; padding:6px 8px; border:1.5px solid #e5e7eb; border-radius:6px; font-size:12px; font-family:monospace; box-sizing:border-box;">
+                        </div>
+                    </div>
+                    <button onclick="addToPositionsList()"
+                            style="width:100%; padding:7px; font-size:13px; font-weight:600;
+                                   background:#667eea; color:#fff; border:none; border-radius:7px; cursor:pointer;">
+                        ➕ Adicionar esta posição
+                    </button>
+                </div>
+            </details>
+            <div id="ao-pick-hint" style="display:none;"></div>
+            <div id="ao-positions-list"
+                 style="display:none; background:#f0fdf4; border:1px solid #86efac;
+                        border-radius:10px; padding:10px; margin-bottom:12px; max-height:180px; overflow-y:auto;">
+            </div>
+        </div>
+
+        <!-- ── SECÇÃO: Linha / Espaldeira ── -->
+        <div id="ao-section-line" style="display:none; margin-bottom:12px;">
+            <button onclick="activateLineDrawMode()"
                     style="width:100%; padding:13px; font-size:15px; font-weight:700;
-                           background:linear-gradient(135deg,#667eea,#764ba2); color:#fff;
+                           background:linear-gradient(135deg,#0ea5e9,#0369a1); color:#fff;
                            border:none; border-radius:10px; cursor:pointer;
                            display:flex; align-items:center; justify-content:center; gap:8px;
-                           box-shadow:0 2px 8px rgba(102,126,234,.4);">
-                🗺️ Marcar posições no mapa
+                           box-shadow:0 2px 8px rgba(14,165,233,.4);">
+                🗺️ Desenhar linha no mapa
             </button>
             <div style="font-size:11px; color:#9ca3af; text-align:center; margin-top:5px;">
-                Clique no mapa tantas vezes quantas árvores/postes quiser marcar.
+                Clique no mapa para definir o percurso. Cada ponto adiciona um vértice. Clique em <strong>Concluído</strong> quando terminar.
             </div>
-        </div>
 
-        <!-- Entrada manual (colapsável) -->
-        <details style="margin-bottom:12px;">
-            <summary style="font-size:12px; color:#667eea; cursor:pointer; user-select:none; margin-bottom:8px;">
-                ✏️ Adicionar posição manualmente
-            </summary>
-            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px; margin-top:6px;">
-                <div style="display:grid; grid-template-columns:1fr 1fr 0.6fr; gap:6px; margin-bottom:8px;">
+            <!-- Config (aparece depois de desenhar) -->
+            <div id="ao-line-config" style="display:none; margin-top:12px; background:#f0f9ff;
+                 border:1px solid #bae6fd; border-radius:10px; padding:12px;">
+                <div id="ao-line-length-label"
+                     style="font-size:13px; font-weight:700; color:#0369a1; margin-bottom:10px;">
+                    📏 —
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
                     <div>
-                        <label style="font-size:11px; color:#6b7280; display:block; margin-bottom:3px;">Latitude</label>
-                        <input id="ao-lat" type="number" step="0.0000001" placeholder="38.5180"
-                               style="width:100%; padding:6px 8px; border:1.5px solid #e5e7eb; border-radius:6px;
-                                      font-size:12px; font-family:monospace; box-sizing:border-box;">
+                        <label style="font-size:11px; color:#6b7280; font-weight:600; display:block; margin-bottom:3px;">
+                            Espaçamento entre objectos (m)
+                        </label>
+                        <input id="ao-spacing" type="number" min="0.1" step="0.1" value="5"
+                               oninput="previewLineObjects()"
+                               style="width:100%; padding:8px 9px; border:1.5px solid #e5e7eb; border-radius:7px; font-size:15px; box-sizing:border-box;">
                     </div>
                     <div>
-                        <label style="font-size:11px; color:#6b7280; display:block; margin-bottom:3px;">Longitude</label>
-                        <input id="ao-lng" type="number" step="0.0000001" placeholder="-8.1270"
-                               style="width:100%; padding:6px 8px; border:1.5px solid #e5e7eb; border-radius:6px;
-                                      font-size:12px; font-family:monospace; box-sizing:border-box;">
-                    </div>
-                    <div>
-                        <label style="font-size:11px; color:#6b7280; display:block; margin-bottom:3px;">Alt. (m)</label>
-                        <input id="ao-altitude" type="number" step="0.1" placeholder="0"
-                               style="width:100%; padding:6px 8px; border:1.5px solid #e5e7eb; border-radius:6px;
-                                      font-size:12px; font-family:monospace; box-sizing:border-box;">
+                        <label style="font-size:11px; color:#6b7280; font-weight:600; display:block; margin-bottom:3px;">
+                            ID da linha / fila
+                        </label>
+                        <input id="ao-row-id" type="text" placeholder="Linha A, Fila 1…"
+                               style="width:100%; padding:8px 9px; border:1.5px solid #e5e7eb; border-radius:7px; font-size:14px; box-sizing:border-box;">
                     </div>
                 </div>
-                <button onclick="addToPositionsList()"
-                        style="width:100%; padding:7px; font-size:13px; font-weight:600;
-                               background:#667eea; color:#fff; border:none; border-radius:7px; cursor:pointer;">
-                    ➕ Adicionar esta posição
+                <div style="margin-bottom:8px;">
+                    <label style="font-size:11px; color:#6b7280; font-weight:600; display:block; margin-bottom:3px;">
+                        Offset do 1.º objecto desde o início da linha (m)
+                    </label>
+                    <input id="ao-line-offset" type="number" min="0" step="0.1" value="0"
+                           oninput="previewLineObjects()"
+                           style="width:110px; padding:8px 9px; border:1.5px solid #e5e7eb; border-radius:7px; font-size:14px;">
+                </div>
+                <div id="ao-line-preview"
+                     style="font-size:13px; font-weight:700; color:#374151; padding:6px 0;"></div>
+                <button onclick="activateLineDrawMode()"
+                        style="width:100%; margin-top:6px; font-size:12px; color:#0369a1; background:#e0f2fe;
+                               border:1px solid #bae6fd; border-radius:7px; padding:7px; cursor:pointer;">
+                    🔄 Re-desenhar linha
                 </button>
             </div>
-        </details>
-
-        <div id="ao-pick-hint" style="display:none;"></div>
-
-        <!-- Lista de posições acumuladas -->
-        <div id="ao-positions-list" style="display:none; background:#f0fdf4; border:1px solid #86efac;
-             border-radius:10px; padding:10px; margin-bottom:12px; max-height:180px; overflow-y:auto;">
         </div>
 
-        <!-- Terreno -->
+        <!-- Terreno + Notas (comuns a ambos os modos) -->
         <div style="margin-bottom:12px;">
             <label style="font-size:12px; color:#6b7280; display:block; margin-bottom:4px; font-weight:600;">Terreno associado</label>
             <select id="ao-terrain"
@@ -1008,8 +1074,6 @@ try {
                 <?php endforeach; ?>
             </select>
         </div>
-
-        <!-- Notas -->
         <div>
             <label style="font-size:12px; color:#6b7280; display:block; margin-bottom:4px; font-weight:600;">Notas (opcional)</label>
             <textarea id="ao-notes" rows="2" placeholder="Estado, data de plantação, observações…"
@@ -1018,7 +1082,7 @@ try {
     </div>
 
     <div style="padding:12px 20px 18px; display:flex; gap:10px; border-top:1px solid #f3f4f6; align-items:center;">
-        <button id="ao-save-btn" onclick="saveFieldObject()" class="btn btn-primary" style="flex:1; padding:12px; font-size:15px;">
+        <button id="ao-save-btn" onclick="saveObjects()" class="btn btn-primary" style="flex:1; padding:12px; font-size:15px;">
             💾 Guardar Objecto
         </button>
         <button onclick="closeAddObjectModal()" class="btn btn-secondary" style="padding:12px 20px;">
