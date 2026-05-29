@@ -257,6 +257,95 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn && $isAdmin) {
                 }, $filenames));
                 break;
 
+            case 'mqtt_diagnostics':
+                $diag    = [];
+                $mqttHost = defined('MQTT_HOST') ? MQTT_HOST : '';
+                $mqttPort = defined('MQTT_PORT') ? (int)MQTT_PORT : 1883;
+                $mqttUser = defined('MQTT_USER') ? MQTT_USER : '';
+                $mqttPass = defined('MQTT_PASS') ? MQTT_PASS : '';
+
+                // 1 — fsockopen disponível?
+                $disabled = array_map('trim', explode(',', ini_get('disable_functions')));
+                $fsockDisabled = in_array('fsockopen', $disabled);
+                $diag[] = [
+                    'test'   => 'fsockopen disponível',
+                    'ok'     => !$fsockDisabled,
+                    'detail' => $fsockDisabled
+                        ? 'fsockopen está em disable_functions — impossível fazer ligações TCP'
+                        : 'fsockopen activo',
+                ];
+
+                // 2 — Configuração definida?
+                $cfgOk = $mqttHost !== '';
+                $diag[] = [
+                    'test'   => 'Configuração MQTT (config.php)',
+                    'ok'     => $cfgOk,
+                    'detail' => $cfgOk
+                        ? "MQTT_HOST={$mqttHost}  MQTT_PORT={$mqttPort}  " . ($mqttUser ? "user={$mqttUser}" : 'sem autenticação')
+                        : 'MQTT_HOST não definido em config.php',
+                ];
+
+                if (!$fsockDisabled && $cfgOk) {
+                    // 3 — Resolução DNS
+                    $ip       = @gethostbyname($mqttHost);
+                    $resolved = ($ip !== $mqttHost);
+                    $diag[] = [
+                        'test'   => 'Resolução DNS',
+                        'ok'     => $resolved,
+                        'detail' => $resolved ? "{$mqttHost} → {$ip}" : "Não foi possível resolver \"{$mqttHost}\"",
+                    ];
+
+                    // 4 — Ligação TCP
+                    $sock = @fsockopen($mqttHost, $mqttPort, $tcpErrno, $tcpErrstr, 5);
+                    $tcpOk = (bool)$sock;
+                    $diag[] = [
+                        'test'   => "Ligação TCP a {$mqttHost}:{$mqttPort}",
+                        'ok'     => $tcpOk,
+                        'detail' => $tcpOk ? 'Porta aberta e acessível' : "Falhou: {$tcpErrstr} ({$tcpErrno})",
+                    ];
+
+                    if ($sock) {
+                        // 5 — MQTT CONNACK
+                        $cid   = 'soilqi_diag_' . substr(md5(uniqid()), 0, 6);
+                        $body  = "\x00\x04MQTT\x04";
+                        $flags = 0x02; // clean session
+                        if ($mqttUser !== '') {
+                            $flags |= 0x80;
+                            if ($mqttPass !== '') $flags |= 0x40;
+                        }
+                        $body .= chr($flags) . "\x00\x3c";
+                        $encStr = function($s) { $l = strlen($s); return chr($l >> 8) . chr($l & 0xFF) . $s; };
+                        $body  .= $encStr($cid);
+                        if ($mqttUser !== '') {
+                            $body .= $encStr($mqttUser);
+                            if ($mqttPass !== '') $body .= $encStr($mqttPass);
+                        }
+                        // remaining length
+                        $len = strlen($body); $remLen = '';
+                        do { $b = $len & 0x7F; $len >>= 7; if ($len > 0) $b |= 0x80; $remLen .= chr($b); } while ($len > 0);
+
+                        stream_set_timeout($sock, 3);
+                        fwrite($sock, chr(0x10) . $remLen . $body);
+                        $ack = fread($sock, 4);
+                        fwrite($sock, "\xe0\x00"); // DISCONNECT
+                        fclose($sock);
+
+                        $rcMap = [0=>'Ligação aceite',1=>'Versão inaceitável',2=>'Client ID rejeitado',
+                                  3=>'Servidor indisponível',4=>'Credenciais inválidas',5=>'Não autorizado'];
+                        $rc    = strlen($ack) >= 4 ? ord($ack[3]) : -1;
+                        $connOk = (strlen($ack) >= 4 && ord($ack[0]) === 0x20 && $rc === 0);
+                        $diag[] = [
+                            'test'   => 'Handshake MQTT (CONNECT → CONNACK)',
+                            'ok'     => $connOk,
+                            'detail' => $rcMap[$rc] ?? "Resposta inesperada (rc={$rc}, bytes=" . strlen($ack) . ")",
+                        ];
+                    }
+                }
+
+                $response['success']     = true;
+                $response['diagnostics'] = $diag;
+                break;
+
             case 'run_migration':
                 $filename = basename($_POST['filename'] ?? '');
 
@@ -482,6 +571,22 @@ try {
         </p>
         <div id="migrations-list">
             <div class="text-center" style="padding:20px;color:#6b7280;">A carregar…</div>
+        </div>
+    </div>
+
+    <!-- Diagnóstico MQTT -->
+    <div class="section">
+        <div class="section-title">
+            <h3>🔌 Diagnóstico MQTT</h3>
+            <button class="btn btn-primary btn-sm" onclick="runMqttDiagnostics()">▶️ Executar</button>
+        </div>
+        <p style="color:#6b7280;font-size:14px;margin-bottom:16px;">
+            Testa a ligação PHP → broker MQTT passo a passo:
+            disponibilidade de <code>fsockopen</code>, configuração,
+            resolução DNS, ligação TCP e handshake MQTT completo.
+        </p>
+        <div id="mqtt-diag-result">
+            <div style="color:#9ca3af;font-size:13px;">Prima "Executar" para iniciar o diagnóstico.</div>
         </div>
     </div>
 

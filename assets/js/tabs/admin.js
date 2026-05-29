@@ -455,6 +455,69 @@ function runMigration(filename) {
         });
 }
 
+// =====================================================
+// DIAGNÓSTICO MQTT
+// =====================================================
+
+function runMqttDiagnostics() {
+    const el = document.getElementById('mqtt-diag-result');
+    if (!el) return;
+    el.innerHTML = '<div style="padding:12px;color:#6b7280;">⏳ A executar diagnósticos…</div>';
+
+    const fd = new FormData();
+    fd.append('action', 'mqtt_diagnostics');
+
+    fetch('?tab=admin', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                el.innerHTML = `<div class="sql-error">❌ ${escapeHtml(data.message || 'Erro desconhecido')}</div>`;
+                return;
+            }
+            displayMqttDiagnostics(data.diagnostics);
+        })
+        .catch(() => {
+            el.innerHTML = '<div class="sql-error">❌ Erro de rede ao executar diagnósticos.</div>';
+        });
+}
+
+function displayMqttDiagnostics(tests) {
+    const el = document.getElementById('mqtt-diag-result');
+    const allOk = tests.every(t => t.ok);
+
+    const rows = tests.map(t => `
+        <tr>
+            <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;white-space:nowrap;">
+                ${t.ok ? '✅' : '❌'} <strong>${escapeHtml(t.test)}</strong>
+            </td>
+            <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;
+                       color:${t.ok ? '#166534' : '#991b1b'};font-size:13px;">
+                ${escapeHtml(t.detail)}
+            </td>
+        </tr>`).join('');
+
+    const summary = allOk
+        ? `<div class="sql-success" style="margin-bottom:12px">
+               ✅ Todos os testes passaram — o PHP consegue ligar ao broker MQTT.
+           </div>`
+        : `<div class="sql-error" style="margin-bottom:12px">
+               ❌ Alguns testes falharam — verifique os detalhes abaixo.
+           </div>`;
+
+    el.innerHTML = summary + `
+        <div class="data-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Teste</th>
+                        <th>Detalhe</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>`;
+}
+
 // Carregar utilizadores quando a página carrega
 document.addEventListener('DOMContentLoaded', function() {
     if (activeTab === 'admin') {
