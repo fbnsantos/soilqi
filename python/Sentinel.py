@@ -90,7 +90,7 @@ oauth = OAuth2Session(client=client)
 
 token = oauth.fetch_token(
     token_url=TOKEN_URL,
-    client_secret=CLIENT_SECRET,
+    client_secret=soilqi.CLIENT_SECRET,
     include_client_id=True
 )
 
