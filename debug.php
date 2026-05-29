@@ -24,6 +24,19 @@ echo "<style>
     pre { background: #f0f0f0; padding: 10px; border-radius: 4px; overflow: auto; }
 </style>";
 
+<?php
+// Testar se o servidor PHP consegue fazer ligações TCP saintes
+$tests = [
+    ['google.com',       80,   'HTTP normal'],
+    ['google.com',       443,  'HTTPS normal'],
+    ['mqtt.vifield.com', 1883, 'MQTT 1883'],
+    ['mqtt.vifield.com', 8883, 'MQTT TLS 8883'],
+];
+foreach ($tests as [$host, $port, $label]) {
+    $s = @fsockopen($host, $port, $e, $m, 5);
+    echo ($s ? '✅' : '❌') . " $label ($host:$port)" . ($s ? '' : " — $m ($e)") . "\n";
+    if ($s) fclose($s);
+}
 // 1. Verificar PHP
 echo "<div class='section'>";
 echo "<h2>1. Versão PHP</h2>";

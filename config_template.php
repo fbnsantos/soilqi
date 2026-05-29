@@ -248,4 +248,4 @@ function verifyPassword($password, $hash) {
     return password_verify($password, $hash);
 }
 
-// Nota: ficheiro sem tag PHP de fecho (?>) para evitar output acidental de whitespace.
+// Fim de config.php — sem tag de fecho para evitar output acidental de whitespace.
