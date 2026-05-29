@@ -29,7 +29,7 @@ $tests = [
     ['google.com',       80,   'HTTP normal'],
     ['google.com',       443,  'HTTPS normal'],
     ['mqtt.vifield.com', 1883, 'MQTT 1883'],
-    ['mqtt.vifield.com', 8883, 'MQTT TLS 8883'],
+    ['mqtt.vifield.com', 8080, 'MQTT TLS 8883'],
 ];
 foreach ($tests as [$host, $port, $label]) {
     $s = @fsockopen($host, $port, $e, $m, 5);
