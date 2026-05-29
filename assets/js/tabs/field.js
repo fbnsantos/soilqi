@@ -45,7 +45,7 @@ let pendingKmzFile  = null;
 document.addEventListener('DOMContentLoaded', function () {
     if (activeTab !== 'field') return;
     initFieldMap();
-    applyFilters();
+    // Tabela não carrega automaticamente — aguarda que o utilizador clique em Filtrar
 });
 
 // ── Mapa ─────────────────────────────────────────────────────────────────────
@@ -209,6 +209,10 @@ function applyFilters() {
     const userSel = document.getElementById('filter-user');
     if (userSel) fd.append('user_id', userSel.value || '');
 
+    // Mostrar a secção da tabela e indicador de carregamento
+    const section = document.getElementById('table-section');
+    if (section) section.style.display = '';
+
     const wrap = document.getElementById('field-table-wrap');
     wrap.innerHTML = '<div style="text-align:center;padding:40px;color:#6b7280">A carregar…</div>';
 
@@ -258,7 +262,21 @@ function clearFilters() {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
-    applyFilters();
+
+    // Ocultar tabela e limpar estado
+    const section = document.getElementById('table-section');
+    if (section) section.style.display = 'none';
+
+    const wrap = document.getElementById('field-table-wrap');
+    if (wrap) wrap.innerHTML = '';
+
+    const count = document.getElementById('field-count');
+    if (count) count.textContent = '';
+
+    // Limpar mapa e estatísticas
+    allMeasurements = [];
+    if (markerLayer) markerLayer.clearLayers();
+    updateStats({ total: null, avg_ec: null, avg_ph: null, avg_temp: null });
 }
 
 // ── Estatísticas ──────────────────────────────────────────────────────────────
@@ -266,7 +284,7 @@ function updateStats(s) {
     if (!s) return;
     const fmt = (v, dec) => (v !== null && v !== undefined) ? parseFloat(v).toFixed(dec) : '—';
 
-    document.getElementById('stat-total').textContent = s.total || 0;
+    document.getElementById('stat-total').textContent = s.total !== null ? (s.total || 0) : '–';
     document.getElementById('stat-ec').textContent    = fmt(s.avg_ec,   2);
     document.getElementById('stat-ph').textContent    = fmt(s.avg_ph,   1);
     document.getElementById('stat-temp').textContent  = fmt(s.avg_temp, 1);

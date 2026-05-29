@@ -740,15 +740,15 @@ try {
     <div class="field-filters">
         <div class="filter-group">
             <label>De</label>
-            <input type="date" id="filter-date-from" onchange="applyFilters()">
+            <input type="date" id="filter-date-from">
         </div>
         <div class="filter-group">
             <label>Até</label>
-            <input type="date" id="filter-date-to" onchange="applyFilters()">
+            <input type="date" id="filter-date-to">
         </div>
         <div class="filter-group">
             <label>Terreno</label>
-            <select id="filter-terrain" onchange="applyFilters()">
+            <select id="filter-terrain">
                 <option value="">Todos</option>
                 <?php foreach ($filterTerrains as $t): ?>
                     <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); ?></option>
@@ -758,7 +758,7 @@ try {
         <?php if ($isAdmin): ?>
         <div class="filter-group">
             <label>Utilizador</label>
-            <select id="filter-user" onchange="applyFilters()">
+            <select id="filter-user">
                 <option value="">Todos</option>
                 <?php foreach ($filterUsers as $u): ?>
                     <option value="<?php echo $u['id']; ?>"><?php echo htmlspecialchars($u['username']); ?></option>
@@ -1352,8 +1352,8 @@ try {
     </div>
 </div>
 
-<!-- Tabela -->
-<div class="section">
+<!-- Tabela (oculta por defeito — aparece ao clicar em Filtrar) -->
+<div id="table-section" class="section" style="display:none">
     <div class="section-title">
         <h3>📋 Lista de Medições</h3>
         <div style="display:flex; gap:8px; align-items:center;">
@@ -1362,9 +1362,7 @@ try {
         </div>
     </div>
 
-    <div id="field-table-wrap" class="data-table">
-        <div style="text-align:center; padding:40px; color:#6b7280;">A carregar…</div>
-    </div>
+    <div id="field-table-wrap" class="data-table"></div>
 </div>
 
 <style>
