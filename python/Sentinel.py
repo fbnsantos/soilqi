@@ -415,8 +415,12 @@ def post_result(job: dict, png_bytes: Optional[bytes], error_msg: Optional[str] 
             "max_lat":    bbox[3],
         }
 
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; SoilQI-Sentinel/1.0)",
+        "Accept":     "application/json",
+    }
     try:
-        r = requests.post(url, json=payload, timeout=30)
+        r = requests.post(url, json=payload, headers=headers, timeout=30)
         if r.status_code == 200 and r.json().get("success"):
             log.info("Resultado entregue (%s).", job["request_id"])
         else:
