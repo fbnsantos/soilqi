@@ -24,7 +24,6 @@ echo "<style>
     pre { background: #f0f0f0; padding: 10px; border-radius: 4px; overflow: auto; }
 </style>";
 
-<?php
 // Testar se o servidor PHP consegue fazer ligações TCP saintes
 $tests = [
     ['google.com',       80,   'HTTP normal'],
