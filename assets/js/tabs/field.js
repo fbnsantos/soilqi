@@ -2570,11 +2570,13 @@ function loadRastersList() {
 }
 
 const RASTER_TYPE_LABELS = {
-    ndvi:         '🌿 NDVI Atual',
-    ndvi_anomaly: '📊 NDVI Anomalia',
-    ndvi_diff:    '📈 NDVI Diferença',
-    ndmi:         '💧 NDMI Humidade',
-    lst:          '🌡️ LST Temperatura',
+    ndvi:          '🌿 NDVI Atual',
+    ndvi_anomaly:  '📊 NDVI Anomalia',
+    ndvi_diff:     '📈 NDVI Diferença',
+    ndmi:          '💧 NDMI Humidade',
+    lst:           '🌡️ LST Temperatura',
+    chuva:         '🌧️ Chuva / Precipitação',
+    humidade_solo: '🌱 Humidade do Solo',
 };
 const RASTER_STATUS_ICON = { pending:'⏳', processing:'🔄', done:'✅', error:'❌' };
 

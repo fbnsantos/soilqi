@@ -8,9 +8,11 @@ e devolve o resultado PNG ao servidor PHP via HTTP POST.
 Tipos de raster suportados:
   ndvi          — NDVI atual (Sentinel-2 L2A)
   ndmi          — NDMI / Humidade vegetativa (Sentinel-2 L2A)
-  lst           — LST / Temperatura de superfície (Landsat 8/9 L2)
+  lst           — LST / Temperatura de superfície (Sentinel-3 SLSTR, ~1 km)
   ndvi_anomaly  — NDVI anomalia vs período de referência (dois períodos S-2)
   ndvi_diff     — NDVI diferença entre dois períodos (dois períodos S-2)
+  chuva         — Precipitação acumulada em mm (Open-Meteo / ERA5 reanalysis)
+  humidade_solo — Humidade do solo proxy (Sentinel-1 GRD, VV backscatter SAR)
 
 Instalação:
   pip install -r requirements.txt
@@ -139,20 +141,43 @@ function evaluatePixel(s){
 }
 """
 
-# LST usa Landsat 8/9 L2 — colecção diferente
+# LST usa Sentinel-3 SLSTR — banda S8 (10.85 µm, ~1 km resolução)
+# Disponível em CDSE sem subscrição especial; S8 devolve temperatura de brilho em Kelvin
 _EVALSCRIPT_LST = """
 //VERSION=3
-function setup(){return{input:["ST_B10","QA_PIXEL","dataMask"],output:{bands:4,sampleType:"AUTO"}};}
+function setup(){return{input:["S8","dataMask"],output:{bands:4,sampleType:"AUTO"}};}
 function evaluatePixel(s){
   if(s.dataMask===0)return[0,0,0,0];
-  if((s.QA_PIXEL&8)!==0)return[0,0,0,0]; // nuvem
-  const lst=s.ST_B10*0.00341802+149.0-273.15; // Kelvin→Celsius
-  // colormap 0-45 °C: azul→verde→amarelo→vermelho
+  // S8 = temperatura de brilho em Kelvin; converter para Celsius
+  const lst=s.S8-273.15;
+  if(lst<-50||lst>80)return[0,0,0,0]; // valor inválido/fora de escala
+  // colormap 0–45 °C: azul→ciano→verde→amarelo→vermelho
   const t=Math.max(0,Math.min(1,(lst-0)/45));
   let r,g,b;
-  if(t<0.33){r=0;g=t*3;b=1-(t*3);}
-  else if(t<0.66){r=(t-0.33)*3;g=1;b=0;}
-  else{r=1;g=1-((t-0.66)*3);b=0;}
+  if(t<0.25){r=0;g=t*4;b=1;}
+  else if(t<0.5){r=0;g=1;b=1-(t-0.25)*4;}
+  else if(t<0.75){r=(t-0.5)*4;g=1;b=0;}
+  else{r=1;g=1-(t-0.75)*4;b=0;}
+  return[r,g,b,1];
+}
+"""
+
+# Humidade do solo — Sentinel-1 GRD, VV backscatter (proxy SAR)
+# Escala dB: -25 dB (seco/reflexão fraca) → -5 dB (húmido/reflexão intensa)
+_EVALSCRIPT_SOIL_MOISTURE = """
+//VERSION=3
+function setup(){return{input:["VV","VH","dataMask"],output:{bands:4,sampleType:"AUTO"}};}
+function evaluatePixel(s){
+  if(s.dataMask===0)return[0,0,0,0];
+  // VV em unidades lineares → dB
+  const vv_db=10*Math.log10(Math.max(s.VV,1e-10));
+  // Normalizar -25 dB…-5 dB → 0…1 (seco→húmido)
+  const t=Math.max(0,Math.min(1,(vv_db-(-25))/20));
+  // Colormap: vermelho(seco)→amarelo→verde→azul(húmido)
+  let r,g,b;
+  if(t<0.33){r=1;g=t*3;b=0;}
+  else if(t<0.66){r=1-(t-0.33)*3;g=1;b=0;}
+  else{r=0;g=1-(t-0.66)*3;b=(t-0.66)*3;}
   return[r,g,b,1];
 }
 """
@@ -233,15 +258,28 @@ def _build_s2_data(date_from: str, date_to: str, ds_id: Optional[str] = None) ->
     return entry
 
 
-def _build_landsat_data(date_from: str, date_to: str) -> dict:
+def _build_slstr_data(date_from: str, date_to: str) -> dict:
+    """Bloco de dados Sentinel-3 SLSTR para temperatura de superfície (LST)."""
     return {
-        "type": "landsat-ot-l2",
+        "type": "sentinel-3-slstr",
         "dataFilter": {
             "timeRange": {
                 "from": date_from + "T00:00:00Z",
                 "to":   date_to   + "T23:59:59Z",
             },
-            "mosaickingOrder": "leastCC",
+        }
+    }
+
+
+def _build_s1_data(date_from: str, date_to: str) -> dict:
+    """Bloco de dados Sentinel-1 GRD para humidade do solo (SAR backscatter)."""
+    return {
+        "type": "sentinel-1-grd",
+        "dataFilter": {
+            "timeRange": {
+                "from": date_from + "T00:00:00Z",
+                "to":   date_to   + "T23:59:59Z",
+            },
         }
     }
 
@@ -291,6 +329,76 @@ def _diverging_colormap(diff: np.ndarray, scale: float = 0.3) -> Image.Image:
     return Image.fromarray(rgba, "RGBA")
 
 
+def _generate_precipitation_raster(bbox: list, date_from: str, date_to: str) -> bytes:
+    """
+    Gera raster de precipitação acumulada (mm) via Open-Meteo (ERA5 reanalysis).
+    Resolução ERA5 ~0.25° (~28 km) — suficiente para terrenos agrícolas típicos.
+    Paleta: branco (0 mm) → azul claro → azul → azul escuro → roxo (≥ 100 mm).
+    """
+    min_lon, min_lat, max_lon, max_lat = bbox
+    cx = (min_lon + max_lon) / 2.0
+    cy = (min_lat + max_lat) / 2.0
+
+    url = (
+        "https://archive-api.open-meteo.com/v1/archive"
+        f"?latitude={cy:.5f}&longitude={cx:.5f}"
+        f"&start_date={date_from}&end_date={date_to}"
+        "&daily=precipitation_sum&timezone=UTC"
+    )
+    try:
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+        daily_vals = resp.json().get("daily", {}).get("precipitation_sum", [])
+        total_mm   = sum(v for v in daily_vals if v is not None)
+    except Exception as e:
+        raise RuntimeError(f"Open-Meteo não disponível: {e}")
+
+    log.info("Precipitação acumulada: %.1f mm (%s → %s)", total_mm, date_from, date_to)
+
+    # ── Colormap em pontos de controlo (mm → [R, G, B]) ──────────────────────
+    color_ramp = [
+        (0.0,   [255, 255, 255]),   # seco — branco
+        (2.0,   [200, 235, 255]),   # vestígios — azul muito claro
+        (10.0,  [120, 190, 240]),   # chuva leve
+        (30.0,  [40,  130, 210]),   # chuva moderada
+        (60.0,  [10,   70, 170]),   # chuva forte
+        (100.0, [50,    0, 130]),   # chuva muito intensa — roxo
+    ]
+
+    def _interp_color(mm: float) -> tuple:
+        if mm <= color_ramp[0][0]:
+            return tuple(color_ramp[0][1])
+        if mm >= color_ramp[-1][0]:
+            return tuple(color_ramp[-1][1])
+        for k in range(1, len(color_ramp)):
+            t0, c0 = color_ramp[k - 1]
+            t1, c1 = color_ramp[k]
+            if mm <= t1:
+                f = (mm - t0) / (t1 - t0)
+                return tuple(int(c0[i] + f * (c1[i] - c0[i])) for i in range(3))
+        return tuple(color_ramp[-1][1])
+
+    r, g, b = _interp_color(total_mm)
+
+    # Alpha: quase transparente se sem chuva, opaco com chuva significativa
+    alpha = max(60, min(230, int(60 + 170 * min(1.0, total_mm / 50.0))))
+
+    out_w = CFG["OUTPUT_WIDTH"]
+    out_h = CFG["OUTPUT_HEIGHT"]
+
+    # Cor uniforme (ERA5 >> resolução típica de campo)
+    rgba = np.zeros((out_h, out_w, 4), dtype=np.uint8)
+    rgba[:, :, 0] = r
+    rgba[:, :, 1] = g
+    rgba[:, :, 2] = b
+    rgba[:, :, 3] = alpha
+
+    img = Image.fromarray(rgba, "RGBA")
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
 def generate_raster(job: dict) -> bytes:
     """
     Gera o PNG para o tipo de raster pedido.
@@ -309,17 +417,26 @@ def generate_raster(job: dict) -> bytes:
     }
     out_size = {"width": CFG["OUTPUT_WIDTH"], "height": CFG["OUTPUT_HEIGHT"]}
 
-    # ── Tipos de período único (PNG directo) ─────────────────────────────────
-    if rtype in ("ndvi", "ndmi", "lst"):
+    # ── Precipitação — Open-Meteo (ERA5), sem Sentinel Hub ───────────────────
+    if rtype == "chuva":
+        return _generate_precipitation_raster(bbox, date_from, date_to)
+
+    # ── Tipos de período único via Sentinel Hub (PNG directo) ─────────────────
+    if rtype in ("ndvi", "ndmi", "lst", "humidade_solo"):
         if rtype == "lst":
-            data_block  = [_build_landsat_data(date_from, date_to)]
-            evalscript  = _EVALSCRIPT_LST
+            # Sentinel-3 SLSTR — temperatura de brilho banda S8 (10.85 µm, ~1 km)
+            data_block = [_build_slstr_data(date_from, date_to)]
+            evalscript = _EVALSCRIPT_LST
+        elif rtype == "humidade_solo":
+            # Sentinel-1 GRD — VV backscatter C-band como proxy de humidade
+            data_block = [_build_s1_data(date_from, date_to)]
+            evalscript = _EVALSCRIPT_SOIL_MOISTURE
         elif rtype == "ndmi":
-            data_block  = [_build_s2_data(date_from, date_to)]
-            evalscript  = _EVALSCRIPT_NDMI
+            data_block = [_build_s2_data(date_from, date_to)]
+            evalscript = _EVALSCRIPT_NDMI
         else:  # ndvi
-            data_block  = [_build_s2_data(date_from, date_to)]
-            evalscript  = _EVALSCRIPT_NDVI
+            data_block = [_build_s2_data(date_from, date_to)]
+            evalscript = _EVALSCRIPT_NDVI
 
         body = {
             "input":  {"bounds": bounds_obj, "data": data_block},

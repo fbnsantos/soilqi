@@ -7,11 +7,13 @@
 const mapRasterOverlays = {};
 
 const MAP_RASTER_LABELS = {
-    ndvi:         '🌿 NDVI Atual',
-    ndvi_anomaly: '📊 NDVI Anomalia',
-    ndvi_diff:    '📈 NDVI Diferença',
-    ndmi:         '💧 NDMI Humidade',
-    lst:          '🌡️ LST Temperatura',
+    ndvi:          '🌿 NDVI Atual',
+    ndvi_anomaly:  '📊 NDVI Anomalia',
+    ndvi_diff:     '📈 NDVI Diferença',
+    ndmi:          '💧 NDMI Humidade',
+    lst:           '🌡️ LST Temperatura',
+    chuva:         '🌧️ Chuva / Precipitação',
+    humidade_solo: '🌱 Humidade do Solo',
 };
 
 // ── Carregar lista ────────────────────────────────────────────────────────────

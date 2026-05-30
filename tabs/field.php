@@ -658,7 +658,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 $dateFrom2  = trim($_POST['date_from2']    ?? '');
                 $dateTo2    = trim($_POST['date_to2']      ?? '');
 
-                $allowed = ['ndvi','ndvi_anomaly','ndvi_diff','ndmi','lst'];
+                $allowed = ['ndvi','ndvi_anomaly','ndvi_diff','ndmi','lst','chuva','humidade_solo'];
                 if (!$terrainId || !in_array($rasterType, $allowed, true) || !$dateFrom || !$dateTo) {
                     $response['message'] = 'Dados em falta ou tipo de raster inválido.';
                     break;
@@ -694,6 +694,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                     'ndvi_diff'     => 'NDVI Diferença',
                     'ndmi'          => 'NDMI Humidade',
                     'lst'           => 'LST Temperatura',
+                    'chuva'         => 'Chuva / Precipitação',
+                    'humidade_solo' => 'Humidade do Solo',
                 ];
                 $name = ($typeLabels[$rasterType] ?? $rasterType)
                       . ' · ' . $terrain['name']
@@ -1614,7 +1616,9 @@ try {
                     <select id="raster-type" onchange="onRasterTypeChange()">
                         <option value="ndvi">🌿 NDVI Atual</option>
                         <option value="ndmi">💧 NDMI / Humidade vegetativa</option>
-                        <option value="lst">🌡️ LST / Temperatura de superfície</option>
+                        <option value="lst">🌡️ LST / Temperatura superfície</option>
+                        <option value="chuva">🌧️ Chuva / Precipitação</option>
+                        <option value="humidade_solo">🌱 Humidade do solo</option>
                         <option value="ndvi_anomaly">📊 NDVI Anomalia (vs. ano anterior)</option>
                         <option value="ndvi_diff">📈 NDVI Diferença entre datas</option>
                     </select>
