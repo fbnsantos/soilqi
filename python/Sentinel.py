@@ -235,7 +235,7 @@ def _build_s2_data(date_from: str, date_to: str, ds_id: Optional[str] = None) ->
 
 def _build_landsat_data(date_from: str, date_to: str) -> dict:
     return {
-        "type": "LANDSAT_OT_L2",
+        "type": "landsat-ot-l2",
         "dataFilter": {
             "timeRange": {
                 "from": date_from + "T00:00:00Z",
