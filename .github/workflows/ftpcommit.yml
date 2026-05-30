@@ -23,6 +23,13 @@ jobs:
           -d "dbuser=${{ secrets.DB_USER }}" \
           -d "dbpass=${{ secrets.DB_PASS }}" \
           -d "dbname=${{ secrets.DB_NAME }}" \
+          -d "dbname=${{ secrets.DB_NAME }}" \
+          -d "dbname=${{ secrets.SITE_URL }}" \
+          -d "dbname=${{ secrets.MQTT_HOST }}" \
+          -d "dbname=${{ secrets.MQTT_PORT }}" \
+          -d "dbname=${{ secrets.MQTT_USER }}" \
+          -d "dbname=${{ secrets.MQTT_PASS }}" \
+          -d "dbname=${{ secrets.RASTER_API_KEY }}" \          
           https://soilqi.com/git.php \
           || echo "⚠️ cURL completed with warnings"
         
