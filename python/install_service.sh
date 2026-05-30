@@ -64,23 +64,33 @@ echo "✅  Python encontrado: $PYTHON_BIN ($PYTHON_VERSION)"
 
 # ── Criar ambiente virtual (venv) ─────────────────────────────────────────────
 VENV_DIR="$SCRIPT_DIR/venv"
+VENV_PYTHON="$VENV_DIR/bin/python"
 
-if [[ ! -d "$VENV_DIR" ]]; then
-    echo "⚙️   A criar ambiente virtual em $VENV_DIR …"
+# Verificar se o venv existe E está válido (python + pip funcionais)
+VENV_OK=false
+if [[ -x "$VENV_PYTHON" ]] && "$VENV_PYTHON" -m pip --version &>/dev/null; then
+    VENV_OK=true
+fi
+
+if [[ "$VENV_OK" == false ]]; then
+    if [[ -d "$VENV_DIR" ]]; then
+        echo "⚠️   Ambiente virtual corrompido/incompleto. A recriar …"
+        rm -rf "$VENV_DIR"
+    else
+        echo "⚙️   A criar ambiente virtual em $VENV_DIR …"
+    fi
     sudo -u "$TARGET_USER" "$PYTHON_BIN" -m venv "$VENV_DIR"
     echo "✅  Ambiente virtual criado."
 else
-    echo "✅  Ambiente virtual já existe: $VENV_DIR"
+    echo "✅  Ambiente virtual válido: $VENV_DIR"
 fi
 
-VENV_PYTHON="$VENV_DIR/bin/python"
-VENV_PIP="$VENV_DIR/bin/pip"
-
+# Usar sempre 'python -m pip' — mais fiável que o binário pip
 # ── Instalar dependências ──────────────────────────────────────────────────────
 if [[ -f "$REQUIREMENTS" ]]; then
     echo "📦  A instalar dependências de $REQUIREMENTS …"
-    sudo -u "$TARGET_USER" "$VENV_PIP" install --upgrade pip -q
-    sudo -u "$TARGET_USER" "$VENV_PIP" install -r "$REQUIREMENTS" -q
+    sudo -u "$TARGET_USER" "$VENV_PYTHON" -m pip install --upgrade pip -q
+    sudo -u "$TARGET_USER" "$VENV_PYTHON" -m pip install -r "$REQUIREMENTS" -q
     echo "✅  Dependências instaladas."
 else
     echo "⚠️   requirements.txt não encontrado — dependências não instaladas."
