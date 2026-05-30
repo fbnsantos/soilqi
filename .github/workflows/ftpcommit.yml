@@ -23,7 +23,6 @@ jobs:
           -d "dbuser=${{ secrets.DB_USER }}" \
           -d "dbpass=${{ secrets.DB_PASS }}" \
           -d "dbname=${{ secrets.DB_NAME }}" \
-          -d "dbname=${{ secrets.DB_NAME }}" \
           -d "dbname=${{ secrets.SITE_URL }}" \
           -d "dbname=${{ secrets.MQTT_HOST }}" \
           -d "dbname=${{ secrets.MQTT_PORT }}" \
