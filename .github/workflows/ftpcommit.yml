@@ -16,20 +16,17 @@ jobs:
     - name: Deploy to server
       run: |
         echo "🚀 Starting deployment..."
-        
-        # Sem -f para não falhar, mas com verificação manual
         curl -X POST \
           -d "dbhost=${{ secrets.DB_HOST }}" \
           -d "dbuser=${{ secrets.DB_USER }}" \
           -d "dbpass=${{ secrets.DB_PASS }}" \
           -d "dbname=${{ secrets.DB_NAME }}" \
-          -d "dbname=${{ secrets.SITE_URL }}" \
-          -d "dbname=${{ secrets.MQTT_HOST }}" \
-          -d "dbname=${{ secrets.MQTT_PORT }}" \
-          -d "dbname=${{ secrets.MQTT_USER }}" \
-          -d "dbname=${{ secrets.MQTT_PASS }}" \
-          -d "dbname=${{ secrets.RASTER_API_KEY }}" \          
+          -d "site_url=${{ secrets.SITE_URL }}" \
+          -d "mqtt_host=${{ secrets.MQTT_HOST }}" \
+          -d "mqtt_port=${{ secrets.MQTT_PORT }}" \
+          -d "mqtt_user=${{ secrets.MQTT_USER }}" \
+          -d "mqtt_pass=${{ secrets.MQTT_PASS }}" \
+          -d "raster_api_key=${{ secrets.RASTER_API_KEY }}" \
           https://soilqi.com/git.php \
           || echo "⚠️ cURL completed with warnings"
-        
-        echo "✅ Deploy process completed!"
+        echo "✅ Deploy triggered"
