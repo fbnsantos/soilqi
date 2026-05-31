@@ -228,6 +228,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if (file_exists($tabJsFile)): ?>
         <script src="<?php echo $tabJsFile; ?>"></script>
     <?php endif; ?>
+
+    <?php if ($activeTab === 'map'): ?>
+    <!-- jsPDF — necessário para geração de relatórios PDF no tab Mapa -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <?php endif; ?>
     
     <!-- Main JS -->
     <script src="assets/js/app.js"></script>

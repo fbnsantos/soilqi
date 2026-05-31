@@ -589,8 +589,14 @@ function _renderNotesList(notes) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function generateMapReport() {
+    // Se jsPDF ainda não foi carregado, injectá-lo dinamicamente e recomeçar
     if (typeof window.jspdf === 'undefined') {
-        _showAlert('⏳ jsPDF ainda a carregar, aguarde e tente de novo.', 'warning');
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+        s.onload  = () => generateMapReport();
+        s.onerror = () => _showAlert('❌ Não foi possível carregar jsPDF (sem ligação à internet?).', 'error');
+        document.head.appendChild(s);
+        _showAlert('⏳ A carregar gerador de PDF…', 'info');
         return;
     }
     const { jsPDF } = window.jspdf;
