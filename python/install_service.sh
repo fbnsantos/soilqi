@@ -12,6 +12,7 @@ set -uo pipefail   # sem -e para não sair silenciosamente em erros systemd
 # ── Configuração ──────────────────────────────────────────────────────────────
 SENTINEL_SERVICE="sentinel"
 ZONATION_SERVICE="zonation"
+PRESCRIPTION_SERVICE="prescription"
 
 # Detectar utilizador: argumento --user, ou SUDO_USER, ou utilizador actual
 TARGET_USER="${SUDO_USER:-$USER}"
@@ -28,6 +29,7 @@ TARGET_HOME=$(eval echo "~$TARGET_USER")
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SENTINEL_SCRIPT="$SCRIPT_DIR/Sentinel.py"
 ZONATION_SCRIPT="$SCRIPT_DIR/Zonation.py"
+PRESCRIPTION_SCRIPT="$SCRIPT_DIR/Prescription.py"
 REQUIREMENTS="$SCRIPT_DIR/requirements.txt"
 
 # ── Validações ────────────────────────────────────────────────────────────────
@@ -40,9 +42,9 @@ if [[ "$DEPS_ONLY" == false && $EUID -ne 0 ]]; then
     exit 1
 fi
 
-if [[ ! -f "$SENTINEL_SCRIPT" && ! -f "$ZONATION_SCRIPT" ]]; then
+if [[ ! -f "$SENTINEL_SCRIPT" && ! -f "$ZONATION_SCRIPT" && ! -f "$PRESCRIPTION_SCRIPT" ]]; then
     echo "❌  Nenhum script Python encontrado em: $SCRIPT_DIR"
-    echo "    (Sentinel.py e/ou Zonation.py devem estar presentes)"
+    echo "    (Sentinel.py, Zonation.py e/ou Prescription.py devem estar presentes)"
     exit 1
 fi
 
@@ -53,10 +55,12 @@ echo "════════════════════════�
 echo "  Utilizador : $TARGET_USER"
 echo "  Home       : $TARGET_HOME"
 echo "  Diretório  : $SCRIPT_DIR"
-[[ -f "$SENTINEL_SCRIPT" ]] && echo "  Sentinel   : $SENTINEL_SCRIPT  ✅" \
-                             || echo "  Sentinel   : não encontrado    ⚠️"
-[[ -f "$ZONATION_SCRIPT" ]] && echo "  Zonation   : $ZONATION_SCRIPT  ✅" \
-                             || echo "  Zonation   : não encontrado    ⚠️"
+[[ -f "$SENTINEL_SCRIPT"     ]] && echo "  Sentinel     : $SENTINEL_SCRIPT  ✅" \
+                                || echo "  Sentinel     : não encontrado    ⚠️"
+[[ -f "$ZONATION_SCRIPT"     ]] && echo "  Zonation     : $ZONATION_SCRIPT  ✅" \
+                                || echo "  Zonation     : não encontrado    ⚠️"
+[[ -f "$PRESCRIPTION_SCRIPT" ]] && echo "  Prescription : $PRESCRIPTION_SCRIPT  ✅" \
+                                || echo "  Prescription : não encontrado    ⚠️"
 echo "══════════════════════════════════════════════════════════"
 echo ""
 
@@ -217,6 +221,16 @@ else
     echo "⚠️   Zonation.py não encontrado — serviço $ZONATION_SERVICE não instalado."
 fi
 
+# ── Instalar Prescription.py ──────────────────────────────────────────────────
+if [[ -f "$PRESCRIPTION_SCRIPT" ]]; then
+    create_service \
+        "$PRESCRIPTION_SERVICE" \
+        "$PRESCRIPTION_SCRIPT" \
+        "SoilQI Prescription.py — Geração de ShapeFiles VRA via MQTT"
+else
+    echo "⚠️   Prescription.py não encontrado — serviço $PRESCRIPTION_SERVICE não instalado."
+fi
+
 # ── Estado final ──────────────────────────────────────────────────────────────
 echo ""
 echo "══════════════════════════════════════════════════════════"
@@ -227,18 +241,18 @@ echo "  ┌───────────────────────
 echo "  │ Ver logs em tempo real:"
 echo "  │   journalctl -u $SENTINEL_SERVICE -f"
 echo "  │   journalctl -u $ZONATION_SERVICE -f"
+echo "  │   journalctl -u $PRESCRIPTION_SERVICE -f"
 echo "  │"
 echo "  │ Reiniciar serviços:"
-echo "  │   sudo systemctl restart $SENTINEL_SERVICE"
-echo "  │   sudo systemctl restart $ZONATION_SERVICE"
+echo "  │   sudo systemctl restart $SENTINEL_SERVICE $ZONATION_SERVICE $PRESCRIPTION_SERVICE"
 echo "  │"
 echo "  │ Estado dos serviços:"
-echo "  │   sudo systemctl status $SENTINEL_SERVICE $ZONATION_SERVICE"
+echo "  │   sudo systemctl status $SENTINEL_SERVICE $ZONATION_SERVICE $PRESCRIPTION_SERVICE"
 echo "  │"
 echo "  │ Parar serviços:"
-echo "  │   sudo systemctl stop $SENTINEL_SERVICE $ZONATION_SERVICE"
+echo "  │   sudo systemctl stop $SENTINEL_SERVICE $ZONATION_SERVICE $PRESCRIPTION_SERVICE"
 echo "  │"
 echo "  │ Desactivar arranque automático:"
-echo "  │   sudo systemctl disable $SENTINEL_SERVICE $ZONATION_SERVICE"
+echo "  │   sudo systemctl disable $SENTINEL_SERVICE $ZONATION_SERVICE $PRESCRIPTION_SERVICE"
 echo "  └─────────────────────────────────────────────────────"
 echo ""

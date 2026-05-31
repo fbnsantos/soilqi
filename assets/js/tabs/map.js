@@ -74,6 +74,8 @@ function onReportTerrainChange(val) {
     _loadRasterLayers(reportTerrainId);
     loadMapNotes(reportTerrainId);
     loadZonationHistory(reportTerrainId);
+    loadPrescriptionZonations(reportTerrainId);
+    loadPrescriptionHistory(reportTerrainId);
 }
 
 // ── Grupos colapsáveis ────────────────────────────────────────────────────────
@@ -1279,6 +1281,301 @@ function _setBadge(name, count) {
     if (!badge) return;
     badge.textContent = count;
     badge.className   = count > 0 ? 'layer-badge has-items' : 'layer-badge';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRESCRIÇÃO / SHAPEFILE VRA
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Helper de estado do painel de prescrição. */
+function _prescStatus(msg, type) {
+    const el = document.getElementById('presc-status');
+    if (!el) return;
+    if (!msg) { el.style.display = 'none'; el.textContent = ''; return; }
+    const colors = {
+        info:    { bg:'#eff6ff', border:'#bfdbfe', text:'#1d4ed8' },
+        success: { bg:'#f0fdf4', border:'#bbf7d0', text:'#166534' },
+        error:   { bg:'#fef2f2', border:'#fecaca', text:'#dc2626' },
+        warning: { bg:'#fffbeb', border:'#fde68a', text:'#92400e' },
+    };
+    const c = colors[type] || colors.info;
+    Object.assign(el.style, {
+        display:'', background:c.bg, border:`1px solid ${c.border}`,
+        color:c.text, borderRadius:'6px', padding:'8px 10px',
+        fontSize:'11px', marginTop:'8px', lineHeight:'1.5', whiteSpace:'pre-line',
+    });
+    el.textContent = msg;
+}
+
+/**
+ * Preenche o dropdown "Zonagem base" com as zonagens concluídas do terreno.
+ * Chamado quando muda o terreno seleccionado.
+ */
+function loadPrescriptionZonations(terrainId) {
+    const sel = document.getElementById('presc-zonation-select');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— Selecione uma zonagem —</option>';
+    document.getElementById('presc-zone-inputs').innerHTML = '';
+    _prescStatus('', '');
+
+    if (!terrainId) return;
+
+    const fd = new FormData();
+    fd.append('action',     'get_zonation_list');
+    fd.append('terrain_id', terrainId);
+
+    fetch('index.php?tab=map', { method:'POST', body:fd })
+        .then(r => r.json())
+        .then(data => {
+            const items = data.items || [];
+            items.forEach(z => {
+                const opt = document.createElement('option');
+                opt.value = z.id;
+                opt.textContent = _pdfStr(z.name) + '  (' + z.method + ')';
+                // guardar legenda como data attribute
+                opt.dataset.legend = JSON.stringify(
+                    typeof z.legend === 'string' ? JSON.parse(z.legend || '[]') : (z.legend || [])
+                );
+                sel.appendChild(opt);
+            });
+        })
+        .catch(() => {});
+}
+
+/**
+ * Ao seleccionar uma zonagem, renderiza os inputs de prescrição por zona.
+ */
+function onPrescZonationChange(id) {
+    const sel = document.getElementById('presc-zonation-select');
+    const container = document.getElementById('presc-zone-inputs');
+    _prescStatus('', '');
+    if (!id || !sel || !container) { container.innerHTML = ''; return; }
+
+    const opt    = sel.querySelector(`option[value="${id}"]`);
+    const legend = opt ? JSON.parse(opt.dataset.legend || '[]') : [];
+
+    if (!legend.length) {
+        container.innerHTML = '<div class="layer-empty">Sem informação de zonas.</div>';
+        return;
+    }
+
+    const inp = (id, placeholder, val='0') =>
+        `<input type="number" id="${id}" value="${val}" min="0" step="0.1"
+                style="width:100%;padding:4px 5px;border:1px solid #e5e7eb;border-radius:5px;
+                       font-size:11px;box-sizing:border-box;" placeholder="${placeholder}">`;
+
+    container.innerHTML = `
+        <div style="font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;
+                    letter-spacing:.5px;margin-bottom:6px;">
+            Valores por zona
+        </div>
+        <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:11px;">
+            <thead>
+                <tr style="background:#f8fafc;color:#6b7280;">
+                    <th style="padding:4px 5px;text-align:left;font-weight:600;border-bottom:1px solid #e5e7eb;min-width:80px;">Zona</th>
+                    <th style="padding:4px 5px;text-align:center;font-weight:600;border-bottom:1px solid #e5e7eb;" title="Litros por hectare">Spray<br><small>L/ha</small></th>
+                    <th style="padding:4px 5px;text-align:center;font-weight:600;border-bottom:1px solid #e5e7eb;" title="Azoto kg/ha">N<br><small>kg/ha</small></th>
+                    <th style="padding:4px 5px;text-align:center;font-weight:600;border-bottom:1px solid #e5e7eb;" title="Fósforo kg/ha">P<br><small>kg/ha</small></th>
+                    <th style="padding:4px 5px;text-align:center;font-weight:600;border-bottom:1px solid #e5e7eb;" title="Potássio kg/ha">K<br><small>kg/ha</small></th>
+                </tr>
+            </thead>
+            <tbody>
+                ${legend.map(z => {
+                    const zid  = z.zone_id ?? z.id ?? 0;
+                    const lbl  = _pdfStr(z.label || `Zona ${zid}`);
+                    const col  = z.color || '#999';
+                    return `
+                    <tr style="border-bottom:1px solid #f1f5f9;">
+                        <td style="padding:5px 5px;">
+                            <div style="display:flex;align-items:center;gap:5px;">
+                                <div style="width:10px;height:10px;border-radius:2px;
+                                            background:${col};flex-shrink:0;"></div>
+                                <span style="font-weight:600;color:#374151;">${_esc(lbl)}</span>
+                                <span style="color:#9ca3af;font-size:10px;">${z.area_pct ?? ''}%</span>
+                            </div>
+                        </td>
+                        <td style="padding:3px;">${inp('presc-spray-'+zid, '0')}</td>
+                        <td style="padding:3px;">${inp('presc-n-'+zid,     '0')}</td>
+                        <td style="padding:3px;">${inp('presc-p-'+zid,     '0')}</td>
+                        <td style="padding:3px;">${inp('presc-k-'+zid,     '0')}</td>
+                    </tr>`;
+                }).join('')}
+            </tbody>
+        </table>
+        </div>`;
+}
+
+/** Recolhe os valores da tabela e envia o pedido de geração. */
+function generatePrescription() {
+    if (!reportTerrainId) { _prescStatus('Selecione um terreno primeiro.', 'warning'); return; }
+
+    const sel    = document.getElementById('presc-zonation-select');
+    const zonId  = sel ? parseInt(sel.value) : 0;
+    if (!zonId)  { _prescStatus('Selecione uma zonagem base.', 'warning'); return; }
+
+    const name = (document.getElementById('presc-name')?.value || '').trim();
+    if (!name) { _prescStatus('Dê um nome à prescrição.', 'warning'); return; }
+
+    // Recolher prescriptions da tabela
+    const opt    = sel.querySelector(`option[value="${zonId}"]`);
+    const legend = opt ? JSON.parse(opt.dataset.legend || '[]') : [];
+    if (!legend.length) { _prescStatus('Zonagem sem zonas na legenda.', 'error'); return; }
+
+    const prescriptions = legend.map(z => {
+        const zid = z.zone_id ?? z.id ?? 0;
+        const v   = id => parseFloat(document.getElementById(id)?.value || 0) || 0;
+        return {
+            zone_id: zid,
+            spray:   v('presc-spray-' + zid),
+            fert_n:  v('presc-n-' + zid),
+            fert_p:  v('presc-p-' + zid),
+            fert_k:  v('presc-k-' + zid),
+        };
+    });
+
+    const btn = document.getElementById('presc-generate-btn');
+    const _resetBtn = () => {
+        if (btn) { btn.textContent = '📋 Gerar ShapeFile'; btn.disabled = false; btn.style.opacity = '1'; }
+    };
+    if (btn) { btn.textContent = '⏳ A enviar…'; btn.disabled = true; btn.style.opacity = '0.7'; }
+    _prescStatus('⏳ A enviar pedido ao servidor…', 'info');
+
+    const fd = new FormData();
+    fd.append('action',        'generate_prescription');
+    fd.append('terrain_id',    reportTerrainId);
+    fd.append('zonation_id',   zonId);
+    fd.append('name',          name);
+    fd.append('prescriptions', JSON.stringify(prescriptions));
+
+    fetch('index.php?tab=map', { method:'POST', body:fd })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                _resetBtn();
+                _prescStatus('❌ ' + (data.message || 'Erro ao criar pedido.'), 'error');
+                return;
+            }
+            if (data.mqtt_warning) {
+                _resetBtn();
+                _prescStatus('⚠️ MQTT não configurado: o serviço Python não recebeu o pedido.\n' + data.mqtt_warning, 'warning');
+                return;
+            }
+            if (btn) { btn.textContent = '⏳ A processar…'; }
+            _prescStatus('📡 Pedido enviado. A aguardar geração do ShapeFile…', 'info');
+            _pollPrescriptionStatus(data.request_id, _resetBtn);
+        })
+        .catch(err => {
+            _resetBtn();
+            _prescStatus('❌ Erro de rede: ' + err.message, 'error');
+        });
+}
+
+function _pollPrescriptionStatus(requestId, onDone) {
+    const MAX = 60;
+    let   att = 0;
+
+    const timer = setInterval(() => {
+        att++;
+        if (att > MAX) {
+            clearInterval(timer);
+            if (onDone) onDone();
+            _prescStatus('⏱️ Tempo limite excedido. Verifique o historial mais tarde.', 'warning');
+            return;
+        }
+        _prescStatus(`⏳ A gerar ShapeFile… (${att * 3}s)`, 'info');
+
+        const fd = new FormData();
+        fd.append('action',     'get_prescription_status');
+        fd.append('request_id', requestId);
+
+        fetch('index.php?tab=map', { method:'POST', body:fd })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success && data.message) {
+                    clearInterval(timer); if (onDone) onDone();
+                    _prescStatus('❌ ' + data.message, 'error'); return;
+                }
+                if (data.status === 'done') {
+                    clearInterval(timer); if (onDone) onDone();
+                    _prescStatus('✅ ShapeFile gerado! Disponível no historial abaixo.', 'success');
+                    loadPrescriptionHistory(reportTerrainId);
+                } else if (data.status === 'error') {
+                    clearInterval(timer); if (onDone) onDone();
+                    _prescStatus('❌ ' + (data.message || 'Erro na geração.'), 'error');
+                }
+            })
+            .catch(() => {});
+    }, 3000);
+}
+
+/** Carrega e renderiza o historial de prescrições para o terreno. */
+function loadPrescriptionHistory(terrainId) {
+    const listEl = document.getElementById('presc-history-list');
+    if (!listEl) return;
+
+    if (!terrainId) {
+        listEl.innerHTML = '<div class="layer-empty">Selecione um terreno.</div>';
+        _setBadge('prescription', 0);
+        return;
+    }
+
+    const fd = new FormData();
+    fd.append('action',     'get_prescription_list');
+    fd.append('terrain_id', terrainId);
+
+    fetch('index.php?tab=map', { method:'POST', body:fd })
+        .then(r => r.json())
+        .then(data => {
+            const items = data.items || [];
+            _setBadge('prescription', items.length);
+            if (!items.length) {
+                listEl.innerHTML = '<div class="layer-empty">Nenhuma prescrição guardada.</div>';
+                return;
+            }
+            listEl.innerHTML = items.map(it => {
+                const dt = new Date(it.created_at).toLocaleDateString('pt-PT');
+                return `
+                <div class="zn-hist-row" style="display:flex;align-items:center;gap:6px;
+                      padding:6px 4px;border-bottom:1px solid #f8fafc;">
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-size:11px;font-weight:600;color:#374151;
+                                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+                             title="${_esc(it.name)}">${_esc(it.name)}</div>
+                        <div style="font-size:10px;color:#9ca3af;">${dt}</div>
+                    </div>
+                    <a href="api/prescription_download.php?id=${it.id}"
+                       target="_blank"
+                       style="padding:4px 8px;background:#059669;color:#fff;border:none;
+                              border-radius:5px;font-size:10px;font-weight:600;
+                              cursor:pointer;text-decoration:none;white-space:nowrap;">
+                        ⬇ ZIP
+                    </a>
+                    <button onclick="_deletePrescription(${it.id})"
+                            style="padding:4px 6px;background:#fee2e2;color:#dc2626;border:none;
+                                   border-radius:5px;font-size:10px;cursor:pointer;">
+                        🗑
+                    </button>
+                </div>`;
+            }).join('');
+        })
+        .catch(() => {
+            listEl.innerHTML = '<div class="layer-empty" style="color:#ef4444;">Erro de rede.</div>';
+        });
+}
+
+function _deletePrescription(id) {
+    if (!confirm('Eliminar esta prescrição?')) return;
+    const fd = new FormData();
+    fd.append('action', 'delete_prescription');
+    fd.append('id',     id);
+    fetch('index.php?tab=map', { method:'POST', body:fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) loadPrescriptionHistory(reportTerrainId);
+            else _prescStatus('❌ ' + (data.message || 'Erro ao eliminar.'), 'error');
+        })
+        .catch(() => {});
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

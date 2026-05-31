@@ -527,6 +527,140 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                     if (!$response['success']) $response['message'] = 'Zonagem não encontrada.';
                 } catch (PDOException $e2) { $response['message'] = $e2->getMessage(); }
                 break;
+
+            // ── Prescrição / ShapeFile VRA ─────────────────────────────────────
+
+            case 'generate_prescription':
+                $terrain_id    = intval($_POST['terrain_id']    ?? 0);
+                $zonation_id   = intval($_POST['zonation_id']   ?? 0);
+                $name          = trim($_POST['name']            ?? '');
+                $prescriptions = json_decode($_POST['prescriptions'] ?? '[]', true) ?: [];
+
+                if (!$terrain_id || !$zonation_id || !$name || empty($prescriptions)) {
+                    $response['message'] = 'Parâmetros em falta.';
+                    break;
+                }
+
+                // Verificar que a zonagem existe e pertence ao utilizador/terreno
+                $stZ = $pdo->prepare("SELECT id FROM zonation_results
+                                      WHERE id=? AND user_id=? AND terrain_id=? AND status='done'");
+                $stZ->execute([$zonation_id, $currentUser['id'], $terrain_id]);
+                if (!$stZ->fetch()) {
+                    $response['message'] = 'Zonagem não encontrada ou não concluída.';
+                    break;
+                }
+
+                // Auto-criar tabela
+                $pdo->exec("CREATE TABLE IF NOT EXISTS prescription_results (
+                    id               INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id          INT NOT NULL,
+                    terrain_id       INT NOT NULL,
+                    zonation_id      INT NOT NULL,
+                    request_id       VARCHAR(36) NULL,
+                    status           ENUM('pending','processing','done','error') NOT NULL DEFAULT 'pending',
+                    name             VARCHAR(200) NOT NULL,
+                    zone_prescriptions JSON NULL,
+                    shapefile_zip    MEDIUMBLOB NULL,
+                    error_msg        TEXT NULL,
+                    created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uidx_pr_req (request_id),
+                    INDEX idx_pr (user_id, terrain_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // Gerar UUID
+                $requestId = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+                    mt_rand(0,0xffff), mt_rand(0,0xffff), mt_rand(0,0xffff),
+                    mt_rand(0,0x0fff)|0x4000, mt_rand(0,0x3fff)|0x8000,
+                    mt_rand(0,0xffff), mt_rand(0,0xffff), mt_rand(0,0xffff));
+
+                $ins = $pdo->prepare("INSERT INTO prescription_results
+                    (user_id, terrain_id, zonation_id, request_id, status, name, zone_prescriptions)
+                    VALUES (?,?,?,?,?,?,?)");
+                $ins->execute([
+                    $currentUser['id'], $terrain_id, $zonation_id,
+                    $requestId, 'pending', $name, json_encode($prescriptions),
+                ]);
+                $newId = (int)$pdo->lastInsertId();
+
+                // Publicar via MQTT
+                $mqttError = null;
+                $prescTopic = defined('PRESCRIPTION_TOPIC') ? PRESCRIPTION_TOPIC : '/soilqi/prescription';
+                $siteUrl    = defined('SITE_URL') ? rtrim(SITE_URL, '/') : '';
+
+                if (defined('MQTT_HOST') && MQTT_HOST !== '' && MQTT_HOST !== '{{MQTT_HOST}}') {
+                    try {
+                        require_once __DIR__ . '/../lib/MqttPublisher.php';
+                        $mqtt = new MqttPublisher(
+                            MQTT_HOST,
+                            defined('MQTT_PORT') ? (int)MQTT_PORT : 1883,
+                            'soilqi_presc_' . substr($requestId, 0, 8),
+                            defined('MQTT_USER') ? MQTT_USER : '',
+                            defined('MQTT_PASS') ? MQTT_PASS : ''
+                        );
+                        $mqtt->publish($prescTopic, json_encode([
+                            'request_id'   => $requestId,
+                            'data_url'     => $siteUrl . '/api/prescription_data.php',
+                            'callback_url' => $siteUrl . '/api/prescription_result.php',
+                            'api_key'      => defined('RASTER_API_KEY') ? RASTER_API_KEY : '',
+                        ]), 1, false);
+                        $mqtt->disconnect();
+                    } catch (Throwable $mqttEx) {
+                        $mqttError = $mqttEx->getMessage();
+                    }
+                } else {
+                    $mqttError = 'MQTT não configurado.';
+                }
+
+                $response['success']    = true;
+                $response['id']         = $newId;
+                $response['request_id'] = $requestId;
+                $response['name']       = $name;
+                if ($mqttError) $response['mqtt_warning'] = $mqttError;
+                break;
+
+            case 'get_prescription_status':
+                $requestId = trim($_POST['request_id'] ?? '');
+                if (!$requestId) { $response['message'] = 'request_id em falta.'; break; }
+                try {
+                    $st = $pdo->prepare("SELECT id, status, error_msg, name
+                                         FROM prescription_results
+                                         WHERE request_id=? AND user_id=?");
+                    $st->execute([$requestId, $currentUser['id']]);
+                    $row = $st->fetch(PDO::FETCH_ASSOC);
+                    if (!$row) { $response['message'] = 'Pedido não encontrado.'; break; }
+                    $response['success'] = true;
+                    $response['status']  = $row['status'];
+                    $response['id']      = (int)$row['id'];
+                    $response['name']    = $row['name'];
+                    if ($row['status'] === 'error') {
+                        $response['message'] = $row['error_msg'] ?: 'Erro desconhecido.';
+                    }
+                } catch (PDOException $e2) { $response['message'] = $e2->getMessage(); }
+                break;
+
+            case 'get_prescription_list':
+                $terrain_id = intval($_POST['terrain_id'] ?? 0);
+                try {
+                    if ($terrain_id <= 0) { $response['success']=true; $response['items']=[]; break; }
+                    $st = $pdo->prepare("SELECT id, name, created_at, zonation_id
+                                         FROM prescription_results
+                                         WHERE user_id=? AND terrain_id=? AND status='done'
+                                         ORDER BY created_at DESC LIMIT 30");
+                    $st->execute([$currentUser['id'], $terrain_id]);
+                    $response['success'] = true;
+                    $response['items']   = $st->fetchAll(PDO::FETCH_ASSOC);
+                } catch (PDOException $e2) { $response['success']=true; $response['items']=[]; }
+                break;
+
+            case 'delete_prescription':
+                $id = intval($_POST['id'] ?? 0);
+                try {
+                    $st = $pdo->prepare("DELETE FROM prescription_results WHERE id=? AND user_id=?");
+                    $st->execute([$id, $currentUser['id']]);
+                    $response['success'] = ($st->rowCount() > 0);
+                    if (!$response['success']) $response['message'] = 'Prescrição não encontrada.';
+                } catch (PDOException $e2) { $response['message'] = $e2->getMessage(); }
+                break;
         }
     } catch (PDOException $e) {
         $response['message'] = 'Erro no sistema: ' . $e->getMessage();
@@ -818,6 +952,66 @@ if ($isLoggedIn) {
                     </div>
 
                 </div><!-- #lg-zonation -->
+            </div>
+
+            <!-- 📋 Prescrição / ShapeFile VRA ─────────────────────────────── -->
+            <div class="layer-group">
+                <div class="layer-group-hdr" onclick="toggleLayerGroup('prescription')">
+                    <span>📋 Prescrição / ShapeFile</span>
+                    <span style="display:flex;align-items:center;gap:6px;">
+                        <span id="prescription-badge" class="layer-badge">0</span>
+                        <span id="prescription-arrow">▶</span>
+                    </span>
+                </div>
+                <div id="lg-prescription" class="layer-group-body" style="display:none;">
+
+                    <!-- Zonagem base -->
+                    <div style="margin-bottom:8px;">
+                        <label class="zn-lbl">Zonagem base</label>
+                        <select id="presc-zonation-select"
+                                onchange="onPrescZonationChange(this.value)"
+                                style="width:100%;padding:6px 8px;border:1.5px solid #e5e7eb;
+                                       border-radius:6px;font-size:12px;margin-top:3px;background:#fff;">
+                            <option value="">— Selecione uma zonagem —</option>
+                        </select>
+                    </div>
+
+                    <!-- Nome -->
+                    <div style="margin-bottom:8px;">
+                        <label class="zn-lbl">Nome da prescrição</label>
+                        <input type="text" id="presc-name"
+                               placeholder="Ex: Fertilização Azoto Maio 2026"
+                               style="width:100%;padding:6px 8px;border:1.5px solid #e5e7eb;
+                                      border-radius:6px;font-size:12px;margin-top:3px;
+                                      box-sizing:border-box;">
+                    </div>
+
+                    <!-- Tabela de prescrições por zona (renderizada por JS) -->
+                    <div id="presc-zone-inputs" style="margin-bottom:8px;"></div>
+
+                    <!-- Botão gerar -->
+                    <button id="presc-generate-btn" onclick="generatePrescription()"
+                            style="width:100%;padding:9px;border:none;cursor:pointer;
+                                   background:linear-gradient(135deg,#059669,#0d9488);
+                                   color:#fff;font-size:12px;font-weight:700;
+                                   border-radius:8px;transition:opacity .15s;">
+                        📋 Gerar ShapeFile
+                    </button>
+
+                    <!-- Feedback assíncrono -->
+                    <div id="presc-status" style="display:none;"></div>
+
+                    <!-- Historial de prescrições -->
+                    <div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:8px;">
+                        <div class="zn-lbl" style="margin-bottom:4px;">
+                            📥 Prescrições guardadas
+                        </div>
+                        <div id="presc-history-list">
+                            <div class="layer-empty">Nenhuma prescrição guardada.</div>
+                        </div>
+                    </div>
+
+                </div><!-- #lg-prescription -->
             </div>
 
         </div><!-- #report-layers -->
