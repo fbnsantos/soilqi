@@ -8,6 +8,9 @@
 
 let reportTerrainId = null;
 
+// Cache de rasters do terreno actual (partilhado com painel de zonagem)
+let _currentTerrainRasters = [];
+
 // id → L.imageOverlay  /  dados para PDF
 // Nomes com prefixo "rpt" para não colidir com variáveis homónimas de app.js
 const rptInterpOverlays = {};   // id → L.imageOverlay
@@ -69,6 +72,7 @@ function onReportTerrainChange(val) {
     _loadGeoJSONLayers(reportTerrainId);
     _loadRasterLayers(reportTerrainId);
     loadMapNotes(reportTerrainId);
+    loadZonationHistory(reportTerrainId);
 }
 
 // ── Grupos colapsáveis ────────────────────────────────────────────────────────
@@ -90,6 +94,7 @@ function setGlobalOpacity(val) {
     const opacity = parseInt(val) / 100;
     Object.values(rptInterpOverlays).forEach(ov => ov.setOpacity(opacity));
     Object.values(mapRasterOverlays).forEach(ov => ov.setOpacity(opacity));
+    Object.values(zonationOverlays).forEach(ov => ov.setOpacity(opacity));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -312,8 +317,10 @@ function _loadRasterLayers(terrainId) {
         .then(r => r.json())
         .then(data => {
             const items = data.rasters || [];
+            _currentTerrainRasters = items;
             _setBadge('raster', items.length);
             _renderRasterList(items);
+            _refreshZonationLayerList();
         })
         .catch(() => {
             if (listEl) listEl.innerHTML = '<div class="layer-empty" style="color:#ef4444;">Erro de rede.</div>';
@@ -627,6 +634,7 @@ function generateMapReport() {
         ...Object.entries(rptGeoJSONData).map(([, d]) => '🗺️ ' + d.name),
         ...Object.entries(mapRasterData).map(([, d]) =>
             (MAP_RASTER_LABELS[d.type] || d.type) + ' — ' + d.name),
+        ...Object.entries(zonationData).map(([, d]) => '🗺️ Zonagem — ' + d.name),
     ];
 
     if (allLayers.length === 0) {
@@ -725,6 +733,312 @@ function generateMapReport() {
     // ── Guardar ───────────────────────────────────────────────────────────────
     const safeName = terrainName.replace(/[^a-zA-Z0-9_\-]/g, '_').toLowerCase();
     doc.save('soilqi_relatorio_' + safeName + '_' + now.toISOString().slice(0, 10) + '.pdf');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAPA DE ZONAGEM
+// ─────────────────────────────────────────────────────────────────────────────
+
+const zonationOverlays = {};  // id → L.imageOverlay  (id negativo = gerado mas ainda não guardado)
+const zonationData     = {};  // id → {name, png, bounds, legend}
+
+// ── Painel de layers (checkboxes) ────────────────────────────────────────────
+
+function _refreshZonationLayerList() {
+    const listEl = document.getElementById('zonation-layer-list');
+    if (!listEl) return;
+    if (!_currentTerrainRasters.length) {
+        listEl.innerHTML = '<div class="layer-empty">Nenhum raster neste terreno.</div>';
+        return;
+    }
+    listEl.innerHTML = _currentTerrainRasters.map(r => {
+        const label = MAP_RASTER_LABELS[r.raster_type] || r.raster_type;
+        const dt    = r.date_from ? r.date_from + ' → ' + r.date_to : new Date(r.created_at).toLocaleDateString('pt-PT');
+        return `
+        <label style="display:flex;align-items:center;gap:8px;padding:5px 4px;
+                      border-bottom:1px solid #f8fafc;cursor:pointer;font-size:11px;">
+            <input type="checkbox" id="zn-layer-${r.id}" value="${r.id}"
+                   onchange="_onZonationLayerToggle()"
+                   style="width:14px;height:14px;accent-color:#667eea;flex-shrink:0;">
+            <span style="flex:1;min-width:0;">
+                <span style="font-weight:600;color:#1f2937;">${label}</span><br>
+                <span style="color:#9ca3af;font-size:10px;">${dt}</span>
+            </span>
+        </label>`;
+    }).join('');
+}
+
+function _onZonationLayerToggle() {
+    _updateWeightPanels();
+}
+
+function _getSelectedRasterIds() {
+    return [...document.querySelectorAll('#zonation-layer-list input[type=checkbox]:checked')]
+        .map(cb => parseInt(cb.value));
+}
+
+// ── Mudança de método ─────────────────────────────────────────────────────────
+
+function onZonationMethodChange(method) {
+    document.querySelectorAll('.zn-params').forEach(el => el.style.display = 'none');
+    const panel = document.getElementById('params-' + method);
+    if (panel) panel.style.display = '';
+    _updateWeightPanels();
+}
+
+// ── Painéis de pesos (Quantis / Índice Composto) ─────────────────────────────
+
+function _updateWeightPanels() {
+    const method  = document.getElementById('zonation-method')?.value || 'kmeans';
+    const ids     = _getSelectedRasterIds();
+    const needsWt = (method === 'quantiles' || method === 'weighted');
+
+    ['qt-weights-panel', 'wt-weights-panel'].forEach(panelId => {
+        const el = document.getElementById(panelId);
+        if (!el) return;
+        if (!needsWt || !ids.length) { el.innerHTML = ''; return; }
+
+        el.innerHTML = '<div class="zn-lbl" style="margin-bottom:4px;">Pesos por camada</div>' +
+            ids.map(id => {
+                const r     = _currentTerrainRasters.find(x => x.id == id);
+                const label = r ? (MAP_RASTER_LABELS[r.raster_type] || r.raster_type) : `Layer ${id}`;
+                const wid   = panelId + '-w-' + id;
+                const iid   = panelId + '-inv-' + id;
+                return `
+                <div class="zn-weight-row">
+                    <span title="${_esc(label)}">${label}</span>
+                    <input type="range" min="0" max="2" step="0.1" value="1"
+                           id="${wid}"
+                           oninput="document.getElementById('${wid}-v').textContent=parseFloat(this.value).toFixed(1)">
+                    <span class="zn-weight-val" id="${wid}-v">1.0</span>
+                    <label title="Inverter" style="display:flex;align-items:center;gap:3px;cursor:pointer;color:#9ca3af;font-size:10px;">
+                        <input type="checkbox" id="${iid}" style="width:12px;height:12px;accent-color:#667eea;"> inv
+                    </label>
+                </div>`;
+            }).join('');
+    });
+}
+
+// ── Gerar zonagem ─────────────────────────────────────────────────────────────
+
+function generateZonation() {
+    if (!reportTerrainId) { _showAlert('Selecione um terreno primeiro.', 'warning'); return; }
+
+    const ids = _getSelectedRasterIds();
+    if (!ids.length) { _showAlert('Selecione pelo menos uma camada de entrada.', 'warning'); return; }
+
+    const method = document.getElementById('zonation-method')?.value || 'kmeans';
+
+    // Construir params específicos do método
+    const g = id => document.getElementById(id);
+    let params = {};
+
+    if (method === 'kmeans') {
+        params = {
+            n_clusters: parseInt(g('km-n_clusters')?.value || 4),
+            n_init:     parseInt(g('km-n_init')?.value     || 10),
+            max_iter:   parseInt(g('km-max_iter')?.value   || 300),
+        };
+    } else if (method === 'fcm') {
+        params = {
+            n_clusters: parseInt(g('fcm-n_clusters')?.value || 4),
+            m:          parseFloat(g('fcm-m')?.value         || 2.0),
+            maxiter:    parseInt(g('fcm-maxiter')?.value     || 1000),
+            error:      parseFloat(g('fcm-error')?.value     || 0.005),
+        };
+    } else if (method === 'gmm') {
+        params = {
+            n_components:    parseInt(g('gmm-n_components')?.value   || 4),
+            covariance_type: g('gmm-covariance_type')?.value         || 'full',
+            n_init:          parseInt(g('gmm-n_init')?.value          || 3),
+        };
+    } else if (method === 'quantiles') {
+        params = { n_zones: parseInt(g('qt-n_zones')?.value || 3) };
+        params.weights = ids.map(id => {
+            const v = document.getElementById('qt-weights-panel-w-' + id);
+            return v ? parseFloat(v.value) : 1.0;
+        });
+        params.invert = ids.map(id => {
+            const v = document.getElementById('qt-weights-panel-inv-' + id);
+            return v ? v.checked : false;
+        });
+    } else if (method === 'weighted') {
+        params = {
+            n_zones:     parseInt(g('wt-n_zones')?.value      || 3),
+            classify_by: g('wt-classify_by')?.value            || 'quantile',
+        };
+        params.weights = ids.map(id => {
+            const v = document.getElementById('wt-weights-panel-w-' + id);
+            return v ? parseFloat(v.value) : 1.0;
+        });
+        params.invert = ids.map(id => {
+            const v = document.getElementById('wt-weights-panel-inv-' + id);
+            return v ? v.checked : false;
+        });
+    }
+
+    // Feedback visual
+    const btn = document.getElementById('zonation-generate-btn');
+    if (btn) { btn.textContent = '⏳ A processar…'; btn.disabled = true; btn.style.opacity = '0.7'; }
+
+    const fd = new FormData();
+    fd.append('action',     'generate_zonation');
+    fd.append('terrain_id', reportTerrainId);
+    fd.append('method',     method);
+    fd.append('params',     JSON.stringify(params));
+    fd.append('raster_ids', JSON.stringify(ids));
+
+    fetch('index.php?tab=map', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (btn) { btn.textContent = '🗺️ Gerar Zonagem'; btn.disabled = false; btn.style.opacity = '1'; }
+            if (!data.success) {
+                _showAlert('❌ ' + (data.message || 'Erro na zonagem.'), 'error');
+                return;
+            }
+            // Mostrar no mapa
+            _showZonationOnMap(data.id, data.name, data.png, data.bounds, data.legend);
+            // Actualizar historial
+            loadZonationHistory(reportTerrainId);
+            _showAlert('✅ Zonagem gerada!', 'success');
+        })
+        .catch(err => {
+            if (btn) { btn.textContent = '🗺️ Gerar Zonagem'; btn.disabled = false; btn.style.opacity = '1'; }
+            _showAlert('Erro de rede: ' + err.message, 'error');
+        });
+}
+
+// ── Overlay no mapa ───────────────────────────────────────────────────────────
+
+function _showZonationOnMap(id, name, png, bounds, legend) {
+    // Remover overlay anterior com o mesmo id (se existir)
+    if (zonationOverlays[id]) {
+        map.removeLayer(zonationOverlays[id]);
+        delete zonationOverlays[id];
+    }
+    const opacity = _globalOpacity();
+    const llBounds = [[bounds.min_lat, bounds.min_lng], [bounds.max_lat, bounds.max_lng]];
+    const ov = L.imageOverlay(png, llBounds, { opacity, zIndex: 450 }).addTo(map);
+    zonationOverlays[id] = ov;
+    zonationData[id]     = { name, png, bounds: llBounds, legend };
+    map.fitBounds(llBounds, { padding: [30, 30] });
+    _renderZonationLegend(legend);
+}
+
+function _renderZonationLegend(legend) {
+    const el = document.getElementById('zonation-legend');
+    if (!el || !legend?.length) return;
+    el.style.display = '';
+    el.innerHTML = '<div class="zn-lbl" style="margin-bottom:4px;">Legenda</div>' +
+        legend.map(z => `
+        <div class="zn-legend-row">
+            <div class="zn-legend-swatch" style="background:${z.color};"></div>
+            <span>${_esc(z.label)}</span>
+            <span class="zn-legend-pct">${z.area_pct}%</span>
+        </div>`).join('');
+}
+
+// ── Historial ─────────────────────────────────────────────────────────────────
+
+function loadZonationHistory(terrainId) {
+    const listEl = document.getElementById('zonation-history-list');
+    if (!listEl) return;
+
+    const fd = new FormData();
+    fd.append('action',     'get_zonation_list');
+    fd.append('terrain_id', terrainId || '');
+
+    fetch('index.php?tab=map', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            const items = data.items || [];
+            _setBadge('zonation', items.length);
+            _renderZonationHistory(items);
+        })
+        .catch(() => {});
+}
+
+function _renderZonationHistory(items) {
+    const listEl = document.getElementById('zonation-history-list');
+    if (!listEl) return;
+    if (!items.length) {
+        listEl.innerHTML = '<div class="layer-empty">Nenhuma zonagem guardada.</div>';
+        return;
+    }
+    listEl.innerHTML = items.map(it => {
+        const on = !!zonationOverlays[it.id];
+        const dt = new Date(it.created_at).toLocaleString('pt-PT');
+        return `
+        <div class="zn-hist-row" id="zn-hist-${it.id}">
+            <div class="zn-hist-info">
+                <div class="zn-hist-name" title="${_esc(it.name)}">${_esc(it.name)}</div>
+                <div class="zn-hist-date">${dt}</div>
+            </div>
+            <button id="zn-hist-btn-${it.id}"
+                    onclick="toggleZonationOnMap(${it.id})"
+                    class="layer-toggle-btn ${on ? 'layer-toggle-on' : 'layer-toggle-off'}"
+                    style="font-size:10px;padding:3px 7px;">
+                ${on ? '✅ ON' : '👁 Ver'}
+            </button>
+            <button onclick="_deleteZonation(${it.id})"
+                    class="layer-toggle-btn layer-toggle-off"
+                    style="font-size:10px;padding:3px 6px;color:#ef4444;background:#fff0f0;">🗑</button>
+        </div>`;
+    }).join('');
+}
+
+function toggleZonationOnMap(id) {
+    if (zonationOverlays[id]) {
+        map.removeLayer(zonationOverlays[id]);
+        delete zonationOverlays[id];
+        delete zonationData[id];
+        const btn = document.getElementById('zn-hist-btn-' + id);
+        if (btn) { btn.textContent = '👁 Ver'; btn.className = 'layer-toggle-btn layer-toggle-off'; }
+        return;
+    }
+    // Carregar PNG do servidor
+    const btn = document.getElementById('zn-hist-btn-' + id);
+    if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
+
+    const fd = new FormData();
+    fd.append('action', 'get_zonation_png');
+    fd.append('id', id);
+
+    fetch('index.php?tab=map', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (btn) btn.disabled = false;
+            if (!data.success) {
+                _showAlert('❌ ' + (data.message || 'Erro.'), 'error');
+                if (btn) { btn.textContent = '👁 Ver'; btn.className = 'layer-toggle-btn layer-toggle-off'; }
+                return;
+            }
+            const bounds = { min_lat: data.min_lat, max_lat: data.max_lat,
+                             min_lng: data.min_lng, max_lng: data.max_lng };
+            _showZonationOnMap(id, data.name, data.png, bounds, data.legend);
+            if (btn) { btn.textContent = '✅ ON'; btn.className = 'layer-toggle-btn layer-toggle-on'; }
+        })
+        .catch(() => {
+            if (btn) { btn.textContent = '👁 Ver'; btn.disabled = false; btn.className = 'layer-toggle-btn layer-toggle-off'; }
+        });
+}
+
+function _deleteZonation(id) {
+    if (!confirm('Eliminar esta zonagem?')) return;
+    const fd = new FormData();
+    fd.append('action', 'delete_zonation');
+    fd.append('id', id);
+    fetch('index.php?tab=map', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                if (zonationOverlays[id]) { map.removeLayer(zonationOverlays[id]); delete zonationOverlays[id]; }
+                delete zonationData[id];
+                loadZonationHistory(reportTerrainId);
+            } else {
+                _showAlert('❌ ' + (data.message || 'Erro.'), 'error');
+            }
+        });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

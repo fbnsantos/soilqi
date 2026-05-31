@@ -287,6 +287,177 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 $response['success'] = ($st->rowCount() > 0);
                 if (!$response['success']) $response['message'] = 'Nota não encontrada.';
                 break;
+
+            // ── Zonagem ────────────────────────────────────────────────────────
+
+            case 'generate_zonation':
+                $terrain_id = intval($_POST['terrain_id'] ?? 0);
+                $method     = trim($_POST['method'] ?? '');
+                $params     = json_decode(trim($_POST['params'] ?? '{}'), true) ?: [];
+                $raster_ids = json_decode(trim($_POST['raster_ids'] ?? '[]'), true) ?: [];
+
+                $allowed_methods = ['quantiles','weighted','kmeans','fcm','gmm'];
+                if (!$terrain_id || !in_array($method, $allowed_methods, true) || empty($raster_ids)) {
+                    $response['message'] = 'Parâmetros inválidos.';
+                    break;
+                }
+
+                // Buscar PNGs das camadas seleccionadas
+                $layers = [];
+                foreach ($raster_ids as $rid) {
+                    $rid = intval($rid);
+                    $st  = $pdo->prepare("
+                        SELECT id, png_data, min_lat, max_lat, min_lng, max_lng, name, raster_type
+                        FROM raster_results
+                        WHERE id=? AND user_id=? AND terrain_id=? AND status='done'
+                    ");
+                    $st->execute([$rid, $currentUser['id'], $terrain_id]);
+                    $row = $st->fetch(PDO::FETCH_ASSOC);
+                    if ($row && $row['png_data']) {
+                        $layers[] = [
+                            'id'     => (int)$rid,
+                            'name'   => $row['name'],
+                            'type'   => $row['raster_type'],
+                            'png'    => base64_encode($row['png_data']),
+                            'bounds' => [
+                                'min_lat' => (float)$row['min_lat'],
+                                'max_lat' => (float)$row['max_lat'],
+                                'min_lng' => (float)$row['min_lng'],
+                                'max_lng' => (float)$row['max_lng'],
+                            ],
+                        ];
+                    }
+                }
+                if (empty($layers)) {
+                    $response['message'] = 'Nenhuma camada válida encontrada para este terreno.';
+                    break;
+                }
+
+                // Localizar Python da venv
+                $venvPy = realpath(__DIR__ . '/../python/venv/bin/python');
+                $python = ($venvPy && is_executable($venvPy)) ? $venvPy : 'python3';
+                $script = realpath(__DIR__ . '/../python/Zonation.py');
+                if (!$script) { $response['message'] = 'Zonation.py não encontrado.'; break; }
+
+                $input_json = json_encode([
+                    'method' => $method,
+                    'params' => $params,
+                    'layers' => $layers,
+                ]);
+
+                set_time_limit(90);
+                $desc = [0 => ['pipe','r'], 1 => ['pipe','w'], 2 => ['pipe','w']];
+                $proc = proc_open("$python $script", $desc, $pipes);
+                if (!is_resource($proc)) { $response['message'] = 'Falha ao iniciar Python.'; break; }
+                fwrite($pipes[0], $input_json);
+                fclose($pipes[0]);
+                $stdout = stream_get_contents($pipes[1]);
+                $stderr = stream_get_contents($pipes[2]);
+                fclose($pipes[1]);
+                fclose($pipes[2]);
+                proc_close($proc);
+
+                $result = json_decode($stdout, true);
+                if (!$result || !($result['success'] ?? false)) {
+                    $msg = $result['message'] ?? '';
+                    if (!$msg && $stderr) $msg = substr(strip_tags($stderr), 0, 300);
+                    $response['message'] = $msg ?: 'Erro desconhecido na zonagem.';
+                    break;
+                }
+
+                // Auto-criar tabela e guardar resultado
+                $pdo->exec("CREATE TABLE IF NOT EXISTS zonation_results (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL, terrain_id INT NOT NULL,
+                    method VARCHAR(20) NOT NULL,
+                    params JSON NULL, name VARCHAR(200) NOT NULL,
+                    png_data MEDIUMBLOB NOT NULL,
+                    min_lat DOUBLE, max_lat DOUBLE, min_lng DOUBLE, max_lng DOUBLE,
+                    legend JSON NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_zr (user_id, terrain_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $method_labels = [
+                    'quantiles' => 'Quantis',
+                    'weighted'  => 'Índice Composto',
+                    'kmeans'    => 'K-means',
+                    'fcm'       => 'FCM',
+                    'gmm'       => 'GMM',
+                ];
+                $name    = ($method_labels[$method] ?? $method) . ' — ' . date('Y-m-d H:i');
+                $png_bin = base64_decode($result['png']);
+                $b       = $result['bounds'];
+
+                $ins = $pdo->prepare("INSERT INTO zonation_results
+                    (user_id, terrain_id, method, params, name, png_data,
+                     min_lat, max_lat, min_lng, max_lng, legend)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?)");
+                $ins->execute([
+                    $currentUser['id'], $terrain_id, $method,
+                    json_encode($params), $name, $png_bin,
+                    (float)$b['min_lat'], (float)$b['max_lat'],
+                    (float)$b['min_lng'], (float)$b['max_lng'],
+                    json_encode($result['legend'] ?? []),
+                ]);
+
+                $response['success'] = true;
+                $response['id']      = (int)$pdo->lastInsertId();
+                $response['name']    = $name;
+                $response['png']     = 'data:image/png;base64,' . $result['png'];
+                $response['bounds']  = $b;
+                $response['legend']  = $result['legend'] ?? [];
+                break;
+
+            case 'get_zonation_list':
+                $terrain_id = intval($_POST['terrain_id'] ?? 0);
+                try {
+                    $st = $terrain_id > 0
+                        ? $pdo->prepare("SELECT id, name, method, legend, created_at,
+                                                min_lat, max_lat, min_lng, max_lng
+                                         FROM zonation_results
+                                         WHERE user_id=? AND terrain_id=?
+                                         ORDER BY created_at DESC LIMIT 20")
+                        : null;
+                    if ($st) { $st->execute([$currentUser['id'], $terrain_id]); }
+                    else     { $response['success'] = true; $response['items'] = []; break; }
+                    $response['success'] = true;
+                    $response['items']   = $st->fetchAll(PDO::FETCH_ASSOC);
+                } catch (PDOException $e2) {
+                    $response['success'] = true; $response['items'] = [];
+                }
+                break;
+
+            case 'get_zonation_png':
+                $id = intval($_POST['id'] ?? 0);
+                if ($id <= 0) { $response['message'] = 'ID inválido.'; break; }
+                try {
+                    $st = $pdo->prepare("SELECT png_data, min_lat, max_lat, min_lng, max_lng,
+                                                name, method, legend
+                                         FROM zonation_results WHERE id=? AND user_id=?");
+                    $st->execute([$id, $currentUser['id']]);
+                    $row = $st->fetch(PDO::FETCH_ASSOC);
+                    if (!$row) { $response['message'] = 'Zonagem não encontrada.'; break; }
+                    $response['success'] = true;
+                    $response['png']     = 'data:image/png;base64,' . base64_encode($row['png_data']);
+                    $response['min_lat'] = (float)$row['min_lat'];
+                    $response['max_lat'] = (float)$row['max_lat'];
+                    $response['min_lng'] = (float)$row['min_lng'];
+                    $response['max_lng'] = (float)$row['max_lng'];
+                    $response['name']    = $row['name'];
+                    $response['legend']  = json_decode($row['legend'] ?? '[]', true) ?: [];
+                } catch (PDOException $e2) { $response['message'] = $e2->getMessage(); }
+                break;
+
+            case 'delete_zonation':
+                $id = intval($_POST['id'] ?? 0);
+                try {
+                    $st = $pdo->prepare("DELETE FROM zonation_results WHERE id=? AND user_id=?");
+                    $st->execute([$id, $currentUser['id']]);
+                    $response['success'] = ($st->rowCount() > 0);
+                    if (!$response['success']) $response['message'] = 'Zonagem não encontrada.';
+                } catch (PDOException $e2) { $response['message'] = $e2->getMessage(); }
+                break;
         }
     } catch (PDOException $e) {
         $response['message'] = 'Erro no sistema: ' . $e->getMessage();
@@ -444,6 +615,139 @@ if ($isLoggedIn) {
                 </div>
             </div>
 
+            <!-- 🗺️ Mapa de Zonagem -->
+            <div class="layer-group">
+                <div class="layer-group-hdr" onclick="toggleLayerGroup('zonation')">
+                    <span>🗺️ Mapa de Zonagem</span>
+                    <span style="display:flex;align-items:center;gap:6px;">
+                        <span id="zonation-badge" class="layer-badge">0</span>
+                        <span id="zonation-arrow">▶</span>
+                    </span>
+                </div>
+                <div id="lg-zonation" class="layer-group-body" style="display:none;">
+
+                    <!-- Método -->
+                    <div style="margin-bottom:10px;">
+                        <label class="zn-lbl">Método de classificação</label>
+                        <select id="zonation-method" onchange="onZonationMethodChange(this.value)"
+                                style="width:100%;padding:6px 8px;border:1.5px solid #e5e7eb;
+                                       border-radius:6px;font-size:12px;margin-top:3px;background:#fff;">
+                            <option value="kmeans">K-means</option>
+                            <option value="fcm">Fuzzy C-means (FCM)</option>
+                            <option value="gmm">Gaussian Mixture (GMM)</option>
+                            <option value="quantiles">Quantis</option>
+                            <option value="weighted">Índice Composto Ponderado</option>
+                        </select>
+                    </div>
+
+                    <!-- Camadas de entrada -->
+                    <div style="margin-bottom:10px;">
+                        <label class="zn-lbl">Camadas de entrada
+                            <span style="font-weight:400;color:#9ca3af;">(selecione ≥1)</span>
+                        </label>
+                        <div id="zonation-layer-list"
+                             style="margin-top:4px;max-height:170px;overflow-y:auto;
+                                    border:1px solid #f1f5f9;border-radius:6px;padding:4px;">
+                            <div class="layer-empty">Selecione um terreno primeiro.</div>
+                        </div>
+                    </div>
+
+                    <!-- ── Parâmetros K-means ── -->
+                    <div id="params-kmeans" class="zn-params">
+                        <label class="zn-lbl">Parâmetros K-means</label>
+                        <div class="zn-grid3">
+                            <div><label class="zn-sub">Nº Zonas (K)</label>
+                                <input type="number" id="km-n_clusters" value="4" min="2" max="8" class="zn-inp"></div>
+                            <div><label class="zn-sub">Nº Inits</label>
+                                <input type="number" id="km-n_init" value="10" min="1" max="20" class="zn-inp"></div>
+                            <div><label class="zn-sub">Max Iter.</label>
+                                <input type="number" id="km-max_iter" value="300" min="50" max="500" class="zn-inp"></div>
+                        </div>
+                    </div>
+
+                    <!-- ── Parâmetros FCM ── -->
+                    <div id="params-fcm" class="zn-params" style="display:none;">
+                        <label class="zn-lbl">Parâmetros FCM</label>
+                        <div class="zn-grid3">
+                            <div><label class="zn-sub">Nº Zonas (C)</label>
+                                <input type="number" id="fcm-n_clusters" value="4" min="2" max="8" class="zn-inp"></div>
+                            <div><label class="zn-sub">Fuzziness (m)</label>
+                                <input type="number" id="fcm-m" value="2.0" min="1.1" max="5.0" step="0.1" class="zn-inp"></div>
+                            <div><label class="zn-sub">Max Iter.</label>
+                                <input type="number" id="fcm-maxiter" value="1000" min="50" max="2000" class="zn-inp"></div>
+                        </div>
+                        <div style="margin-top:5px;display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+                            <div><label class="zn-sub">Erro (conv.)</label>
+                                <input type="number" id="fcm-error" value="0.005" min="0.0001" max="0.1" step="0.001" class="zn-inp"></div>
+                        </div>
+                    </div>
+
+                    <!-- ── Parâmetros GMM ── -->
+                    <div id="params-gmm" class="zn-params" style="display:none;">
+                        <label class="zn-lbl">Parâmetros GMM</label>
+                        <div class="zn-grid3">
+                            <div><label class="zn-sub">Nº Comp.</label>
+                                <input type="number" id="gmm-n_components" value="4" min="2" max="8" class="zn-inp"></div>
+                            <div><label class="zn-sub">Covariância</label>
+                                <select id="gmm-covariance_type" class="zn-inp" style="padding:4px 5px;">
+                                    <option value="full">Full</option>
+                                    <option value="tied">Tied</option>
+                                    <option value="diag">Diag</option>
+                                    <option value="spherical">Spherical</option>
+                                </select></div>
+                            <div><label class="zn-sub">Nº Inits</label>
+                                <input type="number" id="gmm-n_init" value="3" min="1" max="10" class="zn-inp"></div>
+                        </div>
+                    </div>
+
+                    <!-- ── Parâmetros Quantis ── -->
+                    <div id="params-quantiles" class="zn-params" style="display:none;">
+                        <label class="zn-lbl">Parâmetros Quantis</label>
+                        <div style="margin-top:4px;display:grid;grid-template-columns:1fr;gap:6px;">
+                            <div><label class="zn-sub">Nº Zonas</label>
+                                <input type="number" id="qt-n_zones" value="3" min="2" max="8" class="zn-inp"></div>
+                        </div>
+                        <div id="qt-weights-panel" style="margin-top:8px;"></div>
+                    </div>
+
+                    <!-- ── Parâmetros Índice Composto ── -->
+                    <div id="params-weighted" class="zn-params" style="display:none;">
+                        <label class="zn-lbl">Parâmetros Índice Composto</label>
+                        <div style="margin-top:4px;display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+                            <div><label class="zn-sub">Nº Zonas</label>
+                                <input type="number" id="wt-n_zones" value="3" min="2" max="8" class="zn-inp"></div>
+                            <div><label class="zn-sub">Classificar por</label>
+                                <select id="wt-classify_by" class="zn-inp" style="padding:4px 5px;">
+                                    <option value="quantile">Quantil</option>
+                                    <option value="equal">Intervalo igual</option>
+                                </select></div>
+                        </div>
+                        <div id="wt-weights-panel" style="margin-top:8px;"></div>
+                    </div>
+
+                    <!-- Botão gerar -->
+                    <button id="zonation-generate-btn" onclick="generateZonation()"
+                            style="width:100%;margin-top:10px;padding:9px;border:none;cursor:pointer;
+                                   background:linear-gradient(135deg,#667eea,#764ba2);
+                                   color:#fff;font-size:12px;font-weight:700;border-radius:8px;
+                                   transition:opacity .15s;">
+                        🗺️ Gerar Zonagem
+                    </button>
+
+                    <!-- Legenda do resultado -->
+                    <div id="zonation-legend" style="display:none;margin-top:10px;"></div>
+
+                    <!-- Historial -->
+                    <div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:8px;">
+                        <div class="zn-lbl" style="margin-bottom:4px;">📚 Historial</div>
+                        <div id="zonation-history-list">
+                            <div class="layer-empty">Nenhuma zonagem guardada.</div>
+                        </div>
+                    </div>
+
+                </div><!-- #lg-zonation -->
+            </div>
+
         </div><!-- #report-layers -->
     </div><!-- .sidebar -->
     <?php endif; ?>
@@ -544,4 +848,41 @@ if ($isLoggedIn) {
     transition: color .15s;
 }
 .note-delete-btn:hover { color: #ef4444; }
+
+/* ── Zonagem ── */
+.zn-lbl  { font-size:11px; font-weight:600; color:#6b7280; display:block; }
+.zn-sub  { font-size:10px; color:#9ca3af; display:block; margin-bottom:2px; }
+.zn-inp  { width:100%; padding:5px 6px; border:1px solid #e5e7eb; border-radius:5px;
+           font-size:12px; box-sizing:border-box; }
+.zn-params { margin-bottom:10px; }
+.zn-grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-top:4px; }
+
+/* Linha de peso por layer */
+.zn-weight-row {
+    display:flex; align-items:center; gap:6px; padding:5px 0;
+    border-bottom:1px solid #f8fafc; font-size:11px;
+}
+.zn-weight-row span { flex:1; color:#374151; white-space:nowrap;
+                      overflow:hidden; text-overflow:ellipsis; }
+.zn-weight-row input[type=range] { width:70px; accent-color:#667eea; height:3px; cursor:pointer; }
+.zn-weight-val { min-width:24px; text-align:right; color:#667eea; font-weight:600; font-size:11px; }
+
+/* Legenda de zonas */
+.zn-legend-row {
+    display:flex; align-items:center; gap:7px; padding:4px 2px;
+    font-size:11px; color:#374151;
+}
+.zn-legend-swatch { width:14px; height:14px; border-radius:3px; flex-shrink:0; }
+.zn-legend-pct { margin-left:auto; color:#9ca3af; font-size:10px; }
+
+/* Linha de historial */
+.zn-hist-row {
+    display:flex; align-items:center; gap:6px; padding:5px 6px;
+    border-radius:6px; font-size:11px; background:#fff; border:1px solid #f1f5f9;
+    margin-bottom:4px;
+}
+.zn-hist-info { flex:1; min-width:0; }
+.zn-hist-name { font-weight:600; color:#1f2937; white-space:nowrap;
+                overflow:hidden; text-overflow:ellipsis; }
+.zn-hist-date { font-size:10px; color:#9ca3af; }
 </style>
