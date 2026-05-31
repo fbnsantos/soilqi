@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# install_service.sh — Instala o Sentinel.py como serviço systemd
+# install_service.sh — Instala Sentinel.py e Zonation.py como serviços systemd
 # Uso: sudo bash install_service.sh [--user UTILIZADOR]
 #
 # Nota: a parte do serviço systemd requer um VPS/servidor dedicado com systemd.
@@ -10,8 +10,8 @@
 set -uo pipefail   # sem -e para não sair silenciosamente em erros systemd
 
 # ── Configuração ──────────────────────────────────────────────────────────────
-SERVICE_NAME="sentinel"
-SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+SENTINEL_SERVICE="sentinel"
+ZONATION_SERVICE="zonation"
 
 # Detectar utilizador: argumento --user, ou SUDO_USER, ou utilizador actual
 TARGET_USER="${SUDO_USER:-$USER}"
@@ -26,12 +26,13 @@ done
 
 TARGET_HOME=$(eval echo "~$TARGET_USER")
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PYTHON_SCRIPT="$SCRIPT_DIR/Sentinel.py"
+SENTINEL_SCRIPT="$SCRIPT_DIR/Sentinel.py"
+ZONATION_SCRIPT="$SCRIPT_DIR/Zonation.py"
 REQUIREMENTS="$SCRIPT_DIR/requirements.txt"
 
 # ── Validações ────────────────────────────────────────────────────────────────
 if [[ "$DEPS_ONLY" == false && $EUID -ne 0 ]]; then
-    echo "❌  Para instalar o serviço systemd este script precisa de sudo."
+    echo "❌  Para instalar os serviços systemd este script precisa de sudo."
     echo "    Uso: sudo bash install_service.sh"
     echo ""
     echo "    Para instalar apenas as dependências Python (sem systemd):"
@@ -39,19 +40,24 @@ if [[ "$DEPS_ONLY" == false && $EUID -ne 0 ]]; then
     exit 1
 fi
 
-if [[ ! -f "$PYTHON_SCRIPT" ]]; then
-    echo "❌  Sentinel.py não encontrado em: $PYTHON_SCRIPT"
+if [[ ! -f "$SENTINEL_SCRIPT" && ! -f "$ZONATION_SCRIPT" ]]; then
+    echo "❌  Nenhum script Python encontrado em: $SCRIPT_DIR"
+    echo "    (Sentinel.py e/ou Zonation.py devem estar presentes)"
     exit 1
 fi
 
 echo ""
-echo "══════════════════════════════════════════════════"
-echo "  Instalador do Sentinel.py como serviço systemd"
-echo "══════════════════════════════════════════════════"
+echo "══════════════════════════════════════════════════════════"
+echo "  Instalador SoilQI — serviços systemd"
+echo "══════════════════════════════════════════════════════════"
 echo "  Utilizador : $TARGET_USER"
 echo "  Home       : $TARGET_HOME"
-echo "  Script     : $PYTHON_SCRIPT"
-echo "══════════════════════════════════════════════════"
+echo "  Diretório  : $SCRIPT_DIR"
+[[ -f "$SENTINEL_SCRIPT" ]] && echo "  Sentinel   : $SENTINEL_SCRIPT  ✅" \
+                             || echo "  Sentinel   : não encontrado    ⚠️"
+[[ -f "$ZONATION_SCRIPT" ]] && echo "  Zonation   : $ZONATION_SCRIPT  ✅" \
+                             || echo "  Zonation   : não encontrado    ⚠️"
+echo "══════════════════════════════════════════════════════════"
 echo ""
 
 # ── Detectar Python 3 ─────────────────────────────────────────────────────────
@@ -75,7 +81,6 @@ echo "✅  Python encontrado: $PYTHON_BIN ($PYTHON_VERSION)"
 VENV_DIR="$SCRIPT_DIR/venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
 
-# Verificar se o venv existe E está válido (python + pip funcionais)
 VENV_OK=false
 if [[ -x "$VENV_PYTHON" ]] && "$VENV_PYTHON" -m pip --version &>/dev/null; then
     VENV_OK=true
@@ -88,18 +93,20 @@ if [[ "$VENV_OK" == false ]]; then
     else
         echo "⚙️   A criar ambiente virtual em $VENV_DIR …"
     fi
-    sudo -u "$TARGET_USER" "$PYTHON_BIN" -m venv "$VENV_DIR"
+    if [[ "$DEPS_ONLY" == true ]]; then
+        "$PYTHON_BIN" -m venv "$VENV_DIR"
+    else
+        sudo -u "$TARGET_USER" "$PYTHON_BIN" -m venv "$VENV_DIR"
+    fi
     echo "✅  Ambiente virtual criado."
 else
     echo "✅  Ambiente virtual válido: $VENV_DIR"
 fi
 
-# Usar sempre 'python -m pip' — mais fiável que o binário pip
 # ── Instalar dependências ──────────────────────────────────────────────────────
 if [[ -f "$REQUIREMENTS" ]]; then
     echo "📦  A instalar dependências de $REQUIREMENTS …"
     if [[ "$DEPS_ONLY" == true ]]; then
-        # Sem sudo em hosting partilhado
         "$VENV_PYTHON" -m pip install --upgrade pip -q
         "$VENV_PYTHON" -m pip install -r "$REQUIREMENTS" -q
     else
@@ -116,16 +123,26 @@ if [[ "$DEPS_ONLY" == true ]]; then
     echo ""
     echo "✅  Dependências Python instaladas com sucesso!"
     echo "   Venv: $VENV_DIR"
-    echo "   Para instalar o serviço systemd: sudo bash install_service.sh"
+    echo "   Para instalar os serviços systemd: sudo bash install_service.sh"
     exit 0
 fi
 
-# ── Criar ficheiro de serviço systemd ─────────────────────────────────────────
-echo "⚙️   A criar $SERVICE_FILE …"
+# ── Função para criar um ficheiro de serviço systemd ─────────────────────────
+create_service() {
+    local SERVICE_NAME="$1"
+    local PYTHON_SCRIPT="$2"
+    local DESCRIPTION="$3"
+    local SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
-cat > "$SERVICE_FILE" <<EOF
+    echo ""
+    echo "──────────────────────────────────────────────────────────"
+    echo "  Serviço: $SERVICE_NAME"
+    echo "──────────────────────────────────────────────────────────"
+    echo "⚙️   A criar $SERVICE_FILE …"
+
+    cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=SoilQI Sentinel.py — Geração de rasters de satélite via MQTT
+Description=$DESCRIPTION
 Documentation=https://soilqi.com
 After=network-online.target
 Wants=network-online.target
@@ -150,56 +167,78 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=$SERVICE_NAME
 
-# Variáveis de ambiente (opcional — as credenciais são lidas do módulo soilqi)
+# Variáveis de ambiente
 Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-echo "✅  Ficheiro de serviço criado: $SERVICE_FILE"
+    echo "✅  Ficheiro de serviço criado: $SERVICE_FILE"
 
-# ── Activar e iniciar o serviço ───────────────────────────────────────────────
+    echo "⚙️   A activar serviço (arranque automático no boot) …"
+    systemctl enable "$SERVICE_NAME"
+
+    if systemctl is-active --quiet "$SERVICE_NAME"; then
+        echo "⚙️   A parar instância anterior de $SERVICE_NAME …"
+        systemctl stop "$SERVICE_NAME"
+    fi
+
+    echo "🚀  A iniciar $SERVICE_NAME …"
+    systemctl start "$SERVICE_NAME"
+
+    sleep 2
+
+    echo ""
+    systemctl status "$SERVICE_NAME" --no-pager -l
+}
+
+# ── Recarregar systemd ────────────────────────────────────────────────────────
 echo "⚙️   A recarregar systemd …"
 systemctl daemon-reload
 
-echo "⚙️   A activar serviço (arranque automático no boot) …"
-systemctl enable "$SERVICE_NAME"
-
-# Parar instância anterior se existir
-if systemctl is-active --quiet "$SERVICE_NAME"; then
-    echo "⚙️   A parar instância anterior …"
-    systemctl stop "$SERVICE_NAME"
+# ── Instalar Sentinel.py ──────────────────────────────────────────────────────
+if [[ -f "$SENTINEL_SCRIPT" ]]; then
+    create_service \
+        "$SENTINEL_SERVICE" \
+        "$SENTINEL_SCRIPT" \
+        "SoilQI Sentinel.py — Geração de rasters de satélite via MQTT"
+else
+    echo "⚠️   Sentinel.py não encontrado — serviço $SENTINEL_SERVICE não instalado."
 fi
 
-echo "🚀  A iniciar $SERVICE_NAME …"
-systemctl start "$SERVICE_NAME"
-
-sleep 2
+# ── Instalar Zonation.py ──────────────────────────────────────────────────────
+if [[ -f "$ZONATION_SCRIPT" ]]; then
+    create_service \
+        "$ZONATION_SERVICE" \
+        "$ZONATION_SCRIPT" \
+        "SoilQI Zonation.py — Geração de mapas de zonagem via MQTT"
+else
+    echo "⚠️   Zonation.py não encontrado — serviço $ZONATION_SERVICE não instalado."
+fi
 
 # ── Estado final ──────────────────────────────────────────────────────────────
 echo ""
-echo "══════════════════════════════════════════════════"
-systemctl status "$SERVICE_NAME" --no-pager -l
-echo "══════════════════════════════════════════════════"
-echo ""
+echo "══════════════════════════════════════════════════════════"
 echo "✅  Instalação concluída!"
 echo ""
 echo "  Comandos úteis:"
-echo "  ┌─────────────────────────────────────────────"
+echo "  ┌─────────────────────────────────────────────────────"
 echo "  │ Ver logs em tempo real:"
-echo "  │   journalctl -u $SERVICE_NAME -f"
+echo "  │   journalctl -u $SENTINEL_SERVICE -f"
+echo "  │   journalctl -u $ZONATION_SERVICE -f"
 echo "  │"
-echo "  │ Ver últimas 50 linhas:"
-echo "  │   journalctl -u $SERVICE_NAME -n 50 --no-pager"
+echo "  │ Reiniciar serviços:"
+echo "  │   sudo systemctl restart $SENTINEL_SERVICE"
+echo "  │   sudo systemctl restart $ZONATION_SERVICE"
 echo "  │"
-echo "  │ Reiniciar serviço:"
-echo "  │   sudo systemctl restart $SERVICE_NAME"
+echo "  │ Estado dos serviços:"
+echo "  │   sudo systemctl status $SENTINEL_SERVICE $ZONATION_SERVICE"
 echo "  │"
-echo "  │ Parar serviço:"
-echo "  │   sudo systemctl stop $SERVICE_NAME"
+echo "  │ Parar serviços:"
+echo "  │   sudo systemctl stop $SENTINEL_SERVICE $ZONATION_SERVICE"
 echo "  │"
 echo "  │ Desactivar arranque automático:"
-echo "  │   sudo systemctl disable $SERVICE_NAME"
-echo "  └─────────────────────────────────────────────"
+echo "  │   sudo systemctl disable $SENTINEL_SERVICE $ZONATION_SERVICE"
+echo "  └─────────────────────────────────────────────────────"
 echo ""
