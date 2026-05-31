@@ -173,23 +173,79 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 $stmt->execute($params);
                 $rows = $stmt->fetchAll();
 
-                // Estatísticas do mesmo conjunto
-                $sStmt = $pdo->prepare("
-                    SELECT COUNT(*)            AS total,
-                           AVG(conductivity)   AS avg_ec,
-                           AVG(ph)             AS avg_ph,
-                           AVG(temperature)    AS avg_temp
-                    FROM   field_measurements m
-                    LEFT JOIN terrains t ON m.terrain_id = t.id
-                    LEFT JOIN users    u ON m.user_id    = u.id
-                    $wc
-                ");
-                $sStmt->execute($params);
-                $stats = $sStmt->fetch();
+                // Estatísticas do mesmo conjunto — resiliente: nunca derruba a resposta
+                $stats = ['total' => 0, 'avg_ec' => null, 'avg_ph' => null, 'avg_temp' => null];
+                try {
+                    $sStmt = $pdo->prepare("
+                        SELECT COUNT(*)          AS total,
+                               AVG(conductivity) AS avg_ec,
+                               AVG(ph)           AS avg_ph,
+                               AVG(temperature)  AS avg_temp
+                        FROM   field_measurements m
+                        $wc
+                    ");
+                    $sStmt->execute($params);
+                    $row = $sStmt->fetch();
+                    if ($row) {
+                        $stats = [
+                            'total'   => (int)   $row['total'],
+                            'avg_ec'  => $row['avg_ec']   !== null ? (float) $row['avg_ec']   : null,
+                            'avg_ph'  => $row['avg_ph']   !== null ? (float) $row['avg_ph']   : null,
+                            'avg_temp'=> $row['avg_temp'] !== null ? (float) $row['avg_temp'] : null,
+                        ];
+                    }
+                } catch (PDOException $e) {
+                    // Stats não críticos — falhar silenciosamente, measurements continuam ok
+                    error_log('[SoilQI] Erro na query de stats: ' . $e->getMessage());
+                }
 
                 $response['success']      = true;
                 $response['measurements'] = $rows;
                 $response['stats']        = $stats;
+                break;
+
+            case 'get_field_stats':
+                // Stats leves (sem measurements) — para carregar no arranque da página
+                $where2  = [];
+                $params2 = [];
+                if (!$isAdmin) {
+                    $where2[]  = 'm.user_id = ?';
+                    $params2[] = $currentUser['id'];
+                } elseif (!empty($_POST['user_id'])) {
+                    $where2[]  = 'm.user_id = ?';
+                    $params2[] = intval($_POST['user_id']);
+                }
+                if (!empty($_POST['terrain_id'])) {
+                    $where2[]  = 'm.terrain_id = ?';
+                    $params2[] = intval($_POST['terrain_id']);
+                }
+                if (!empty($_POST['date_from'])) {
+                    $where2[]  = 'DATE(m.measured_at) >= ?';
+                    $params2[] = $_POST['date_from'];
+                }
+                if (!empty($_POST['date_to'])) {
+                    $where2[]  = 'DATE(m.measured_at) <= ?';
+                    $params2[] = $_POST['date_to'];
+                }
+                $wc2 = $where2 ? 'WHERE ' . implode(' AND ', $where2) : '';
+
+                $sStmt2 = $pdo->prepare("
+                    SELECT COUNT(*)          AS total,
+                           AVG(conductivity) AS avg_ec,
+                           AVG(ph)           AS avg_ph,
+                           AVG(temperature)  AS avg_temp
+                    FROM   field_measurements m
+                    $wc2
+                ");
+                $sStmt2->execute($params2);
+                $sRow = $sStmt2->fetch();
+                $response['success'] = true;
+                $response['stats'] = [
+                    'total'    => (int) ($sRow['total']    ?? 0),
+                    'avg_ec'   => $sRow['avg_ec']   !== null ? (float) $sRow['avg_ec']   : null,
+                    'avg_ph'   => $sRow['avg_ph']   !== null ? (float) $sRow['avg_ph']   : null,
+                    'avg_temp' => $sRow['avg_temp'] !== null ? (float) $sRow['avg_temp'] : null,
+                ];
                 break;
 
             case 'get_terrain_geom':

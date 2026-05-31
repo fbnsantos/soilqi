@@ -45,6 +45,7 @@ let pendingKmzFile  = null;
 document.addEventListener('DOMContentLoaded', function () {
     if (activeTab !== 'field') return;
     initFieldMap();
+    loadFieldStats();   // preenche os stat-cards sem esperar pelo botão Filtrar
     // Tabela não carrega automaticamente — aguarda que o utilizador clique em Filtrar
 });
 
@@ -221,17 +222,30 @@ function applyFilters() {
         .then(data => {
             if (!data.success) {
                 wrap.innerHTML = `<div class="warning-box">⚠️ ${escHtml(data.message)}</div>`;
+                // Mesmo com erro nos measurements, tentar carregar stats
+                loadFieldStats();
                 return;
             }
             allMeasurements = data.measurements || [];
-            updateStats(data.stats);
-            // Se há terreno selecionado, o zoom é feito pelo polígono (skipZoom=true aqui)
+            // Stats vêm embutidos na resposta (mais eficiente que pedido extra)
+            if (data.stats) {
+                updateStats(data.stats);
+            } else {
+                // Fallback: pedir stats separadamente
+                loadFieldStats({
+                    terrain_id: document.getElementById('filter-terrain')?.value || '',
+                    date_from:  document.getElementById('filter-date-from')?.value || '',
+                    date_to:    document.getElementById('filter-date-to')?.value   || '',
+                    user_id:    document.getElementById('filter-user')?.value      || '',
+                });
+            }
             updateMap(allMeasurements, !!terrainId);
             renderTable(allMeasurements);
             if (terrainId) _zoomToFilterTerrain(terrainId);
         })
         .catch(() => {
             wrap.innerHTML = '<div class="sql-error">❌ Erro ao carregar medições.</div>';
+            loadFieldStats();  // tentar recuperar stats mesmo com erro
         });
 }
 
@@ -280,14 +294,33 @@ function clearFilters() {
 }
 
 // ── Estatísticas ──────────────────────────────────────────────────────────────
-function updateStats(s) {
-    if (!s) return;
-    const fmt = (v, dec) => (v !== null && v !== undefined) ? parseFloat(v).toFixed(dec) : '—';
+// Carrega só as estatísticas (sem measurements) — chamado no arranque e ao filtrar
+function loadFieldStats(extraParams) {
+    const fd = new FormData();
+    fd.append('action', 'get_field_stats');
+    if (extraParams) {
+        for (const [k, v] of Object.entries(extraParams)) fd.append(k, v);
+    }
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => { if (data.success) updateStats(data.stats); })
+        .catch(() => {});  // silencioso — stats não são críticos
+}
 
-    document.getElementById('stat-total').textContent = s.total !== null ? (s.total || 0) : '–';
-    document.getElementById('stat-ec').textContent    = fmt(s.avg_ec,   2);
-    document.getElementById('stat-ph').textContent    = fmt(s.avg_ph,   1);
-    document.getElementById('stat-temp').textContent  = fmt(s.avg_temp, 1);
+function updateStats(s) {
+    if (!s || typeof s !== 'object') return;
+    const fmt = (v, dec) => {
+        const n = parseFloat(v);
+        return (!isNaN(n)) ? n.toFixed(dec) : '—';
+    };
+    const setEl = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = val;
+    };
+    setEl('stat-total', (s.total !== null && s.total !== undefined) ? (parseInt(s.total) || 0) : '–');
+    setEl('stat-ec',    fmt(s.avg_ec,   2));
+    setEl('stat-ph',    fmt(s.avg_ph,   1));
+    setEl('stat-temp',  fmt(s.avg_temp, 1));
 }
 
 // ── Tabela ────────────────────────────────────────────────────────────────────
