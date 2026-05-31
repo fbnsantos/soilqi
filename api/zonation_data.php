@@ -69,7 +69,7 @@ try {
 
     // ── Encontrar registo de zonagem pendente ─────────────────────────────────
     $stmt = $pdo->prepare("
-        SELECT id, method, params, input_raster_ids, user_id, terrain_id
+        SELECT id, method, params, input_raster_ids, input_interp_ids, user_id, terrain_id
         FROM zonation_results
         WHERE request_id = ?
     ");
@@ -83,7 +83,9 @@ try {
     }
 
     $rasterIds = json_decode($job['input_raster_ids'] ?? '[]', true) ?: [];
-    if (empty($rasterIds)) {
+    $interpIds = json_decode($job['input_interp_ids'] ?? '[]', true) ?: [];
+
+    if (empty($rasterIds) && empty($interpIds)) {
         http_response_code(400);
         $response['message'] = 'Nenhuma camada associada a este pedido.';
         echo json_encode($response); exit;
@@ -93,15 +95,15 @@ try {
     $pdo->prepare("UPDATE zonation_results SET status='processing' WHERE request_id=?")
         ->execute([$requestId]);
 
-    // ── Recolher PNG de cada raster ───────────────────────────────────────────
     $layers = [];
+
+    // ── Rasters de satélite (raster_results) ─────────────────────────────────
     foreach ($rasterIds as $rid) {
         $rid = intval($rid);
         if ($rid <= 0) continue;
 
         $st = $pdo->prepare("
-            SELECT id, name, raster_type,
-                   png_data,
+            SELECT id, name, raster_type, png_data,
                    min_lat, max_lat, min_lng, max_lng
             FROM raster_results
             WHERE id = ? AND user_id = ? AND status = 'done'
@@ -111,7 +113,7 @@ try {
 
         if ($row && $row['png_data']) {
             $layers[] = [
-                'id'     => (int)$rid,
+                'id'     => 'r_' . $rid,
                 'name'   => $row['name'],
                 'type'   => $row['raster_type'],
                 'png'    => base64_encode($row['png_data']),
@@ -125,12 +127,44 @@ try {
         }
     }
 
+    // ── Interpolações de campo (field_interpolations) ─────────────────────────
+    foreach ($interpIds as $iid) {
+        $iid = intval($iid);
+        if ($iid <= 0) continue;
+
+        try {
+            $st = $pdo->prepare("
+                SELECT id, name, param, png_data,
+                       min_lat, max_lat, min_lng, max_lng
+                FROM field_interpolations
+                WHERE id = ? AND user_id = ?
+            ");
+            $st->execute([$iid, $job['user_id']]);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+
+            if ($row && $row['png_data']) {
+                $layers[] = [
+                    'id'     => 'i_' . $iid,
+                    'name'   => $row['name'] . ($row['param'] ? ' (' . $row['param'] . ')' : ''),
+                    'type'   => 'interp_' . ($row['param'] ?: 'field'),
+                    'png'    => base64_encode($row['png_data']),
+                    'bounds' => [
+                        'min_lat' => (float)$row['min_lat'],
+                        'max_lat' => (float)$row['max_lat'],
+                        'min_lng' => (float)$row['min_lng'],
+                        'max_lng' => (float)$row['max_lng'],
+                    ],
+                ];
+            }
+        } catch (PDOException $ignored) {}
+    }
+
     if (empty($layers)) {
         // Marcar como erro para o JS poder mostrar mensagem
         $pdo->prepare("UPDATE zonation_results SET status='error', error_msg=? WHERE request_id=?")
-            ->execute(['Nenhuma camada raster válida encontrada.', $requestId]);
+            ->execute(['Nenhuma camada válida encontrada (rasters ou interpolações).', $requestId]);
         http_response_code(404);
-        $response['message'] = 'Nenhuma camada raster válida encontrada.';
+        $response['message'] = 'Nenhuma camada válida encontrada.';
         echo json_encode($response); exit;
     }
 

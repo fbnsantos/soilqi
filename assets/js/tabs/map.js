@@ -8,8 +8,9 @@
 
 let reportTerrainId = null;
 
-// Cache de rasters do terreno actual (partilhado com painel de zonagem)
-let _currentTerrainRasters = [];
+// Cache de camadas do terreno actual (partilhada com painel de zonagem)
+let _currentTerrainRasters = [];   // rasters de satélite
+let _currentTerrainInterps = [];   // interpolações de campo
 
 // id → L.imageOverlay  /  dados para PDF
 // Nomes com prefixo "rpt" para não colidir com variáveis homónimas de app.js
@@ -113,8 +114,10 @@ function _loadInterpLayers(terrainId) {
         .then(r => r.json())
         .then(data => {
             const items = data.interpolations || [];
+            _currentTerrainInterps = items;       // actualizar cache para zonagem
             _setBadge('interp', items.length);
             _renderInterpList(items);
+            _refreshZonationLayerList();           // rerender com interps incluídas
         })
         .catch(() => {
             if (listEl) listEl.innerHTML = '<div class="layer-empty" style="color:#ef4444;">Erro de rede.</div>';
@@ -744,37 +747,96 @@ const zonationData     = {};  // id → {name, png, bounds, legend}
 
 // ── Painel de layers (checkboxes) ────────────────────────────────────────────
 
+/**
+ * Reconstrói a lista de checkboxes mostrando rasters de satélite (🛰️) e
+ * interpolações de campo (🎨). Os valores têm prefixo: "r_ID" ou "i_ID".
+ */
 function _refreshZonationLayerList() {
     const listEl = document.getElementById('zonation-layer-list');
     if (!listEl) return;
-    if (!_currentTerrainRasters.length) {
-        listEl.innerHTML = '<div class="layer-empty">Nenhum raster neste terreno.</div>';
+
+    const hasR = _currentTerrainRasters.length > 0;
+    const hasI = _currentTerrainInterps.length  > 0;
+
+    if (!hasR && !hasI) {
+        listEl.innerHTML = '<div class="layer-empty">Nenhuma camada neste terreno.</div>';
         return;
     }
-    listEl.innerHTML = _currentTerrainRasters.map(r => {
-        const label = MAP_RASTER_LABELS[r.raster_type] || r.raster_type;
-        const dt    = r.date_from ? r.date_from + ' → ' + r.date_to : new Date(r.created_at).toLocaleDateString('pt-PT');
-        return `
+
+    const sectionHdr = (icon, label) =>
+        `<div style="font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;
+                     letter-spacing:.5px;padding:5px 4px 2px;">${icon} ${label}</div>`;
+
+    const rowHtml = (key, accent, name, sub) => `
         <label style="display:flex;align-items:center;gap:8px;padding:5px 4px;
                       border-bottom:1px solid #f8fafc;cursor:pointer;font-size:11px;">
-            <input type="checkbox" id="zn-layer-${r.id}" value="${r.id}"
-                   onchange="_onZonationLayerToggle()"
-                   style="width:14px;height:14px;accent-color:#667eea;flex-shrink:0;">
+            <input type="checkbox" value="${key}" onchange="_onZonationLayerToggle()"
+                   style="width:14px;height:14px;accent-color:${accent};flex-shrink:0;">
             <span style="flex:1;min-width:0;">
-                <span style="font-weight:600;color:#1f2937;">${label}</span><br>
-                <span style="color:#9ca3af;font-size:10px;">${dt}</span>
+                <span style="font-weight:600;color:#1f2937;">${name}</span><br>
+                <span style="color:#9ca3af;font-size:10px;">${sub}</span>
             </span>
         </label>`;
-    }).join('');
+
+    let html = '';
+
+    if (hasR) {
+        html += sectionHdr('🛰️', 'Satélite');
+        html += _currentTerrainRasters.map(r => {
+            const label = MAP_RASTER_LABELS[r.raster_type] || r.raster_type;
+            const dt    = r.date_from
+                ? r.date_from + ' → ' + r.date_to
+                : new Date(r.created_at).toLocaleDateString('pt-PT');
+            return rowHtml('r_' + r.id, '#667eea', label, dt);
+        }).join('');
+    }
+
+    if (hasI) {
+        if (hasR) html += '<div style="height:4px;"></div>';
+        html += sectionHdr('🎨', 'Campo');
+        html += _currentTerrainInterps.map(it => {
+            const dt = new Date(it.created_at).toLocaleDateString('pt-PT');
+            return rowHtml('i_' + it.id, '#10b981', _esc(it.name),
+                           _esc(it.param || '') + (it.param ? '  ' : '') + dt);
+        }).join('');
+    }
+
+    listEl.innerHTML = html;
 }
 
 function _onZonationLayerToggle() {
     _updateWeightPanels();
 }
 
-function _getSelectedRasterIds() {
+/** Devolve arrays separados {raster_ids, interp_ids} dos checkboxes marcados. */
+function _getSelectedLayerIds() {
+    const vals = [...document.querySelectorAll('#zonation-layer-list input[type=checkbox]:checked')]
+        .map(cb => cb.value);
+    return {
+        raster_ids: vals.filter(v => v.startsWith('r_')).map(v => parseInt(v.slice(2))),
+        interp_ids: vals.filter(v => v.startsWith('i_')).map(v => parseInt(v.slice(2))),
+    };
+}
+
+/** Devolve a chave prefixada de todas as checkboxes marcadas (para weight panels). */
+function _getSelectedLayerKeys() {
     return [...document.querySelectorAll('#zonation-layer-list input[type=checkbox]:checked')]
-        .map(cb => parseInt(cb.value));
+        .map(cb => cb.value);
+}
+
+/** Label legível para uma chave "r_ID" ou "i_ID". */
+function _layerLabel(key) {
+    if (key.startsWith('r_')) {
+        const id = parseInt(key.slice(2));
+        const r  = _currentTerrainRasters.find(x => x.id === id);
+        return r ? (MAP_RASTER_LABELS[r.raster_type] || r.raster_type) : key;
+    }
+    if (key.startsWith('i_')) {
+        const id = parseInt(key.slice(2));
+        const it = _currentTerrainInterps.find(x => x.id === id);
+        return it ? it.name : key;
+    }
+    return key;
 }
 
 // ── Mudança de método ─────────────────────────────────────────────────────────
@@ -790,23 +852,25 @@ function onZonationMethodChange(method) {
 
 function _updateWeightPanels() {
     const method  = document.getElementById('zonation-method')?.value || 'kmeans';
-    const ids     = _getSelectedRasterIds();
+    const keys    = _getSelectedLayerKeys();   // ["r_42", "i_7", ...]
     const needsWt = (method === 'quantiles' || method === 'weighted');
 
     ['qt-weights-panel', 'wt-weights-panel'].forEach(panelId => {
         const el = document.getElementById(panelId);
         if (!el) return;
-        if (!needsWt || !ids.length) { el.innerHTML = ''; return; }
+        if (!needsWt || !keys.length) { el.innerHTML = ''; return; }
+
+        // sanitize key for use in element ID (replace _ with -)
+        const safeKey = k => k.replace('_', '-');
 
         el.innerHTML = '<div class="zn-lbl" style="margin-bottom:4px;">Pesos por camada</div>' +
-            ids.map(id => {
-                const r     = _currentTerrainRasters.find(x => x.id == id);
-                const label = r ? (MAP_RASTER_LABELS[r.raster_type] || r.raster_type) : `Layer ${id}`;
-                const wid   = panelId + '-w-' + id;
-                const iid   = panelId + '-inv-' + id;
+            keys.map(key => {
+                const label = _layerLabel(key);
+                const wid   = panelId + '-w-' + safeKey(key);
+                const iid   = panelId + '-inv-' + safeKey(key);
                 return `
                 <div class="zn-weight-row">
-                    <span title="${_esc(label)}">${label}</span>
+                    <span title="${_esc(label)}" style="max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_esc(label)}</span>
                     <input type="range" min="0" max="2" step="0.1" value="1"
                            id="${wid}"
                            oninput="document.getElementById('${wid}-v').textContent=parseFloat(this.value).toFixed(1)">
@@ -821,16 +885,39 @@ function _updateWeightPanels() {
 
 // ── Gerar zonagem ─────────────────────────────────────────────────────────────
 
-function generateZonation() {
-    if (!reportTerrainId) { _showAlert('Selecione um terreno primeiro.', 'warning'); return; }
+/** Mostra / limpa o painel de estado da zonagem (abaixo do botão). */
+function _znStatus(msg, type) {
+    const el = document.getElementById('zonation-status');
+    if (!el) return;
+    if (!msg) { el.style.display = 'none'; el.textContent = ''; return; }
+    const colors = {
+        info:    { bg: '#eff6ff', border: '#bfdbfe', text: '#1d4ed8' },
+        success: { bg: '#f0fdf4', border: '#bbf7d0', text: '#166534' },
+        error:   { bg: '#fef2f2', border: '#fecaca', text: '#dc2626' },
+        warning: { bg: '#fffbeb', border: '#fde68a', text: '#92400e' },
+    };
+    const c = colors[type] || colors.info;
+    Object.assign(el.style, {
+        display: '', background: c.bg,
+        border: `1px solid ${c.border}`, color: c.text,
+        borderRadius: '6px', padding: '8px 10px',
+        fontSize: '11px', marginTop: '8px', lineHeight: '1.5',
+    });
+    el.textContent = msg;
+}
 
-    const ids = _getSelectedRasterIds();
-    if (!ids.length) { _showAlert('Selecione pelo menos uma camada de entrada.', 'warning'); return; }
+function generateZonation() {
+    if (!reportTerrainId) { _znStatus('Selecione um terreno primeiro.', 'warning'); return; }
+
+    const { raster_ids, interp_ids } = _getSelectedLayerIds();
+    const keys = _getSelectedLayerKeys();
+    if (!keys.length) { _znStatus('Selecione pelo menos uma camada de entrada.', 'warning'); return; }
 
     const method = document.getElementById('zonation-method')?.value || 'kmeans';
+    const safeKey = k => k.replace('_', '-');
+    const g = id => document.getElementById(id);
 
     // Construir params específicos do método
-    const g = id => document.getElementById(id);
     let params = {};
 
     if (method === 'kmeans') {
@@ -854,27 +941,15 @@ function generateZonation() {
         };
     } else if (method === 'quantiles') {
         params = { n_zones: parseInt(g('qt-n_zones')?.value || 3) };
-        params.weights = ids.map(id => {
-            const v = document.getElementById('qt-weights-panel-w-' + id);
-            return v ? parseFloat(v.value) : 1.0;
-        });
-        params.invert = ids.map(id => {
-            const v = document.getElementById('qt-weights-panel-inv-' + id);
-            return v ? v.checked : false;
-        });
+        params.weights = keys.map(k => { const v = g('qt-weights-panel-w-' + safeKey(k)); return v ? parseFloat(v.value) : 1.0; });
+        params.invert  = keys.map(k => { const v = g('qt-weights-panel-inv-' + safeKey(k)); return v ? v.checked : false; });
     } else if (method === 'weighted') {
         params = {
-            n_zones:     parseInt(g('wt-n_zones')?.value      || 3),
-            classify_by: g('wt-classify_by')?.value            || 'quantile',
+            n_zones:     parseInt(g('wt-n_zones')?.value  || 3),
+            classify_by: g('wt-classify_by')?.value        || 'quantile',
         };
-        params.weights = ids.map(id => {
-            const v = document.getElementById('wt-weights-panel-w-' + id);
-            return v ? parseFloat(v.value) : 1.0;
-        });
-        params.invert = ids.map(id => {
-            const v = document.getElementById('wt-weights-panel-inv-' + id);
-            return v ? v.checked : false;
-        });
+        params.weights = keys.map(k => { const v = g('wt-weights-panel-w-' + safeKey(k)); return v ? parseFloat(v.value) : 1.0; });
+        params.invert  = keys.map(k => { const v = g('wt-weights-panel-inv-' + safeKey(k)); return v ? v.checked : false; });
     }
 
     // Feedback visual
@@ -882,55 +957,64 @@ function generateZonation() {
     const _resetBtn = () => {
         if (btn) { btn.textContent = '🗺️ Gerar Zonagem'; btn.disabled = false; btn.style.opacity = '1'; }
     };
-    if (btn) { btn.textContent = '⏳ A enviar pedido…'; btn.disabled = true; btn.style.opacity = '0.7'; }
+    if (btn) { btn.textContent = '⏳ A enviar…'; btn.disabled = true; btn.style.opacity = '0.7'; }
+    _znStatus('⏳ A enviar pedido ao servidor…', 'info');
 
     const fd = new FormData();
     fd.append('action',     'generate_zonation');
     fd.append('terrain_id', reportTerrainId);
     fd.append('method',     method);
     fd.append('params',     JSON.stringify(params));
-    fd.append('raster_ids', JSON.stringify(ids));
+    fd.append('raster_ids', JSON.stringify(raster_ids));
+    fd.append('interp_ids', JSON.stringify(interp_ids));
 
     fetch('index.php?tab=map', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
             if (!data.success) {
                 _resetBtn();
-                _showAlert('❌ ' + (data.message || 'Erro ao criar pedido de zonagem.'), 'error');
+                _znStatus('❌ ' + (data.message || 'Erro ao criar pedido.'), 'error');
                 return;
             }
 
+            // Se MQTT não está configurado, o job nunca será processado — informar imediatamente
             if (data.mqtt_warning) {
-                console.warn('MQTT:', data.mqtt_warning);
+                _resetBtn();
+                _znStatus('⚠️ MQTT não configurado: o serviço Python não irá receber o pedido.\n' + data.mqtt_warning, 'warning');
+                return;
             }
 
-            // Pedido aceite — iniciar polling
+            // Pedido aceite e MQTT publicado — iniciar polling
             const requestId = data.request_id;
-            const jobId     = data.id;
             if (btn) { btn.textContent = '⏳ A processar…'; }
+            _znStatus('📡 Pedido enviado. A aguardar processamento pelo serviço Python…', 'info');
 
-            _pollZonationStatus(requestId, jobId, _resetBtn);
+            _pollZonationStatus(requestId, _resetBtn);
         })
         .catch(err => {
             _resetBtn();
-            _showAlert('Erro de rede: ' + err.message, 'error');
+            _znStatus('❌ Erro de rede: ' + err.message, 'error');
         });
 }
 
 // ── Polling de estado da zonagem ──────────────────────────────────────────────
 
-function _pollZonationStatus(requestId, jobId, onDone) {
+function _pollZonationStatus(requestId, onDone) {
     const MAX_ATTEMPTS = 60;   // 60 × 3 s = 3 minutos
     let   attempts     = 0;
 
     const timer = setInterval(() => {
         attempts++;
+
         if (attempts > MAX_ATTEMPTS) {
             clearInterval(timer);
             if (onDone) onDone();
-            _showAlert('⏱️ Tempo limite excedido. O servidor ainda pode estar a processar — verifique o historial mais tarde.', 'warning');
+            _znStatus('⏱️ Tempo limite excedido. O serviço Python pode estar indisponível — verifique o historial mais tarde.', 'warning');
             return;
         }
+
+        const elapsed = attempts * 3;
+        _znStatus(`⏳ A processar… (${elapsed}s)  |  Tentativa ${attempts}/${MAX_ATTEMPTS}`, 'info');
 
         const fd = new FormData();
         fd.append('action',     'get_zonation_status');
@@ -940,10 +1024,9 @@ function _pollZonationStatus(requestId, jobId, onDone) {
             .then(r => r.json())
             .then(data => {
                 if (!data.success && data.message) {
-                    // Erro de rede ou de lógica — parar
                     clearInterval(timer);
                     if (onDone) onDone();
-                    _showAlert('❌ ' + data.message, 'error');
+                    _znStatus('❌ ' + data.message, 'error');
                     return;
                 }
 
@@ -952,19 +1035,19 @@ function _pollZonationStatus(requestId, jobId, onDone) {
                 if (st === 'done') {
                     clearInterval(timer);
                     if (onDone) onDone();
+                    _znStatus('✅ Zonagem concluída!', 'success');
                     _showZonationOnMap(data.id, data.name, data.png, data.bounds, data.legend);
                     loadZonationHistory(reportTerrainId);
-                    _showAlert('✅ Zonagem gerada!', 'success');
 
                 } else if (st === 'error') {
                     clearInterval(timer);
                     if (onDone) onDone();
-                    _showAlert('❌ ' + (data.message || 'Erro na zonagem.'), 'error');
+                    _znStatus('❌ ' + (data.message || 'Erro na zonagem.'), 'error');
 
                 }
                 // pending / processing → continuar polling
             })
-            .catch(() => { /* ignorar erros de rede temporários */ });
+            .catch(() => { /* ignorar erros de rede temporários no polling */ });
 
     }, 3000);
 }

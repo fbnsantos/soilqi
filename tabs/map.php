@@ -295,28 +295,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 $method     = trim($_POST['method'] ?? '');
                 $params     = json_decode(trim($_POST['params'] ?? '{}'), true) ?: [];
                 $raster_ids = json_decode(trim($_POST['raster_ids'] ?? '[]'), true) ?: [];
+                $interp_ids = json_decode(trim($_POST['interp_ids'] ?? '[]'), true) ?: [];
 
                 $allowed_methods = ['quantiles','weighted','kmeans','fcm','gmm'];
-                if (!$terrain_id || !in_array($method, $allowed_methods, true) || empty($raster_ids)) {
+                if (!$terrain_id || !in_array($method, $allowed_methods, true)) {
                     $response['message'] = 'Parâmetros inválidos.';
                     break;
                 }
+                if (empty($raster_ids) && empty($interp_ids)) {
+                    $response['message'] = 'Selecione pelo menos uma camada de entrada.';
+                    break;
+                }
 
-                // Validar que as camadas existem e pertencem ao terreno
-                $valid_ids = [];
+                // Validar rasters de satélite
+                $valid_raster_ids = [];
                 foreach ($raster_ids as $rid) {
                     $rid = intval($rid);
                     $st  = $pdo->prepare("SELECT id FROM raster_results
                                           WHERE id=? AND user_id=? AND terrain_id=? AND status='done'");
                     $st->execute([$rid, $currentUser['id'], $terrain_id]);
-                    if ($st->fetch()) { $valid_ids[] = $rid; }
+                    if ($st->fetch()) { $valid_raster_ids[] = $rid; }
                 }
-                if (empty($valid_ids)) {
+
+                // Validar interpolações de campo
+                $valid_interp_ids = [];
+                try {
+                    foreach ($interp_ids as $iid) {
+                        $iid = intval($iid);
+                        $st  = $pdo->prepare("SELECT id FROM field_interpolations
+                                              WHERE id=? AND user_id=? AND terrain_id=?");
+                        $st->execute([$iid, $currentUser['id'], $terrain_id]);
+                        if ($st->fetch()) { $valid_interp_ids[] = $iid; }
+                    }
+                } catch (PDOException $ignored) {}
+
+                if (empty($valid_raster_ids) && empty($valid_interp_ids)) {
                     $response['message'] = 'Nenhuma camada válida encontrada para este terreno.';
                     break;
                 }
 
-                // Auto-criar/migrar tabela com suporte assíncrono
+                // Auto-criar/migrar tabela com suporte assíncrono e interpolações de campo
                 $pdo->exec("CREATE TABLE IF NOT EXISTS zonation_results (
                     id               INT AUTO_INCREMENT PRIMARY KEY,
                     user_id          INT NOT NULL,
@@ -327,6 +345,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                     params           JSON NULL,
                     name             VARCHAR(200) NOT NULL,
                     input_raster_ids JSON NULL,
+                    input_interp_ids JSON NULL,
                     png_data         MEDIUMBLOB NULL,
                     min_lat DOUBLE NULL, max_lat DOUBLE NULL,
                     min_lng DOUBLE NULL, max_lng DOUBLE NULL,
@@ -342,6 +361,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                     "ALTER TABLE zonation_results ADD COLUMN request_id VARCHAR(36) NULL AFTER terrain_id",
                     "ALTER TABLE zonation_results ADD COLUMN status ENUM('pending','processing','done','error') NOT NULL DEFAULT 'pending' AFTER request_id",
                     "ALTER TABLE zonation_results ADD COLUMN input_raster_ids JSON NULL AFTER name",
+                    "ALTER TABLE zonation_results ADD COLUMN input_interp_ids JSON NULL AFTER input_raster_ids",
                     "ALTER TABLE zonation_results ADD COLUMN error_msg TEXT NULL AFTER legend",
                     "ALTER TABLE zonation_results MODIFY COLUMN png_data MEDIUMBLOB NULL",
                     "ALTER TABLE zonation_results ADD UNIQUE KEY uidx_zr_req (request_id)",
@@ -366,11 +386,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
 
                 // Inserir registo pendente
                 $ins = $pdo->prepare("INSERT INTO zonation_results
-                    (user_id, terrain_id, request_id, status, method, params, name, input_raster_ids)
-                    VALUES (?,?,?,?,?,?,?,?)");
+                    (user_id, terrain_id, request_id, status, method, params, name,
+                     input_raster_ids, input_interp_ids)
+                    VALUES (?,?,?,?,?,?,?,?,?)");
                 $ins->execute([
                     $currentUser['id'], $terrain_id, $requestId, 'pending',
-                    $method, json_encode($params), $name, json_encode($valid_ids),
+                    $method, json_encode($params), $name,
+                    json_encode($valid_raster_ids), json_encode($valid_interp_ids),
                 ]);
                 $newId = (int)$pdo->lastInsertId();
 
@@ -780,6 +802,9 @@ if ($isLoggedIn) {
                                    transition:opacity .15s;">
                         🗺️ Gerar Zonagem
                     </button>
+
+                    <!-- Painel de estado (feedback assíncrono) -->
+                    <div id="zonation-status" style="display:none;"></div>
 
                     <!-- Legenda do resultado -->
                     <div id="zonation-legend" style="display:none;margin-top:10px;"></div>
