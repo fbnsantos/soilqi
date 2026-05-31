@@ -2424,15 +2424,21 @@ function onRasterTypeChange() {
     const needsRef = type === 'ndvi_anomaly' || type === 'ndvi_diff';
 
     if (refBox) refBox.style.display = needsRef ? 'block' : 'none';
+    if (fromLbl) fromLbl.textContent = needsRef ? 'Início período actual *' : 'Data início *';
+    if (hint) hint.textContent = (type === 'ndvi_anomaly')
+        ? 'Sugestão: mesmo mês do ano anterior. Ex: 2025-05-01 → 2025-05-31' : '';
 
-    if (fromLbl) {
-        fromLbl.textContent = needsRef ? 'Início período actual *' : 'Data início *';
-    }
-
-    if (hint && type === 'ndvi_anomaly') {
-        hint.textContent = 'Sugestão: mesmo mês do ano anterior. Ex: 2025-05-01 → 2025-05-31';
-    } else if (hint) {
-        hint.textContent = '';
+    // ── Painel de descrição do índice ─────────────────────────────────────────
+    const descBox    = document.getElementById('raster-desc-box');
+    const descMetric = document.getElementById('raster-desc-metric');
+    const descUse    = document.getElementById('raster-desc-use');
+    const info       = RASTER_INFO[type];
+    if (info && descBox) {
+        if (descMetric) descMetric.textContent = '📐 ' + info.metric;
+        if (descUse)    descUse.textContent    = '✅ ' + info.use;
+        descBox.style.display = '';
+    } else if (descBox) {
+        descBox.style.display = 'none';
     }
 }
 
@@ -2603,13 +2609,54 @@ function loadRastersList() {
 }
 
 const RASTER_TYPE_LABELS = {
-    ndvi:          '🌿 NDVI Atual',
+    ndvi:          '🌿 NDVI',
+    ndmi:          '💧 NDMI',
+    evi:           '🌿 EVI',
+    msavi:         '🌿 MSAVI',
+    gndvi:         '🌿 GNDVI',
+    ndre:          '🌿 NDRE',
+    ndwi:          '💧 NDWI',
+    nbr:           '🔥 NBR',
+    bsi:           '🟤 BSI',
     ndvi_anomaly:  '📊 NDVI Anomalia',
     ndvi_diff:     '📈 NDVI Diferença',
-    ndmi:          '💧 NDMI Humidade',
     lst:           '🌡️ LST Temperatura',
-    chuva:         '🌧️ Chuva / Precipitação',
-    humidade_solo: '🌱 Humidade do Solo',
+    chuva:         '🌧️ Chuva',
+    humidade_solo: '🌱 Humidade Solo',
+    sar_vv:        '📡 SAR VV',
+    sar_vh:        '📡 SAR VH',
+    sar_ratio:     '📡 SAR VV/VH',
+    sar_rvi:       '📡 SAR RVI',
+    sar_agua:      '💧 SAR Água',
+    altitude:      '🗻 Altitude',
+    declive:       '📐 Declive',
+    aspect:        '🧭 Orientação',
+};
+
+// Descrições para o painel informativo do índice selecionado
+const RASTER_INFO = {
+    ndvi:          { metric:'Vigor vegetal padrão (NIR–Red)',         use:'Avaliação geral de vegetação e monitorização da biomassa foliar' },
+    evi:           { metric:'Vigor com menor saturação em vegetação densa (NIR, Red, Blue)', use:'Florestas e culturas com biomassa elevada; mais sensível que o NDVI em zonas densas' },
+    msavi:         { metric:'Vigor vegetal com correção do efeito do solo (NIR, Red)', use:'Culturas jovens, linhas de vinha espaçadas ou vegetação pouco densa sobre solo exposto' },
+    gndvi:         { metric:'Sensibilidade à clorofila e ao estado fisiológico (NIR, Green)', use:'Deteção precoce de diferenças vegetativas e stress por nutrientes (N, Mg)' },
+    ndre:          { metric:'Índice baseado no Red-Edge (NIR, RE1)', use:'Stress hídrico e foliar, teor relativo de clorofila, diferenças em vegetação mais desenvolvida' },
+    ndmi:          { metric:'Teor relativo de humidade na vegetação (NIR, SWIR1)', use:'Stress hídrico, seca e risco de incêndio em vegetação' },
+    ndwi:          { metric:'Água superficial ou humidade (Green, NIR)', use:'Delimitação de corpos de água e zonas húmidas; deteção de cheias' },
+    nbr:           { metric:'Severidade e extensão de áreas ardidas (NIR, SWIR2)', use:'Monitorização pós-incêndio; classificação de severidade (dNBR entre datas)' },
+    bsi:           { metric:'Solo exposto — minerais vs. vegetação (SWIR1, Red, NIR, Blue)', use:'Parcelas abandonadas, mobilização do solo e avaliação do risco de erosão' },
+    ndvi_anomaly:  { metric:'NDVI atual vs. período de referência', use:'Identificar zonas com vigor anómalos (excesso ou défice) face à mediana histórica' },
+    ndvi_diff:     { metric:'Diferença de NDVI entre dois períodos', use:'Comparar evolução da vegetação antes/depois de evento (seca, corte, reflorestação)' },
+    lst:           { metric:'Temperatura de brilho superficial — banda S8 10.85 µm (~1 km)', use:'Stress térmico, ilhas de calor, deteção de secas e microclimas' },
+    chuva:         { metric:'Precipitação acumulada em mm (ERA5 reanalysis)', use:'Histórico de chuva no período pedido; correlacionar com NDVI ou estado hídrico' },
+    humidade_solo: { metric:'Proxy de humidade do solo — VV backscatter SAR C-band', use:'Avaliação indicativa do teor de humidade; requer calibração local para valores absolutos' },
+    sar_vv:        { metric:'Retroespalhamento VV em dB (polarização vertical)', use:'Estrutura superficial, solo nu e vegetação baixa; referência estrutural do terreno' },
+    sar_vh:        { metric:'Retroespalhamento VH em dB (polarização cruzada)', use:'Estrutura da vegetação e biomassa relativa; complemento ao NDVI em dias nublados' },
+    sar_ratio:     { metric:'Relação VV/VH entre polarizações (dB)', use:'Deteção de alterações estruturais; distinção solo/vegetação/água' },
+    sar_rvi:       { metric:'Radar Vegetation Index — 4·VH/(VV+VH)', use:'Indicador radar de vegetação; complemento ao NDVI em períodos com nuvens' },
+    sar_agua:      { metric:'Deteção de água por retroespalhamento muito baixo', use:'Mapeamento de cheias, charcos e zonas de drenagem deficiente' },
+    altitude:      { metric:'Altitude em metros — DEM Copernicus GLO-30 (~30 m)', use:'Caracterização topográfica e microclimática; base para índices derivados' },
+    declive:       { metric:'Declive em graus calculado a partir do DEM', use:'Mecanização, acessibilidade, erosão e risco operacional' },
+    aspect:        { metric:'Orientação da encosta (N/S/E/W) — rosa-dos-ventos', use:'Exposição solar, diferenças de humidade e seleção de espécies' },
 };
 const RASTER_STATUS_ICON = { pending:'⏳', processing:'🔄', done:'✅', error:'❌' };
 

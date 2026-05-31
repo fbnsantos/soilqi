@@ -6,13 +6,33 @@ processa pedidos de imagens de satélite via Copernicus Data Space / Sentinel Hu
 e devolve o resultado PNG ao servidor PHP via HTTP POST.
 
 Tipos de raster suportados:
-  ndvi          — NDVI atual (Sentinel-2 L2A)
-  ndmi          — NDMI / Humidade vegetativa (Sentinel-2 L2A)
-  lst           — LST / Temperatura de superfície (Sentinel-3 SLSTR, ~1 km)
-  ndvi_anomaly  — NDVI anomalia vs período de referência (dois períodos S-2)
-  ndvi_diff     — NDVI diferença entre dois períodos (dois períodos S-2)
-  chuva         — Precipitação acumulada em mm (Open-Meteo / ERA5 reanalysis)
-  humidade_solo — Humidade do solo proxy (Sentinel-1 GRD, VV backscatter SAR)
+  — Sentinel-2 L2A (vegetação) —
+  ndvi          NDVI padrão
+  evi           Enhanced Vegetation Index (vegetação densa)
+  msavi         Modified SAVI (correção de solo)
+  gndvi         Green NDVI (clorofila)
+  ndre          Red-Edge NDVI (stress avançado)
+  ndmi          Humidade vegetativa (SWIR)
+  ndwi          Água superficial (McFeeters)
+  nbr           Áreas ardidas (NIR/SWIR2)
+  bsi           Solo exposto (Bare Soil Index)
+  ndvi_anomaly  NDVI anomalia vs. período de referência
+  ndvi_diff     NDVI diferença entre dois períodos
+  — Sentinel-3 SLSTR —
+  lst           Temperatura de superfície (~1 km)
+  — Open-Meteo ERA5 —
+  chuva         Precipitação acumulada (mm)
+  — Sentinel-1 GRD (SAR) —
+  humidade_solo Proxy de humidade do solo (VV)
+  sar_vv        VV backscatter (estrutura superficial)
+  sar_vh        VH backscatter (estrutura vegetação)
+  sar_ratio     VV/VH ratio (alterações estruturais)
+  sar_rvi       Radar Vegetation Index
+  sar_agua      Água / Inundação (retroespalhamento baixo)
+  — DEM Copernicus GLO-30 (~30 m) —
+  altitude      Altitude hipsométrica
+  declive       Declive em graus (calculado em Python)
+  aspect        Orientação da encosta (calculado em Python)
 
 Instalação:
   pip install -r requirements.txt
@@ -182,6 +202,206 @@ function evaluatePixel(s){
 }
 """
 
+# ── Índices Sentinel-2: vegetação avançada ────────────────────────────────────
+
+_EVALSCRIPT_EVI = """
+//VERSION=3
+// EVI — Enhanced Vegetation Index: menos saturação em vegetação densa
+function setup(){return{input:["B02","B04","B08","SCL","dataMask"],output:{bands:4,sampleType:"AUTO"}};}
+const BAD=new Set([3,8,9,10,11]);
+const rampEVI=[[-0.2,[0.4,0.2,0.1,1]],[0,[0.85,0.8,0.4,1]],[0.2,[0.6,0.85,0.2,1]],[0.5,[0.1,0.6,0.05,1]],[0.8,[0,0.3,0,1]]];
+function lerp(a,b,t){return a+t*(b-a);}
+function colRamp(v,ramp){for(let i=1;i<ramp.length;i++){if(v<=ramp[i][0]){const t=(v-ramp[i-1][0])/(ramp[i][0]-ramp[i-1][0]);return ramp[i-1][1].map((a,j)=>lerp(a,ramp[i][1][j],t));}}return ramp[ramp.length-1][1];}
+function evaluatePixel(s){
+  if(s.dataMask===0||BAD.has(s.SCL))return[0,0,0,0];
+  const evi=2.5*(s.B08-s.B04)/(s.B08+6*s.B04-7.5*s.B02+1);
+  return colRamp(Math.max(-0.2,Math.min(0.8,evi)),rampEVI);
+}
+"""
+
+_EVALSCRIPT_MSAVI = """
+//VERSION=3
+// MSAVI — Modified Soil Adjusted Vegetation Index: corrige efeito do solo
+function setup(){return{input:["B04","B08","SCL","dataMask"],output:{bands:4,sampleType:"AUTO"}};}
+const BAD=new Set([3,8,9,10,11]);
+const ramp=[[-0.2,[0.4,0.2,0.1,1]],[0,[0.85,0.8,0.4,1]],[0.2,[0.6,0.85,0.2,1]],[0.5,[0.1,0.6,0.05,1]],[0.8,[0,0.3,0,1]]];
+function lerp(a,b,t){return a+t*(b-a);}
+function colRamp(v,r){for(let i=1;i<r.length;i++){if(v<=r[i][0]){const t=(v-r[i-1][0])/(r[i][0]-r[i-1][0]);return r[i-1][1].map((a,j)=>lerp(a,r[i][1][j],t));}}return r[r.length-1][1];}
+function evaluatePixel(s){
+  if(s.dataMask===0||BAD.has(s.SCL))return[0,0,0,0];
+  const d=(2*s.B08+1)*(2*s.B08+1)-8*(s.B08-s.B04);
+  const msavi=(2*s.B08+1-Math.sqrt(Math.max(0,d)))/2;
+  return colRamp(Math.max(-0.2,Math.min(0.8,msavi)),ramp);
+}
+"""
+
+_EVALSCRIPT_GNDVI = """
+//VERSION=3
+// GNDVI — Green NDVI: sensível à clorofila e estado fisiológico
+function setup(){return{input:["B03","B08","SCL","dataMask"],output:{bands:4,sampleType:"AUTO"}};}
+const BAD=new Set([3,8,9,10,11]);
+const ramp=[[-1,[0.5,0.3,0.1,1]],[-0.1,[0.9,0.85,0.4,1]],[0.2,[0.5,0.8,0.2,1]],[0.5,[0.05,0.55,0.05,1]],[1,[0,0.25,0,1]]];
+function lerp(a,b,t){return a+t*(b-a);}
+function colRamp(v,r){for(let i=1;i<r.length;i++){if(v<=r[i][0]){const t=(v-r[i-1][0])/(r[i][0]-r[i-1][0]);return r[i-1][1].map((a,j)=>lerp(a,r[i][1][j],t));}}return r[r.length-1][1];}
+function evaluatePixel(s){
+  if(s.dataMask===0||BAD.has(s.SCL))return[0,0,0,0];
+  return colRamp((s.B08-s.B03)/(s.B08+s.B03+1e-10),ramp);
+}
+"""
+
+_EVALSCRIPT_NDRE = """
+//VERSION=3
+// NDRE — Red-Edge NDVI: stress e clorofila em vegetação desenvolvida
+function setup(){return{input:["B05","B8A","SCL","dataMask"],output:{bands:4,sampleType:"AUTO"}};}
+const BAD=new Set([3,8,9,10,11]);
+const ramp=[[-0.2,[0.5,0.25,0.1,1]],[0,[0.9,0.8,0.4,1]],[0.1,[0.6,0.85,0.2,1]],[0.3,[0.1,0.6,0.05,1]],[0.5,[0,0.3,0,1]]];
+function lerp(a,b,t){return a+t*(b-a);}
+function colRamp(v,r){for(let i=1;i<r.length;i++){if(v<=r[i][0]){const t=(v-r[i-1][0])/(r[i][0]-r[i-1][0]);return r[i-1][1].map((a,j)=>lerp(a,r[i][1][j],t));}}return r[r.length-1][1];}
+function evaluatePixel(s){
+  if(s.dataMask===0||BAD.has(s.SCL))return[0,0,0,0];
+  return colRamp((s.B8A-s.B05)/(s.B8A+s.B05+1e-10),ramp);
+}
+"""
+
+_EVALSCRIPT_NDWI = """
+//VERSION=3
+// NDWI (McFeeters) — água superficial e zonas húmidas
+function setup(){return{input:["B03","B08","SCL","dataMask"],output:{bands:4,sampleType:"AUTO"}};}
+const BAD=new Set([3,8,9,10,11]);
+const ramp=[[-1,[0.6,0.4,0.1,1]],[-0.3,[0.9,0.9,0.6,1]],[0,[0.7,0.95,0.7,1]],[0.2,[0.2,0.75,0.9,1]],[1,[0,0.25,0.8,1]]];
+function lerp(a,b,t){return a+t*(b-a);}
+function colRamp(v,r){for(let i=1;i<r.length;i++){if(v<=r[i][0]){const t=(v-r[i-1][0])/(r[i][0]-r[i-1][0]);return r[i-1][1].map((a,j)=>lerp(a,r[i][1][j],t));}}return r[r.length-1][1];}
+function evaluatePixel(s){
+  if(s.dataMask===0||BAD.has(s.SCL))return[0,0,0,0];
+  return colRamp((s.B03-s.B08)/(s.B03+s.B08+1e-10),ramp);
+}
+"""
+
+_EVALSCRIPT_NBR = """
+//VERSION=3
+// NBR — Normalized Burn Ratio: áreas ardidas e severidade do fogo
+function setup(){return{input:["B08","B12","SCL","dataMask"],output:{bands:4,sampleType:"AUTO"}};}
+const BAD=new Set([3,8,9,10,11]);
+// Alto NBR = saudável (verde); baixo = ardido (vermelho/preto)
+const ramp=[[-1,[0.05,0.02,0.02,1]],[-0.3,[0.55,0.1,0.05,1]],[-0.1,[0.95,0.35,0.05,1]],[0.1,[0.95,0.75,0.1,1]],[0.3,[0.6,0.88,0.2,1]],[1,[0,0.4,0,1]]];
+function lerp(a,b,t){return a+t*(b-a);}
+function colRamp(v,r){for(let i=1;i<r.length;i++){if(v<=r[i][0]){const t=(v-r[i-1][0])/(r[i][0]-r[i-1][0]);return r[i-1][1].map((a,j)=>lerp(a,r[i][1][j],t));}}return r[r.length-1][1];}
+function evaluatePixel(s){
+  if(s.dataMask===0||BAD.has(s.SCL))return[0,0,0,0];
+  return colRamp((s.B08-s.B12)/(s.B08+s.B12+1e-10),ramp);
+}
+"""
+
+_EVALSCRIPT_BSI = """
+//VERSION=3
+// BSI — Bare Soil Index: solo exposto vs. vegetado
+function setup(){return{input:["B02","B04","B08","B11","SCL","dataMask"],output:{bands:4,sampleType:"AUTO"}};}
+const BAD=new Set([3,8,9,10,11]);
+// Alto BSI = solo exposto (castanho/laranja); baixo = vegetado (verde)
+const ramp=[[-1,[0,0.4,0.1,1]],[-0.1,[0.4,0.7,0.2,1]],[0,[0.85,0.85,0.35,1]],[0.2,[0.75,0.5,0.1,1]],[0.5,[0.85,0.62,0.28,1]]];
+function lerp(a,b,t){return a+t*(b-a);}
+function colRamp(v,r){for(let i=1;i<r.length;i++){if(v<=r[i][0]){const t=(v-r[i-1][0])/(r[i][0]-r[i-1][0]);return r[i-1][1].map((a,j)=>lerp(a,r[i][1][j],t));}}return r[r.length-1][1];}
+function evaluatePixel(s){
+  if(s.dataMask===0||BAD.has(s.SCL))return[0,0,0,0];
+  const bsi=(s.B11+s.B04-s.B08-s.B02)/(s.B11+s.B04+s.B08+s.B02+1e-10);
+  return colRamp(bsi,ramp);
+}
+"""
+
+# ── Radar SAR (Sentinel-1 GRD) ─────────────────────────────────────────────────
+
+_EVALSCRIPT_SAR_VV = """
+//VERSION=3
+// VV — Retroespalhamento vertical: estrutura superficial e solo
+function setup(){return{input:["VV","dataMask"],output:{bands:4,sampleType:"AUTO"}};}
+function evaluatePixel(s){
+  if(s.dataMask===0)return[0,0,0,0];
+  const db=10*Math.log10(Math.max(s.VV,1e-10));
+  const t=Math.max(0,Math.min(1,(db+25)/25)); // -25..0 dB
+  return[t*0.92,t*0.92,t,1];
+}
+"""
+
+_EVALSCRIPT_SAR_VH = """
+//VERSION=3
+// VH — Retroespalhamento cruzado: estrutura da vegetação e biomassa
+function setup(){return{input:["VH","dataMask"],output:{bands:4,sampleType:"AUTO"}};}
+function evaluatePixel(s){
+  if(s.dataMask===0)return[0,0,0,0];
+  const db=10*Math.log10(Math.max(s.VH,1e-10));
+  const t=Math.max(0,Math.min(1,(db+30)/25)); // -30..-5 dB
+  return[t*0.25,t*0.65,t,1];
+}
+"""
+
+_EVALSCRIPT_SAR_RATIO = """
+//VERSION=3
+// VV/VH — Relação entre polarizações: deteção de alterações estruturais
+function setup(){return{input:["VV","VH","dataMask"],output:{bands:4,sampleType:"AUTO"}};}
+function evaluatePixel(s){
+  if(s.dataMask===0)return[0,0,0,0];
+  const vv_db=10*Math.log10(Math.max(s.VV,1e-10));
+  const vh_db=10*Math.log10(Math.max(s.VH,1e-10));
+  const ratio=vv_db-vh_db; // 5..15 dB típico
+  const t=Math.max(0,Math.min(1,(ratio-4)/12));
+  return[t,0.3*(1-t),1-t,1];
+}
+"""
+
+_EVALSCRIPT_SAR_RVI = """
+//VERSION=3
+// RVI — Radar Vegetation Index: complemento ao NDVI em períodos nublados
+function setup(){return{input:["VV","VH","dataMask"],output:{bands:4,sampleType:"AUTO"}};}
+function evaluatePixel(s){
+  if(s.dataMask===0)return[0,0,0,0];
+  const rvi=4*s.VH/(s.VV+s.VH+1e-10); // 0=solo, 1=vegetação densa
+  const t=Math.max(0,Math.min(1,rvi));
+  // castanho (solo) → amarelo → verde (vegetação)
+  let r,g,b;
+  if(t<0.4){r=0.6+t;g=0.3+t*1.5;b=0.05;}
+  else{r=1-(t-0.4)*2;g=0.9;b=0.05+t*0.2;}
+  return[Math.max(0,r),Math.max(0,g),b,1];
+}
+"""
+
+_EVALSCRIPT_SAR_WATER = """
+//VERSION=3
+// Água/Inundação SAR: retroespalhamento muito baixo = superfície de água calma
+function setup(){return{input:["VV","VH","dataMask"],output:{bands:4,sampleType:"AUTO"}};}
+function evaluatePixel(s){
+  if(s.dataMask===0)return[0,0,0,0];
+  const vv_db=10*Math.log10(Math.max(s.VV,1e-10));
+  const vh_db=10*Math.log10(Math.max(s.VH,1e-10));
+  if(vv_db<-14&&vh_db<-21){
+    // azul saturado = água
+    const i=Math.max(0,Math.min(1,(-14-vv_db)/8));
+    return[0,0.15+i*0.25,0.65+i*0.35,1];
+  }
+  // terra: cinzento neutro
+  const g=Math.max(0,Math.min(0.7,(vv_db+25)/22));
+  return[g,g,g,0.7];
+}
+"""
+
+# ── DEM — Topografia (Copernicus DEM GLO-30, ~30 m) ──────────────────────────
+
+_EVALSCRIPT_ALTITUDE = """
+//VERSION=3
+// Altitude — hipsometria 0..3000 m
+function setup(){return{input:["DEM"],output:{bands:4,sampleType:"AUTO"}};}
+const ramp=[[0,[0.18,0.47,0.13,1]],[200,[0.5,0.73,0.28,1]],[500,[0.68,0.62,0.32,1]],[800,[0.6,0.47,0.28,1]],[1200,[0.55,0.43,0.33,1]],[1800,[0.72,0.72,0.72,1]],[3000,[1,1,1,1]]];
+function lerp(a,b,t){return a+t*(b-a);}
+function colRamp(v,r){v=Math.max(0,Math.min(3000,v));for(let i=1;i<r.length;i++){if(v<=r[i][0]){const t=(v-r[i-1][0])/(r[i][0]-r[i-1][0]);return r[i-1][1].map((a,j)=>lerp(a,r[i][1][j],t));}}return r[r.length-1][1];}
+function evaluatePixel(s){return colRamp(s.DEM,ramp);}
+"""
+
+# DEM raw (para cálculo de declive/aspect em Python — 1 banda FLOAT)
+_EVALSCRIPT_DEM_RAW = """
+//VERSION=3
+function setup(){return{input:["DEM"],output:{bands:1,sampleType:"AUTO"}};}
+function evaluatePixel(s){return[s.DEM];}
+"""
+
 _EVALSCRIPT_NDVI_TWOPER = """
 //VERSION=3
 // Multi-datasource: "p1" e "p2"
@@ -282,6 +502,103 @@ def _build_s1_data(date_from: str, date_to: str) -> dict:
             },
         }
     }
+
+
+def _build_dem_data(date_from: str, date_to: str) -> dict:
+    """Bloco de dados DEM (Copernicus GLO-30, ~30 m resolução, colecção estática)."""
+    return {
+        "type": "dem",
+        "dataFilter": {
+            "timeRange": {
+                "from": date_from + "T00:00:00Z",
+                "to":   date_to   + "T23:59:59Z",
+            },
+        }
+    }
+
+
+def _fetch_dem_array(bounds_obj: dict, out_size: dict, date_from: str, date_to: str) -> np.ndarray:
+    """Descarrega DEM como TIFF e devolve array 2D float32 em metros."""
+    import tifffile
+    body = {
+        "input":  {"bounds": bounds_obj, "data": [_build_dem_data(date_from, date_to)]},
+        "output": {**out_size, "responses": [{"identifier": "default", "format": {"type": "image/tiff"}}]},
+        "evalscript": _EVALSCRIPT_DEM_RAW,
+    }
+    raw = _call_process_api(body, "image/tiff")
+    arr = tifffile.imread(io.BytesIO(raw))
+    if arr.ndim == 3:
+        arr = arr[0] if arr.shape[0] == 1 else arr[:, :, 0]
+    return arr.astype(np.float32)
+
+
+def _apply_colormap_ramp(arr_norm: np.ndarray, ramp: list) -> np.ndarray:
+    """Aplica ramp de cores (lista de (t, [R,G,B]) com t em 0-1) a um array normalizado 2D.
+    Devolve array RGBA uint8 (H×W×4)."""
+    h, w = arr_norm.shape
+    r_ch = np.zeros((h, w), dtype=np.float32)
+    g_ch = np.zeros((h, w), dtype=np.float32)
+    b_ch = np.zeros((h, w), dtype=np.float32)
+    for k in range(1, len(ramp)):
+        t0, c0 = ramp[k - 1]
+        t1, c1 = ramp[k]
+        mask = (arr_norm >= t0) & (arr_norm <= t1)
+        if not np.any(mask):
+            continue
+        f = (arr_norm[mask] - t0) / max(t1 - t0, 1e-10)
+        r_ch[mask] = c0[0] + f * (c1[0] - c0[0])
+        g_ch[mask] = c0[1] + f * (c1[1] - c0[1])
+        b_ch[mask] = c0[2] + f * (c1[2] - c0[2])
+    rgba = np.zeros((h, w, 4), dtype=np.uint8)
+    rgba[:, :, 0] = np.clip(r_ch * 255, 0, 255).astype(np.uint8)
+    rgba[:, :, 1] = np.clip(g_ch * 255, 0, 255).astype(np.uint8)
+    rgba[:, :, 2] = np.clip(b_ch * 255, 0, 255).astype(np.uint8)
+    rgba[:, :, 3] = 255
+    return rgba
+
+
+def _generate_slope_raster(bbox: list, bounds_obj: dict, out_size: dict, date_from: str, date_to: str) -> bytes:
+    """Calcula declive em graus a partir do DEM e gera PNG."""
+    dem = _fetch_dem_array(bounds_obj, out_size, date_from, date_to)
+    h, w = dem.shape
+    lat_c = (bbox[1] + bbox[3]) / 2
+    px_m_y = (bbox[3] - bbox[1]) / h * 111320
+    px_m_x = (bbox[2] - bbox[0]) / w * 111320 * np.cos(np.radians(lat_c))
+    dz_dy, dz_dx = np.gradient(dem, px_m_y, px_m_x)
+    slope_deg = np.degrees(np.arctan(np.sqrt(dz_dx ** 2 + dz_dy ** 2)))
+    norm = np.clip(slope_deg / 45.0, 0, 1)  # 0°..45° → 0..1
+    ramp = [(0.0, [1.0, 1.0, 1.0]), (0.25, [1.0, 0.9, 0.0]),
+            (0.5, [1.0, 0.47, 0.0]), (0.75, [0.78, 0.08, 0.0]), (1.0, [0.08, 0.0, 0.0])]
+    rgba = _apply_colormap_ramp(norm, ramp)
+    img  = Image.fromarray(rgba, "RGBA")
+    buf  = io.BytesIO(); img.save(buf, "PNG"); return buf.getvalue()
+
+
+def _generate_aspect_raster(bbox: list, bounds_obj: dict, out_size: dict, date_from: str, date_to: str) -> bytes:
+    """Calcula orientação da encosta (aspect) a partir do DEM e gera PNG (rosa-dos-ventos)."""
+    dem    = _fetch_dem_array(bounds_obj, out_size, date_from, date_to)
+    dz_dy, dz_dx = np.gradient(dem)
+    aspect = np.degrees(np.arctan2(-dz_dy, dz_dx)) % 360  # 0°=E, horário
+    h, w   = dem.shape
+    rgba   = np.zeros((h, w, 4), dtype=np.uint8)
+    # Mapear aspect 0-360° → hue HSV → RGB
+    hue  = aspect / 360.0
+    h6   = hue * 6
+    i_v  = np.floor(h6).astype(int) % 6
+    f    = h6 - np.floor(h6)
+    s, v = 0.85, 0.88
+    p = v * (1 - s)
+    q = v * (1 - s * f)
+    t_v = v * (1 - s * (1 - f))
+    rc = np.select([i_v==0,i_v==1,i_v==2,i_v==3,i_v==4,i_v==5],[v,q,p,p,t_v,v], default=v)
+    gc = np.select([i_v==0,i_v==1,i_v==2,i_v==3,i_v==4,i_v==5],[t_v,v,v,q,p,p], default=p)
+    bc = np.select([i_v==0,i_v==1,i_v==2,i_v==3,i_v==4,i_v==5],[p,p,t_v,v,v,q], default=p)
+    rgba[:, :, 0] = np.clip(rc * 255, 0, 255).astype(np.uint8)
+    rgba[:, :, 1] = np.clip(gc * 255, 0, 255).astype(np.uint8)
+    rgba[:, :, 2] = np.clip(bc * 255, 0, 255).astype(np.uint8)
+    rgba[:, :, 3] = 255
+    img = Image.fromarray(rgba, "RGBA")
+    buf = io.BytesIO(); img.save(buf, "PNG"); return buf.getvalue()
 
 
 def _call_process_api(body: dict, accept: str = "image/png") -> bytes:
@@ -421,23 +738,55 @@ def generate_raster(job: dict) -> bytes:
     if rtype == "chuva":
         return _generate_precipitation_raster(bbox, date_from, date_to)
 
-    # ── Tipos de período único via Sentinel Hub (PNG directo) ─────────────────
-    if rtype in ("ndvi", "ndmi", "lst", "humidade_solo"):
-        if rtype == "lst":
-            # Sentinel-3 SLSTR — temperatura de brilho banda S8 (10.85 µm, ~1 km)
-            data_block = [_build_slstr_data(date_from, date_to)]
-            evalscript = _EVALSCRIPT_LST
-        elif rtype == "humidade_solo":
-            # Sentinel-1 GRD — VV backscatter C-band como proxy de humidade
-            data_block = [_build_s1_data(date_from, date_to)]
-            evalscript = _EVALSCRIPT_SOIL_MOISTURE
-        elif rtype == "ndmi":
-            data_block = [_build_s2_data(date_from, date_to)]
-            evalscript = _EVALSCRIPT_NDMI
-        else:  # ndvi
-            data_block = [_build_s2_data(date_from, date_to)]
-            evalscript = _EVALSCRIPT_NDVI
+    # ── DEM — declive e aspect calculados em Python a partir do TIFF ─────────
+    if rtype == "declive":
+        return _generate_slope_raster(bbox, bounds_obj, out_size, date_from, date_to)
+    if rtype == "aspect":
+        return _generate_aspect_raster(bbox, bounds_obj, out_size, date_from, date_to)
 
+    # ── Tipos de período único via Sentinel Hub (PNG directo) ─────────────────
+    _S2_MAP = {
+        "ndvi":  _EVALSCRIPT_NDVI,
+        "ndmi":  _EVALSCRIPT_NDMI,
+        "evi":   _EVALSCRIPT_EVI,
+        "msavi": _EVALSCRIPT_MSAVI,
+        "gndvi": _EVALSCRIPT_GNDVI,
+        "ndre":  _EVALSCRIPT_NDRE,
+        "ndwi":  _EVALSCRIPT_NDWI,
+        "nbr":   _EVALSCRIPT_NBR,
+        "bsi":   _EVALSCRIPT_BSI,
+    }
+    _S1_MAP = {
+        "humidade_solo": _EVALSCRIPT_SOIL_MOISTURE,
+        "sar_vv":        _EVALSCRIPT_SAR_VV,
+        "sar_vh":        _EVALSCRIPT_SAR_VH,
+        "sar_ratio":     _EVALSCRIPT_SAR_RATIO,
+        "sar_rvi":       _EVALSCRIPT_SAR_RVI,
+        "sar_agua":      _EVALSCRIPT_SAR_WATER,
+    }
+    _DEM_MAP = {
+        "altitude": _EVALSCRIPT_ALTITUDE,
+    }
+    _SLSTR_MAP = {
+        "lst": _EVALSCRIPT_LST,
+    }
+
+    if rtype in _S2_MAP:
+        data_block = [_build_s2_data(date_from, date_to)]
+        evalscript = _S2_MAP[rtype]
+    elif rtype in _S1_MAP:
+        data_block = [_build_s1_data(date_from, date_to)]
+        evalscript = _S1_MAP[rtype]
+    elif rtype in _DEM_MAP:
+        data_block = [_build_dem_data(date_from, date_to)]
+        evalscript = _DEM_MAP[rtype]
+    elif rtype in _SLSTR_MAP:
+        data_block = [_build_slstr_data(date_from, date_to)]
+        evalscript = _SLSTR_MAP[rtype]
+    else:
+        evalscript = None
+
+    if evalscript:
         body = {
             "input":  {"bounds": bounds_obj, "data": data_block},
             "output": {**out_size, "responses": [{"identifier": "default", "format": {"type": "image/png"}}]},

@@ -714,7 +714,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 $dateFrom2  = trim($_POST['date_from2']    ?? '');
                 $dateTo2    = trim($_POST['date_to2']      ?? '');
 
-                $allowed = ['ndvi','ndvi_anomaly','ndvi_diff','ndmi','lst','chuva','humidade_solo'];
+                $allowed = [
+                    // Sentinel-2 vegetação
+                    'ndvi','ndmi','evi','msavi','gndvi','ndre','ndwi','nbr','bsi',
+                    // Sentinel-2 diferenças temporais
+                    'ndvi_anomaly','ndvi_diff',
+                    // Sentinel-3 / Meteo
+                    'lst','chuva',
+                    // SAR Sentinel-1
+                    'humidade_solo','sar_vv','sar_vh','sar_ratio','sar_rvi','sar_agua',
+                    // DEM / Topografia
+                    'altitude','declive','aspect',
+                ];
                 if (!$terrainId || !in_array($rasterType, $allowed, true) || !$dateFrom || !$dateTo) {
                     $response['message'] = 'Dados em falta ou tipo de raster inválido.';
                     break;
@@ -745,13 +756,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
 
                 // Labels amigáveis
                 $typeLabels = [
-                    'ndvi'          => 'NDVI Atual',
+                    'ndvi'          => 'NDVI', 'ndmi'  => 'NDMI',
+                    'evi'           => 'EVI',  'msavi' => 'MSAVI',
+                    'gndvi'         => 'GNDVI','ndre'  => 'NDRE',
+                    'ndwi'          => 'NDWI', 'nbr'   => 'NBR',
+                    'bsi'           => 'BSI',
                     'ndvi_anomaly'  => 'NDVI Anomalia',
                     'ndvi_diff'     => 'NDVI Diferença',
-                    'ndmi'          => 'NDMI Humidade',
                     'lst'           => 'LST Temperatura',
-                    'chuva'         => 'Chuva / Precipitação',
-                    'humidade_solo' => 'Humidade do Solo',
+                    'chuva'         => 'Chuva',
+                    'humidade_solo' => 'Humidade Solo',
+                    'sar_vv'        => 'SAR VV',
+                    'sar_vh'        => 'SAR VH',
+                    'sar_ratio'     => 'SAR VV/VH',
+                    'sar_rvi'       => 'SAR RVI',
+                    'sar_agua'      => 'SAR Água',
+                    'altitude'      => 'Altitude',
+                    'declive'       => 'Declive',
+                    'aspect'        => 'Aspect',
                 ];
                 $name = ($typeLabels[$rasterType] ?? $rasterType)
                       . ' · ' . $terrain['name']
@@ -1670,14 +1692,45 @@ try {
                 <div class="filter-group" style="flex:2; min-width:180px;">
                     <label>Tipo de raster *</label>
                     <select id="raster-type" onchange="onRasterTypeChange()">
-                        <option value="ndvi">🌿 NDVI Atual</option>
-                        <option value="ndmi">💧 NDMI / Humidade vegetativa</option>
-                        <option value="lst">🌡️ LST / Temperatura superfície</option>
-                        <option value="chuva">🌧️ Chuva / Precipitação</option>
-                        <option value="humidade_solo">🌱 Humidade do solo</option>
-                        <option value="ndvi_anomaly">📊 NDVI Anomalia (vs. ano anterior)</option>
-                        <option value="ndvi_diff">📈 NDVI Diferença entre datas</option>
+                        <optgroup label="🌿 Vegetação — Sentinel-2">
+                            <option value="ndvi">NDVI — Vigor vegetal padrão</option>
+                            <option value="evi">EVI — Vigor (vegetação densa)</option>
+                            <option value="msavi">MSAVI — Vigor (correção de solo)</option>
+                            <option value="gndvi">GNDVI — Clorofila e estado fisiológico</option>
+                            <option value="ndre">NDRE — Red-Edge / stress avançado</option>
+                            <option value="ndmi">NDMI — Humidade vegetativa</option>
+                            <option value="ndwi">NDWI — Água superficial / zonas húmidas</option>
+                            <option value="nbr">NBR — Áreas ardidas / severidade</option>
+                            <option value="bsi">BSI — Solo exposto</option>
+                        </optgroup>
+                        <optgroup label="📊 Diferenças temporais — Sentinel-2">
+                            <option value="ndvi_anomaly">NDVI Anomalia (vs. período referência)</option>
+                            <option value="ndvi_diff">NDVI Diferença entre datas</option>
+                        </optgroup>
+                        <optgroup label="🌡️ Temperatura / Clima">
+                            <option value="lst">LST — Temperatura superfície (Sentinel-3)</option>
+                            <option value="chuva">Chuva — Precipitação acumulada (ERA5)</option>
+                        </optgroup>
+                        <optgroup label="📡 Radar SAR — Sentinel-1">
+                            <option value="humidade_solo">Humidade do Solo (proxy SAR)</option>
+                            <option value="sar_vv">VV — Estrutura superficial</option>
+                            <option value="sar_vh">VH — Estrutura da vegetação</option>
+                            <option value="sar_ratio">VV/VH — Relação de polarizações</option>
+                            <option value="sar_rvi">RVI — Vegetação radar</option>
+                            <option value="sar_agua">Água / Inundação SAR</option>
+                        </optgroup>
+                        <optgroup label="🗻 Topografia — DEM GLO-30">
+                            <option value="altitude">Altitude</option>
+                            <option value="declive">Declive</option>
+                            <option value="aspect">Orientação da Encosta</option>
+                        </optgroup>
                     </select>
+                    <!-- Descrição dinâmica do índice selecionado -->
+                    <div id="raster-desc-box" style="display:none; margin-top:8px; padding:10px 12px;
+                         background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; font-size:12px; line-height:1.55;">
+                        <div id="raster-desc-metric" style="font-weight:600; color:#0369a1; margin-bottom:3px;"></div>
+                        <div id="raster-desc-use" style="color:#374151;"></div>
+                    </div>
                 </div>
             </div>
 

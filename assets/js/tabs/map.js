@@ -7,13 +7,28 @@
 const mapRasterOverlays = {};
 
 const MAP_RASTER_LABELS = {
-    ndvi:          '🌿 NDVI Atual',
+    ndvi:          '🌿 NDVI',
+    ndmi:          '💧 NDMI',
+    evi:           '🌿 EVI',
+    msavi:         '🌿 MSAVI',
+    gndvi:         '🌿 GNDVI',
+    ndre:          '🌿 NDRE',
+    ndwi:          '💧 NDWI',
+    nbr:           '🔥 NBR',
+    bsi:           '🟤 BSI',
     ndvi_anomaly:  '📊 NDVI Anomalia',
     ndvi_diff:     '📈 NDVI Diferença',
-    ndmi:          '💧 NDMI Humidade',
     lst:           '🌡️ LST Temperatura',
-    chuva:         '🌧️ Chuva / Precipitação',
-    humidade_solo: '🌱 Humidade do Solo',
+    chuva:         '🌧️ Chuva',
+    humidade_solo: '🌱 Humidade Solo',
+    sar_vv:        '📡 SAR VV',
+    sar_vh:        '📡 SAR VH',
+    sar_ratio:     '📡 SAR VV/VH',
+    sar_rvi:       '📡 SAR RVI',
+    sar_agua:      '💧 SAR Água',
+    altitude:      '🗻 Altitude',
+    declive:       '📐 Declive',
+    aspect:        '🧭 Orientação',
 };
 
 // ── Carregar lista ────────────────────────────────────────────────────────────
