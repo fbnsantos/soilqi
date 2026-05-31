@@ -9,13 +9,14 @@
 let reportTerrainId = null;
 
 // id → L.imageOverlay  /  dados para PDF
-const mapInterpOverlays = {};
-const mapInterpData     = {};   // {name, png, bounds}
+// Nomes com prefixo "rpt" para não colidir com variáveis homónimas de app.js
+const rptInterpOverlays = {};   // id → L.imageOverlay
+const rptInterpData     = {};   // id → {name, png, bounds}
 
-const mapGeoJSONLayers  = {};   // id → L.geoJSON layer
-const mapGeoJSONData    = {};   // id → {name}
+const rptGeoJSONLayers  = {};   // id → L.geoJSON layer
+const rptGeoJSONData    = {};   // id → {name}
 
-const mapRasterOverlays = {};   // id → L.imageOverlay
+const mapRasterOverlays = {};   // id → L.imageOverlay  (rasters satélite)
 const mapRasterData     = {};   // id → {name, png, bounds, type}
 
 let mapNotesCache = [];         // notas carregadas (para PDF)
@@ -87,7 +88,7 @@ function setGlobalOpacity(val) {
     const lbl = document.getElementById('global-opacity-val');
     if (lbl) lbl.textContent = val + '%';
     const opacity = parseInt(val) / 100;
-    Object.values(mapInterpOverlays).forEach(ov => ov.setOpacity(opacity));
+    Object.values(rptInterpOverlays).forEach(ov => ov.setOpacity(opacity));
     Object.values(mapRasterOverlays).forEach(ov => ov.setOpacity(opacity));
 }
 
@@ -123,7 +124,7 @@ function _renderInterpList(items) {
         return;
     }
     listEl.innerHTML = items.map(it => {
-        const on  = !!mapInterpOverlays[it.id];
+        const on  = !!rptInterpOverlays[it.id];
         const dt  = new Date(it.created_at).toLocaleDateString('pt-PT');
         return `
         <div class="layer-row" id="interp-row-${it.id}">
@@ -141,7 +142,7 @@ function _renderInterpList(items) {
 }
 
 function toggleInterpOnMap(id) {
-    mapInterpOverlays[id] ? _hideInterpOnMap(id) : _showInterpOnMap(id);
+    rptInterpOverlays[id] ? _hideInterpOnMap(id) : _showInterpOnMap(id);
 }
 
 function _showInterpOnMap(id) {
@@ -164,8 +165,8 @@ function _showInterpOnMap(id) {
             const opacity = _globalOpacity();
             const bounds  = [[data.min_lat, data.min_lng], [data.max_lat, data.max_lng]];
             const overlay = L.imageOverlay(data.png, bounds, { opacity, zIndex: 350 }).addTo(map);
-            mapInterpOverlays[id] = overlay;
-            mapInterpData[id]     = { name: data.name, png: data.png, bounds };
+            rptInterpOverlays[id] = overlay;
+            rptInterpData[id]     = { name: data.name, png: data.png, bounds };
             map.fitBounds(bounds, { padding: [30, 30] });
             if (btn) { btn.textContent = '✅ ON'; btn.className = 'layer-toggle-btn layer-toggle-on'; }
         })
@@ -176,9 +177,9 @@ function _showInterpOnMap(id) {
 }
 
 function _hideInterpOnMap(id) {
-    const ov = mapInterpOverlays[id];
-    if (ov) { map.removeLayer(ov); delete mapInterpOverlays[id]; }
-    delete mapInterpData[id];
+    const ov = rptInterpOverlays[id];
+    if (ov) { map.removeLayer(ov); delete rptInterpOverlays[id]; }
+    delete rptInterpData[id];
     const btn = document.getElementById('interp-btn-' + id);
     if (btn) { btn.textContent = '👁 Ver'; btn.className = 'layer-toggle-btn layer-toggle-off'; }
 }
@@ -215,7 +216,7 @@ function _renderGeoJSONList(items) {
         return;
     }
     listEl.innerHTML = items.map(it => {
-        const on   = !!mapGeoJSONLayers[it.id];
+        const on   = !!rptGeoJSONLayers[it.id];
         const dt   = new Date(it.created_at).toLocaleDateString('pt-PT');
         const feat = it.feature_count ? it.feature_count + ' feat.' : '';
         return `
@@ -234,7 +235,7 @@ function _renderGeoJSONList(items) {
 }
 
 function toggleGeoJSONOnMap(id) {
-    mapGeoJSONLayers[id] ? _hideGeoJSONOnMap(id) : _showGeoJSONOnMap(id);
+    rptGeoJSONLayers[id] ? _hideGeoJSONOnMap(id) : _showGeoJSONOnMap(id);
 }
 
 function _showGeoJSONOnMap(id) {
@@ -276,8 +277,8 @@ function _showGeoJSONOnMap(id) {
                     }
                 }
             }).addTo(map);
-            mapGeoJSONLayers[id] = layer;
-            mapGeoJSONData[id]   = { name: data.name };
+            rptGeoJSONLayers[id] = layer;
+            rptGeoJSONData[id]   = { name: data.name };
             try { map.fitBounds(layer.getBounds(), { padding: [30, 30] }); } catch(e) {}
             if (btn) { btn.textContent = '✅ ON'; btn.className = 'layer-toggle-btn layer-toggle-on'; }
         })
@@ -288,9 +289,9 @@ function _showGeoJSONOnMap(id) {
 }
 
 function _hideGeoJSONOnMap(id) {
-    const layer = mapGeoJSONLayers[id];
-    if (layer) { map.removeLayer(layer); delete mapGeoJSONLayers[id]; }
-    delete mapGeoJSONData[id];
+    const layer = rptGeoJSONLayers[id];
+    if (layer) { map.removeLayer(layer); delete rptGeoJSONLayers[id]; }
+    delete rptGeoJSONData[id];
     const btn = document.getElementById('geojson-btn-' + id);
     if (btn) { btn.textContent = '👁 Ver'; btn.className = 'layer-toggle-btn layer-toggle-off'; }
 }
@@ -622,8 +623,8 @@ function generateMapReport() {
     doc.setFontSize(10); doc.setFont('helvetica', 'normal'); doc.setTextColor(55, 65, 81);
 
     const allLayers = [
-        ...Object.entries(mapInterpData).map(([, d]) => '🎨 ' + d.name),
-        ...Object.entries(mapGeoJSONData).map(([, d]) => '🗺️ ' + d.name),
+        ...Object.entries(rptInterpData).map(([, d]) => '🎨 ' + d.name),
+        ...Object.entries(rptGeoJSONData).map(([, d]) => '🗺️ ' + d.name),
         ...Object.entries(mapRasterData).map(([, d]) =>
             (MAP_RASTER_LABELS[d.type] || d.type) + ' — ' + d.name),
     ];
@@ -702,7 +703,7 @@ function generateMapReport() {
 
     // ── Páginas: interpolações de campo ──────────────────────────────────────
 
-    Object.entries(mapInterpData).forEach(([, d]) => {
+    Object.entries(rptInterpData).forEach(([, d]) => {
         doc.addPage();
         doc.setFillColor(52, 211, 153);
         doc.rect(0, 0, PW, 16, 'F');
