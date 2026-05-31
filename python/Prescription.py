@@ -38,7 +38,7 @@ import warnings
 import numpy as np
 import requests
 import paho.mqtt.client as mqtt
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 try:
     import shapefile          # pyshp
@@ -89,6 +89,158 @@ WGS84_PRJ = (
     'PRIMEM["Greenwich",0.0],'
     'UNIT["Degree",0.0174532925199433]]'
 )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GERAÇÃO DO PNG DE VISUALIZAÇÃO
+# ─────────────────────────────────────────────────────────────────────────────
+
+def generate_png_visualization(
+    png_b64: str,
+    legend: list,
+    prescriptions: list,
+    name: str,
+) -> str:
+    """
+    Gera um PNG de visualização combinando o mapa de zonagem com uma legenda
+    lateral que mostra os valores de prescrição por zona.
+    Retorna o PNG em base64.
+    """
+    # Decode base64 PNG
+    png_bytes = base64.b64decode(png_b64)
+    map_img   = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+    map_w, map_h = map_img.size
+
+    # Tentar carregar fonte do sistema; fallback para fonte bitmap
+    _font_paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+        "C:/Windows/Fonts/arial.ttf",
+    ]
+    _bold_paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+        "C:/Windows/Fonts/arialbd.ttf",
+    ]
+
+    def _try_font(paths, size):
+        for p in paths:
+            try:
+                return ImageFont.truetype(p, size)
+            except Exception:
+                pass
+        return ImageFont.load_default()
+
+    fnt_sm   = _try_font(_font_paths, 10)
+    fnt_md   = _try_font(_font_paths, 12)
+    fnt_hdr  = _try_font(_bold_paths, 14)
+
+    # Construir lookup prescrição por zona
+    presc_by_zone: dict[int, dict] = {}
+    for p in prescriptions:
+        try:
+            presc_by_zone[int(p["zone_id"])] = p
+        except (KeyError, TypeError, ValueError):
+            pass
+
+    # Dimensões do painel de legenda
+    legend_w = 290
+    hdr_h    = 58
+    col_h    = 22
+    row_h    = 38
+    footer_h = 26
+    n_zones  = len(legend)
+    panel_h  = hdr_h + col_h + n_zones * row_h + footer_h + 8
+
+    total_h = max(map_h, panel_h)
+    total_w = map_w + legend_w
+
+    # Criar imagem composta
+    out_img = Image.new("RGB", (total_w, total_h), (255, 255, 255))
+
+    # Colar mapa (centrado verticalmente, fundo branco para áreas transparentes)
+    map_rgb = Image.new("RGB", map_img.size, (255, 255, 255))
+    map_rgb.paste(map_img, mask=map_img.split()[3])
+    map_offset_y = (total_h - map_h) // 2
+    out_img.paste(map_rgb, (0, map_offset_y))
+
+    draw = ImageDraw.Draw(out_img)
+
+    # Painel de legenda — fundo
+    draw.rectangle([map_w, 0, total_w - 1, total_h - 1], fill=(248, 250, 252))
+    draw.line([map_w, 0, map_w, total_h - 1], fill=(203, 213, 225), width=2)
+
+    # Cabeçalho verde
+    draw.rectangle([map_w, 0, total_w - 1, hdr_h - 1], fill=(5, 150, 105))
+    x0 = map_w + 12
+    draw.text((x0, 10), "PRESCRICAO VRA", fill=(255, 255, 255), font=fnt_hdr)
+    name_disp = name[:38] if len(name) > 38 else name
+    draw.text((x0, 32), name_disp, fill=(167, 243, 208), font=fnt_sm)
+
+    # Cabeçalhos das colunas
+    y = hdr_h
+    draw.rectangle([map_w, y, total_w - 1, y + col_h - 1], fill=(241, 245, 249))
+    draw.line([map_w, y + col_h - 1, total_w - 1, y + col_h - 1], fill=(226, 232, 240))
+    for col_lbl, col_x in [
+        ("ZONA",  map_w + 8),
+        ("Spray", map_w + 150),
+        ("N",     map_w + 198),
+        ("P",     map_w + 228),
+        ("K",     map_w + 258),
+    ]:
+        draw.text((col_x, y + 5), col_lbl, fill=(100, 116, 139), font=fnt_sm)
+    y += col_h
+
+    # Linhas de zona
+    for i, z in enumerate(legend):
+        zone_id = int(z.get("zone_id", i + 1))
+        label   = str(z.get("label", f"Zona {zone_id}"))[:26]
+        try:
+            rgb = _parse_hex_color(str(z.get("color", "#808080")))
+        except Exception:
+            rgb = (128, 128, 128)
+        p    = presc_by_zone.get(zone_id, {})
+        area = float(z.get("area_pct", 0))
+
+        row_bg = (255, 255, 255) if i % 2 == 0 else (249, 250, 251)
+        draw.rectangle([map_w, y, total_w - 1, y + row_h - 1], fill=row_bg)
+        draw.line([map_w, y + row_h - 1, total_w - 1, y + row_h - 1], fill=(243, 244, 246))
+
+        # Swatch de cor
+        sw_x = map_w + 8
+        sw_y = y + (row_h - 16) // 2
+        draw.rectangle([sw_x, sw_y, sw_x + 16, sw_y + 16], fill=rgb, outline=(180, 180, 180))
+
+        # Label + percentagem
+        draw.text((sw_x + 22, y + 5),  label,        fill=(31, 41, 55),    font=fnt_md)
+        draw.text((sw_x + 22, y + 21), f"{area:.1f}%", fill=(156, 163, 175), font=fnt_sm)
+
+        # Valores de prescrição
+        spray  = float(p.get("spray",  0) or 0)
+        fert_n = float(p.get("fert_n", 0) or 0)
+        fert_p = float(p.get("fert_p", 0) or 0)
+        fert_k = float(p.get("fert_k", 0) or 0)
+        val_color = (37, 99, 235) if (spray + fert_n + fert_p + fert_k) > 0 else (156, 163, 175)
+        for val, vx in [
+            (f"{spray:.0f}",  map_w + 150),
+            (f"{fert_n:.0f}", map_w + 198),
+            (f"{fert_p:.0f}", map_w + 228),
+            (f"{fert_k:.0f}", map_w + 258),
+        ]:
+            draw.text((vx, y + 12), val, fill=val_color, font=fnt_md)
+
+        y += row_h
+
+    # Rodapé
+    draw.rectangle([map_w, y, total_w - 1, y + footer_h - 1], fill=(241, 245, 249))
+    draw.text((map_w + 8, y + 7), "Spray: L/ha   N, P, K: kg/ha", fill=(107, 114, 128), font=fnt_sm)
+
+    # Converter para PNG
+    out_buf = io.BytesIO()
+    out_img.save(out_buf, format="PNG", optimize=True)
+    return base64.b64encode(out_buf.getvalue()).decode("ascii")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GERAÇÃO DO SHAPEFILE
@@ -285,6 +437,7 @@ def fetch_job_data(data_url: str, api_key: str, request_id: str) -> dict:
 def post_result(
     job: dict,
     zip_b64: str | None,
+    png_b64: str | None = None,
     error_msg: str | None = None,
 ) -> None:
     url     = job.get("callback_url", "")
@@ -307,6 +460,8 @@ def post_result(
             "status":     "done",
             "zip_data":   zip_b64,
         }
+        if png_b64:
+            payload["png_data"] = png_b64
 
     try:
         r = requests.post(url, json=payload, headers=HEADERS, timeout=60)
@@ -334,7 +489,16 @@ def process_job(job: dict) -> None:
         name   = body.get("name", "prescription")
 
         zip_b64 = generate_shapefile(png, bounds, legend, prescriptions, name)
-        post_result(job, zip_b64)
+
+        # Gerar PNG de visualização (opcional — não bloqueia se falhar)
+        vis_png_b64: str | None = None
+        try:
+            vis_png_b64 = generate_png_visualization(png, legend, prescriptions, name)
+            log.info("[%s] PNG de visualização gerado.", rid)
+        except Exception as png_ex:
+            log.warning("[%s] PNG de visualização falhou (não crítico): %s", rid, png_ex)
+
+        post_result(job, zip_b64, png_b64=vis_png_b64)
         log.info("[%s] Shapefile gerado com sucesso.", rid)
 
     except Exception as ex:

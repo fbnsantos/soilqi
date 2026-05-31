@@ -561,11 +561,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                     name             VARCHAR(200) NOT NULL,
                     zone_prescriptions JSON NULL,
                     shapefile_zip    MEDIUMBLOB NULL,
+                    png_data         MEDIUMBLOB NULL,
                     error_msg        TEXT NULL,
                     created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE KEY uidx_pr_req (request_id),
                     INDEX idx_pr (user_id, terrain_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                // Migração silenciosa: adicionar png_data se ainda não existir
+                try { $pdo->exec("ALTER TABLE prescription_results ADD COLUMN png_data MEDIUMBLOB NULL"); } catch (PDOException $ignored) {}
 
                 // Gerar UUID
                 $requestId = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',

@@ -142,6 +142,10 @@ function _renderInterpList(items) {
                 <div class="layer-row-name" title="${_esc(it.name)}">${_esc(it.name)}</div>
                 <div class="layer-row-meta">${_esc(it.param || '')}  ${dt}</div>
             </div>
+            <a href="api/interpolation_download_png.php?id=${it.id}"
+               download title="Download PNG"
+               class="layer-toggle-btn layer-toggle-off"
+               style="text-decoration:none;font-size:10px;padding:3px 6px;">⬇</a>
             <button id="interp-btn-${it.id}"
                     onclick="toggleInterpOnMap(${it.id})"
                     class="layer-toggle-btn ${on ? 'layer-toggle-on' : 'layer-toggle-off'}">
@@ -354,6 +358,10 @@ function _renderRasterList(items) {
                 <div class="layer-row-name" title="${_esc(r.name)}">${label}</div>
                 <div class="layer-row-meta">${dateRange}  ${dt}</div>
             </div>
+            <a href="api/raster_download_png.php?id=${r.id}"
+               download title="Download PNG"
+               class="layer-toggle-btn layer-toggle-off"
+               style="text-decoration:none;font-size:10px;padding:3px 6px;">⬇</a>
             <button id="raster-btn-${r.id}"
                     onclick="toggleRasterOnMap(${r.id})"
                     class="layer-toggle-btn ${on ? 'layer-toggle-on' : 'layer-toggle-off'}">
@@ -1194,6 +1202,10 @@ function _renderZonationHistory(items) {
                     style="font-size:10px;padding:3px 7px;">
                 ${on ? '✅ ON' : '👁 Ver'}
             </button>
+            <a href="api/zonation_download_png.php?id=${it.id}"
+               download title="Download PNG"
+               class="layer-toggle-btn layer-toggle-off"
+               style="text-decoration:none;font-size:10px;padding:3px 6px;">⬇</a>
             <button onclick="_deleteZonation(${it.id})"
                     class="layer-toggle-btn layer-toggle-off"
                     style="font-size:10px;padding:3px 6px;color:#ef4444;background:#fff0f0;">🗑</button>
@@ -1536,7 +1548,7 @@ function loadPrescriptionHistory(terrainId) {
             listEl.innerHTML = items.map(it => {
                 const dt = new Date(it.created_at).toLocaleDateString('pt-PT');
                 return `
-                <div class="zn-hist-row" style="display:flex;align-items:center;gap:6px;
+                <div class="zn-hist-row" style="display:flex;align-items:center;gap:5px;
                       padding:6px 4px;border-bottom:1px solid #f8fafc;">
                     <div style="flex:1;min-width:0;">
                         <div style="font-size:11px;font-weight:600;color:#374151;
@@ -1544,9 +1556,16 @@ function loadPrescriptionHistory(terrainId) {
                              title="${_esc(it.name)}">${_esc(it.name)}</div>
                         <div style="font-size:10px;color:#9ca3af;">${dt}</div>
                     </div>
+                    <a href="api/prescription_download_png.php?id=${it.id}"
+                       download title="Download PNG"
+                       style="padding:4px 7px;background:#6366f1;color:#fff;border:none;
+                              border-radius:5px;font-size:10px;font-weight:600;
+                              cursor:pointer;text-decoration:none;white-space:nowrap;">
+                        ⬇ PNG
+                    </a>
                     <a href="api/prescription_download.php?id=${it.id}"
-                       target="_blank"
-                       style="padding:4px 8px;background:#059669;color:#fff;border:none;
+                       download title="Download ShapeFile ZIP"
+                       style="padding:4px 7px;background:#059669;color:#fff;border:none;
                               border-radius:5px;font-size:10px;font-weight:600;
                               cursor:pointer;text-decoration:none;white-space:nowrap;">
                         ⬇ ZIP

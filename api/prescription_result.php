@@ -79,8 +79,29 @@ try {
             http_response_code(400); $response['message'] = 'zip_data inválido.';
             echo json_encode($response); exit;
         }
-        $pdo->prepare("UPDATE prescription_results SET status='done', shapefile_zip=? WHERE request_id=?")
-            ->execute([$zipBin, $requestId]);
+
+        // PNG de visualização (opcional)
+        $pngBin = null;
+        if (!empty($input['png_data'])) {
+            $pngB64 = preg_replace('/^data:[^;]+;base64,/', '', $input['png_data']);
+            $decoded = base64_decode($pngB64, true);
+            if ($decoded && strlen($decoded) > 4) {
+                $pngBin = $decoded;
+            }
+        }
+
+        // Migração silenciosa: garantir coluna png_data
+        try {
+            $pdo->exec("ALTER TABLE prescription_results ADD COLUMN png_data MEDIUMBLOB NULL");
+        } catch (PDOException $ignored) {}
+
+        if ($pngBin !== null) {
+            $pdo->prepare("UPDATE prescription_results SET status='done', shapefile_zip=?, png_data=? WHERE request_id=?")
+                ->execute([$zipBin, $pngBin, $requestId]);
+        } else {
+            $pdo->prepare("UPDATE prescription_results SET status='done', shapefile_zip=? WHERE request_id=?")
+                ->execute([$zipBin, $requestId]);
+        }
     }
 
     $response['success'] = true;
