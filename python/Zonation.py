@@ -1,352 +1,242 @@
-#!/usr/bin/env python3
 """
-Zonation.py — Motor de zonagem agrícola a partir de rasters existentes
-======================================================================
-Lê um JSON de stdin com os PNGs em base64, aplica o método escolhido
-pixel-a-pixel e devolve um PNG de zonagem + legenda via stdout (JSON).
+Zonation.py — Serviço MQTT para geração de mapas de zonagem
+============================================================
+Subscreve o tópico MQTT /soilqi/zonation (QoS 1, sessão persistente).
+Para cada pedido:
+  1. Busca os PNGs das camadas via HTTP (api/zonation_data.php)
+  2. Calcula a zonagem com o método pedido
+  3. Envia o PNG resultado de volta ao servidor via HTTP POST (api/zonation_result.php)
 
-Input stdin (JSON):
-{
-  "method":  "kmeans" | "fcm" | "gmm" | "quantiles" | "weighted",
-  "params":  { ... específico por método ... },
-  "layers": [
-    {
-      "id": 42,
-      "name": "NDVI 2024-01 → 2024-03",
-      "type": "ndvi",
-      "png":  "<base64 do PNG>",
-      "bounds": {"min_lat":38.5, "max_lat":38.7, "min_lng":-8.2, "max_lng":-8.0}
-    },
-    ...
-  ]
-}
+Métodos suportados:
+  kmeans    — K-means clustering (sklearn)
+  fcm       — Fuzzy C-means (scikit-fuzzy)
+  gmm       — Gaussian Mixture Models (sklearn)
+  quantiles — Classificação por quantis (numpy)
+  weighted  — Índice composto ponderado (numpy)
 
-Output stdout (JSON):
-{
-  "success": true,
-  "png":    "<base64 PNG RGBA semi-transparente>",
-  "bounds": {"min_lat":..., "max_lat":..., "min_lng":..., "max_lng":...},
-  "legend": [
-    {"zone":1, "color":"#d73027", "label":"Zona 1 (Baixo)", "area_pct":28.3},
-    ...
-  ]
-}
+Configuração — adicionar ao módulo soilqi (2 níveis acima):
+  MQTT_HOST          = "..."
+  MQTT_PORT          = 1883
+  MQTT_USER          = ""
+  MQTT_PASS          = ""
+  ZONATION_TOPIC     = "/soilqi/zonation"    # opcional, este é o default
+  RASTER_API_KEY     = "..."                 # chave partilhada com o PHP
 """
 
+from pathlib import Path
 import sys
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+sys.path.append(str(BASE_DIR))
+
+try:
+    import soilqi  # noqa: E402
+except ImportError:
+    soilqi = None  # fallback para variáveis de ambiente
+
+import os
 import json
+import time
 import base64
 import io
+import logging
+import signal
+import threading
 import warnings
 
 import numpy as np
+import requests
+import paho.mqtt.client as mqtt
 from PIL import Image
 
 warnings.filterwarnings("ignore")
 
-# ── Resolução interna (compromisso velocidade/detalhe) ────────────────────────
-TARGET_W, TARGET_H = 256, 256
+# ─────────────────────────────────────────────────────────────────────────────
+# LOGGING
+# ─────────────────────────────────────────────────────────────────────────────
 
-# ── Paleta categórica para zonas (até 8) ─────────────────────────────────────
-# Gradiente semântico: vermelho(baixo) → laranja → amarelo → verde-claro → azul(alto)
-# Zonas extras: roxo, teal, castanho
-ZONE_COLORS = [
-    (215,  25,  28),   # Z1 Muito Baixo  – vermelho
-    (253, 141,  60),   # Z2 Baixo        – laranja
-    (255, 255, 153),   # Z3 Médio-baixo  – amarelo
-    (166, 217, 106),   # Z4 Médio-alto   – verde claro
-    ( 26, 150,  65),   # Z5 Alto         – verde escuro
-    ( 69, 117, 180),   # Z6              – azul
-    (118,  42, 131),   # Z7              – roxo
-    (140,  81,  10),   # Z8              – castanho
-]
-
-ZONE_LABELS_LOW_HIGH = [
-    "Muito Baixo", "Baixo", "Médio-Baixo", "Médio",
-    "Médio-Alto", "Alto", "Muito Alto", "Máximo"
-]
-
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger("zonation")
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  CARREGAMENTO E NORMALIZAÇÃO
+# CONFIGURAÇÃO
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _cfg(attr: str, env: str, default: str = "") -> str:
+    try:
+        v = getattr(soilqi, attr, None) if soilqi else None
+        return str(v) if v is not None else os.environ.get(env, default)
+    except Exception:
+        return os.environ.get(env, default)
+
+
+CFG = {
+    "MQTT_HOST":        _cfg("MQTT_HOST",    "MQTT_HOST",    "localhost"),
+    "MQTT_PORT":        int(_cfg("MQTT_PORT", "MQTT_PORT",   "1883")),
+    "MQTT_USER":        _cfg("MQTT_USER",    "MQTT_USER",    ""),
+    "MQTT_PASS":        _cfg("MQTT_PASS",    "MQTT_PASS",    ""),
+    "ZONATION_TOPIC":   _cfg("ZONATION_TOPIC", "ZONATION_TOPIC", "/soilqi/zonation"),
+    "MQTT_CLIENT_ID":   "zonation_worker",
+    "API_KEY":          _cfg("RASTER_API_KEY", "RASTER_API_KEY", ""),
+}
+
+log.info("MQTT: %s:%s  tópico: %s", CFG["MQTT_HOST"], CFG["MQTT_PORT"], CFG["ZONATION_TOPIC"])
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONSTANTES DE RENDERIZAÇÃO
+# ─────────────────────────────────────────────────────────────────────────────
+
+TARGET_W, TARGET_H = 256, 256
+
+# Paleta semântica: vermelho(baixo) → laranja → amarelo → verde → azul(alto)
+ZONE_COLORS = [
+    (215,  25,  28),  # Z1 Muito Baixo  – vermelho
+    (253, 141,  60),  # Z2 Baixo        – laranja
+    (255, 255, 153),  # Z3 Médio-baixo  – amarelo
+    (166, 217, 106),  # Z4 Médio-alto   – verde claro
+    ( 26, 150,  65),  # Z5 Alto         – verde escuro
+    ( 69, 117, 180),  # Z6              – azul
+    (118,  42, 131),  # Z7              – roxo
+    (140,  81,  10),  # Z8              – castanho
+]
+ZONE_LABELS = [
+    "Muito Baixo", "Baixo", "Médio-Baixo", "Médio",
+    "Médio-Alto",  "Alto",  "Muito Alto",  "Máximo",
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CARREGAMENTO E PRÉ-PROCESSAMENTO DE LAYERS
 # ─────────────────────────────────────────────────────────────────────────────
 
 def load_layer(layer: dict) -> np.ndarray:
-    """
-    Descodifica o PNG base64 → array float32 [H, W] normalizado [0..1].
-    Pixels transparentes (alpha < 10) ficam NaN.
-    """
+    """PNG base64 → array float32 [H, W] ∈ [0,1]. NaN onde sem dados."""
     png_bytes = base64.b64decode(layer["png"])
-    img = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
-    img = img.resize((TARGET_W, TARGET_H), Image.BILINEAR)
-    arr = np.array(img, dtype=np.float32)        # (H, W, 4)
-
-    alpha  = arr[:, :, 3]
-    r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
-
-    # Luminância percetual — bom proxy para índices com colormaps monotónicos
-    lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0  # [0..1]
-
-    # Máscara sem-dados
-    valid = alpha >= 10
-    return np.where(valid, lum, np.nan)
+    img  = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+    img  = img.resize((TARGET_W, TARGET_H), Image.BILINEAR)
+    arr  = np.array(img, dtype=np.float32)
+    alpha = arr[:, :, 3]
+    lum   = (0.299 * arr[:, :, 0] + 0.587 * arr[:, :, 1]
+             + 0.114 * arr[:, :, 2]) / 255.0
+    return np.where(alpha >= 10, lum, np.nan)
 
 
-def stack_layers(arrays: list[np.ndarray], weights=None, invert=None
-                 ) -> tuple[np.ndarray, np.ndarray]:
+def stack_layers(arrays, weights=None, invert=None):
     """
-    Empilha os arrays numa matriz de características.
-    Aplica peso e/ou inversão se fornecidos.
-
-    Devolve:
-      X     : (n_valid, n_features) float32 — apenas pixels com dados em TODOS os layers
-      valid : (H, W) bool
+    Empilha os arrays normaliz. → (n_valid, n_features) + máscara (H, W).
+    Aplica pesos e inversão opcionais.
     """
     H, W = TARGET_H, TARGET_W
     n = len(arrays)
 
-    # Máscara global: pixel válido em TODOS os layers
     valid = np.ones((H, W), dtype=bool)
     for a in arrays:
         valid &= ~np.isnan(a)
 
-    # Normalizar cada layer para [0,1] (min-max global)
     normed = []
     for i, a in enumerate(arrays):
         vals = a[valid]
         mn, mx = vals.min(), vals.max()
-        rng = mx - mn if (mx - mn) > 1e-9 else 1.0
-        layer_norm = np.where(valid, (a - mn) / rng, 0.0)
-
+        rng = (mx - mn) if (mx - mn) > 1e-9 else 1.0
+        ln = np.where(valid, (a - mn) / rng, 0.0)
         if invert and i < len(invert) and invert[i]:
-            layer_norm = np.where(valid, 1.0 - layer_norm, 0.0)
+            ln = np.where(valid, 1.0 - ln, 0.0)
+        normed.append(ln)
 
-        normed.append(layer_norm)
-
-    # Construir matriz (H*W, n_features)
     flat = np.stack([n_.flatten() for n_ in normed], axis=1).astype(np.float32)
-    X = flat[valid.flatten()]  # (n_valid, n_features)
+    X = flat[valid.flatten()]
 
-    # Aplicar pesos (apenas escala — não afeta clustering, mas afeta índice composto)
     if weights is not None:
         w = np.array(weights[:n] + [1.0] * max(0, n - len(weights)), dtype=np.float32)
-        w = w / (w.sum() if w.sum() > 0 else 1.0)
-        X = X * w  # broadcast sobre features
+        w /= (w.sum() if w.sum() > 0 else 1.0)
+        X = X * w
 
     return X, valid
 
 
-def reorder_by_composite(labels: np.ndarray, X_orig: np.ndarray, n: int) -> np.ndarray:
-    """Re-mapeia labels de forma que zona 0 = menor valor médio composto."""
-    cluster_means = [
-        X_orig[labels == c].mean() if np.any(labels == c) else 0.0
-        for c in range(n)
-    ]
-    order = np.argsort(cluster_means)  # índice[i] = cluster original com i-ésimo menor
+def reorder_by_composite(labels, X_orig, n):
+    means = [X_orig[labels == c].mean() if np.any(labels == c) else 0.0
+             for c in range(n)]
+    order = np.argsort(means)
     remap = np.empty(n, dtype=np.int32)
-    for new_idx, old_cluster in enumerate(order):
-        remap[old_cluster] = new_idx
+    for new_idx, old_c in enumerate(order):
+        remap[old_c] = new_idx
     return remap[labels]
 
-
 # ─────────────────────────────────────────────────────────────────────────────
-#  RENDERIZAÇÃO
-# ─────────────────────────────────────────────────────────────────────────────
-
-def render_zones(labels_valid: np.ndarray, valid: np.ndarray, n_zones: int
-                 ) -> np.ndarray:
-    """Converte labels (para pixels válidos) → array RGBA (H, W, 4)."""
-    H, W = valid.shape
-    full = np.full(H * W, -1, dtype=np.int32)
-    full[valid.flatten()] = labels_valid
-    full = full.reshape(H, W)
-
-    rgba = np.zeros((H, W, 4), dtype=np.uint8)
-    for z in range(n_zones):
-        mask = full == z
-        if not mask.any():
-            continue
-        r, g, b = ZONE_COLORS[z % len(ZONE_COLORS)]
-        rgba[mask, 0] = r
-        rgba[mask, 1] = g
-        rgba[mask, 2] = b
-        rgba[mask, 3] = 210   # semi-transparente
-
-    return rgba
-
-
-def build_legend(labels_valid: np.ndarray, n_zones: int) -> list:
-    total = len(labels_valid)
-    legend = []
-    for z in range(n_zones):
-        cnt = int(np.sum(labels_valid == z))
-        r, g, b = ZONE_COLORS[z % len(ZONE_COLORS)]
-        label_str = ZONE_LABELS_LOW_HIGH[z] if z < len(ZONE_LABELS_LOW_HIGH) else f"Zona {z+1}"
-        legend.append({
-            "zone":     z + 1,
-            "color":    f"#{r:02x}{g:02x}{b:02x}",
-            "label":    f"Zona {z+1} — {label_str}",
-            "area_pct": round(100.0 * cnt / total, 1) if total else 0.0,
-        })
-    return legend
-
-
-def encode_png(rgba: np.ndarray) -> str:
-    img = Image.fromarray(rgba, "RGBA")
-    buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=False)
-    return base64.b64encode(buf.getvalue()).decode("ascii")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  MÉTODOS DE ZONAGEM
+# MÉTODOS DE ZONAGEM
 # ─────────────────────────────────────────────────────────────────────────────
 
-def method_quantiles(X: np.ndarray, valid: np.ndarray, params: dict,
-                     arrays_raw: list) -> tuple[np.ndarray, int]:
-    """
-    Combina layers por média ponderada → classifica em N zonas por quantis.
-
-    Params:
-      n_zones  : int  2-8  (default 3)
-      weights  : list[float]  peso por layer (default 1.0)
-      invert   : list[bool]   inverter layer antes de combinar (default false)
-    """
+def method_quantiles(X, valid, params, arrays_raw):
     n_zones = max(2, min(8, int(params.get("n_zones", 3))))
-
-    # Score = média ponderada das colunas de X (já normalizadas + pesadas em stack_layers)
-    score = X.mean(axis=1)   # (n_valid,)
-
-    # Breaks por quantis
-    qs = np.linspace(0, 100, n_zones + 1)
-    breaks = np.percentile(score, qs)
+    score   = X.mean(axis=1)
+    breaks  = np.percentile(score, np.linspace(0, 100, n_zones + 1))
     breaks[-1] += 1e-9
-
-    labels = np.digitize(score, breaks[1:]).astype(np.int32)
-    labels = np.clip(labels, 0, n_zones - 1)
+    labels = np.clip(np.digitize(score, breaks[1:]).astype(np.int32), 0, n_zones - 1)
     return labels, n_zones
 
 
-def method_weighted(X: np.ndarray, valid: np.ndarray, params: dict,
-                    arrays_raw: list) -> tuple[np.ndarray, int]:
-    """
-    Índice composto ponderado: soma ponderada → classifica em N zonas.
-
-    Params:
-      n_zones      : int  2-8  (default 3)
-      weights      : list[float]
-      invert       : list[bool]
-      classify_by  : "quantile" | "equal"  (default "quantile")
-    """
+def method_weighted(X, valid, params, arrays_raw):
     n_zones     = max(2, min(8, int(params.get("n_zones", 3))))
     classify_by = params.get("classify_by", "quantile")
-
-    score = X.sum(axis=1)   # pesos já aplicados em stack_layers
-
+    score       = X.sum(axis=1)
     if classify_by == "equal":
         mn, mx = score.min(), score.max()
-        bins = np.linspace(mn, mx + 1e-9, n_zones + 1)
-        labels = np.digitize(score, bins[1:]).astype(np.int32)
+        bins   = np.linspace(mn, mx + 1e-9, n_zones + 1)
+        labels = np.clip(np.digitize(score, bins[1:]).astype(np.int32), 0, n_zones - 1)
     else:
-        qs = np.linspace(0, 100, n_zones + 1)
-        breaks = np.percentile(score, qs)
+        breaks = np.percentile(score, np.linspace(0, 100, n_zones + 1))
         breaks[-1] += 1e-9
-        labels = np.digitize(score, breaks[1:]).astype(np.int32)
-
-    labels = np.clip(labels, 0, n_zones - 1)
+        labels = np.clip(np.digitize(score, breaks[1:]).astype(np.int32), 0, n_zones - 1)
     return labels, n_zones
 
 
-def method_kmeans(X: np.ndarray, valid: np.ndarray, params: dict,
-                  arrays_raw: list) -> tuple[np.ndarray, int]:
-    """
-    K-means clustering (sklearn).
-
-    Params:
-      n_clusters : int  2-8   (default 4)
-      n_init     : int  1-20  (default 10)
-      max_iter   : int  50-500 (default 300)
-    """
+def method_kmeans(X, valid, params, arrays_raw):
     from sklearn.cluster import KMeans
     from sklearn.preprocessing import StandardScaler
-
-    k        = max(2, min(8, int(params.get("n_clusters", 4))))
-    n_init   = max(1, min(20, int(params.get("n_init", 10))))
-    max_iter = max(50, min(500, int(params.get("max_iter", 300))))
-
-    Xs = StandardScaler().fit_transform(X)
-
-    km = KMeans(n_clusters=k, n_init=n_init, max_iter=max_iter, random_state=42)
-    raw_labels = km.fit_predict(Xs).astype(np.int32)
-
-    labels = reorder_by_composite(raw_labels, X, k)
-    return labels, k
+    k       = max(2, min(8, int(params.get("n_clusters", 4))))
+    n_init  = max(1, min(20,  int(params.get("n_init",   10))))
+    max_iter= max(50, min(500, int(params.get("max_iter", 300))))
+    Xs      = StandardScaler().fit_transform(X)
+    km      = KMeans(n_clusters=k, n_init=n_init, max_iter=max_iter, random_state=42)
+    raw     = km.fit_predict(Xs).astype(np.int32)
+    return reorder_by_composite(raw, X, k), k
 
 
-def method_fcm(X: np.ndarray, valid: np.ndarray, params: dict,
-               arrays_raw: list) -> tuple[np.ndarray, int]:
-    """
-    Fuzzy C-means (scikit-fuzzy).
-
-    Params:
-      n_clusters : int   2-8    (default 4)
-      m          : float 1.1-5  fuzziness coefficient (default 2.0)
-      maxiter    : int   50-2000 (default 1000)
-      error      : float        convergência (default 0.005)
-    """
+def method_fcm(X, valid, params, arrays_raw):
     try:
         import skfuzzy as fuzz
     except ImportError:
-        raise ImportError("scikit-fuzzy não instalado. Execute: pip install scikit-fuzzy")
-
-    k       = max(2, min(8, int(params.get("n_clusters", 4))))
-    m       = max(1.1, min(5.0, float(params.get("m", 2.0))))
-    maxiter = max(50, min(2000, int(params.get("maxiter", 1000))))
-    error   = float(params.get("error", 0.005))
-
+        raise ImportError("scikit-fuzzy não instalado — execute: pip install scikit-fuzzy")
     from sklearn.preprocessing import StandardScaler
-    Xs = StandardScaler().fit_transform(X).astype(np.float64)
-
-    # skfuzzy espera (features × samples)
-    data = Xs.T
-    cntr, u, _, _, _, _, _ = fuzz.cluster.cmeans(
-        data, k, m, error=error, maxiter=maxiter, init=None, seed=42
+    k       = max(2, min(8, int(params.get("n_clusters", 4))))
+    m       = max(1.1, min(5.0, float(params.get("m",       2.0))))
+    maxiter = max(50,  min(2000, int(params.get("maxiter", 1000))))
+    error   = float(params.get("error", 0.005))
+    Xs      = StandardScaler().fit_transform(X).astype(np.float64)
+    _, u, _, _, _, _, _ = fuzz.cluster.cmeans(
+        Xs.T, k, m, error=error, maxiter=maxiter, init=None, seed=42
     )
-
-    raw_labels = np.argmax(u, axis=0).astype(np.int32)
-    labels = reorder_by_composite(raw_labels, X, k)
-    return labels, k
+    raw = np.argmax(u, axis=0).astype(np.int32)
+    return reorder_by_composite(raw, X, k), k
 
 
-def method_gmm(X: np.ndarray, valid: np.ndarray, params: dict,
-               arrays_raw: list) -> tuple[np.ndarray, int]:
-    """
-    Gaussian Mixture Model (sklearn).
-
-    Params:
-      n_components    : int  2-8    (default 4)
-      covariance_type : str  full|tied|diag|spherical (default "full")
-      n_init          : int  1-10   (default 3)
-    """
+def method_gmm(X, valid, params, arrays_raw):
     from sklearn.mixture import GaussianMixture
     from sklearn.preprocessing import StandardScaler
-
-    k    = max(2, min(8, int(params.get("n_components", 4))))
-    cov  = params.get("covariance_type", "full")
+    k   = max(2, min(8, int(params.get("n_components",   4))))
+    cov = params.get("covariance_type", "full")
     if cov not in ("full", "tied", "diag", "spherical"):
         cov = "full"
-    ni   = max(1, min(10, int(params.get("n_init", 3))))
-
-    Xs = StandardScaler().fit_transform(X)
-
-    gmm = GaussianMixture(
-        n_components=k, covariance_type=cov, n_init=ni,
-        max_iter=200, random_state=42
-    )
-    raw_labels = gmm.fit_predict(Xs).astype(np.int32)
-
-    labels = reorder_by_composite(raw_labels, X, k)
-    return labels, k
+    ni  = max(1, min(10, int(params.get("n_init", 3))))
+    Xs  = StandardScaler().fit_transform(X)
+    gmm = GaussianMixture(n_components=k, covariance_type=cov,
+                          n_init=ni, max_iter=200, random_state=42)
+    raw = gmm.fit_predict(Xs).astype(np.int32)
+    return reorder_by_composite(raw, X, k), k
 
 
 METHOD_MAP = {
@@ -357,80 +247,248 @@ METHOD_MAP = {
     "gmm":       method_gmm,
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# RENDERIZAÇÃO
+# ─────────────────────────────────────────────────────────────────────────────
+
+def render_zones(labels_valid, valid, n_zones):
+    H, W   = valid.shape
+    full   = np.full(H * W, -1, dtype=np.int32)
+    full[valid.flatten()] = labels_valid
+    full   = full.reshape(H, W)
+    rgba   = np.zeros((H, W, 4), dtype=np.uint8)
+    for z in range(n_zones):
+        mask = full == z
+        if not mask.any():
+            continue
+        r, g, b = ZONE_COLORS[z % len(ZONE_COLORS)]
+        rgba[mask, 0] = r; rgba[mask, 1] = g
+        rgba[mask, 2] = b; rgba[mask, 3] = 210
+    return rgba
+
+
+def build_legend(labels_valid, n_zones):
+    total = len(labels_valid)
+    legend = []
+    for z in range(n_zones):
+        cnt   = int(np.sum(labels_valid == z))
+        r, g, b = ZONE_COLORS[z % len(ZONE_COLORS)]
+        lbl   = ZONE_LABELS[z] if z < len(ZONE_LABELS) else f"Zona {z+1}"
+        legend.append({
+            "zone":     z + 1,
+            "color":    f"#{r:02x}{g:02x}{b:02x}",
+            "label":    f"Zona {z+1} — {lbl}",
+            "area_pct": round(100.0 * cnt / total, 1) if total else 0.0,
+        })
+    return legend
+
+
+def encode_png(rgba):
+    img = Image.fromarray(rgba, "RGBA")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  MAIN
+# HTTP: BUSCAR DADOS + ENVIAR RESULTADO
 # ─────────────────────────────────────────────────────────────────────────────
 
-def main():
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; SoilQI-Zonation/1.0)",
+    "Accept":     "application/json",
+}
+
+
+def fetch_layer_data(data_url: str, api_key: str, request_id: str) -> list:
+    """Chama zonation_data.php e devolve lista de layers com PNG base64."""
+    r = requests.post(
+        data_url,
+        json={"api_key": api_key, "request_id": request_id},
+        headers=HEADERS,
+        timeout=60,
+    )
+    r.raise_for_status()
+    body = r.json()
+    if not body.get("success"):
+        raise RuntimeError(f"zonation_data.php: {body.get('message','erro desconhecido')}")
+    layers = body.get("layers", [])
+    if not layers:
+        raise RuntimeError("Nenhuma camada devolvida pelo servidor.")
+    return layers
+
+
+def post_result(job: dict, png_b64: str | None, bounds: dict | None,
+                legend: list | None, error_msg: str | None = None) -> None:
+    """Envia o resultado (ou erro) ao callback PHP."""
+    url     = job.get("callback_url", "")
+    api_key = job.get("api_key") or CFG["API_KEY"]
+    if not url:
+        log.warning("[%s] callback_url em falta — resultado não enviado.", job.get("request_id"))
+        return
+
+    if error_msg:
+        payload = {
+            "api_key":    api_key,
+            "request_id": job["request_id"],
+            "status":     "error",
+            "error_msg":  error_msg,
+        }
+    else:
+        payload = {
+            "api_key":    api_key,
+            "request_id": job["request_id"],
+            "status":     "done",
+            "png_data":   png_b64,
+            "min_lat":    bounds["min_lat"],
+            "max_lat":    bounds["max_lat"],
+            "min_lng":    bounds["min_lng"],
+            "max_lng":    bounds["max_lng"],
+            "legend":     legend,
+        }
+
     try:
-        data = json.loads(sys.stdin.buffer.read().decode("utf-8"))
-    except Exception as e:
-        sys.stdout.write(json.dumps({"success": False, "message": f"JSON inválido: {e}"}))
-        return
+        r = requests.post(url, json=payload, headers=HEADERS, timeout=60)
+        if r.status_code == 200 and r.json().get("success"):
+            log.info("[%s] Resultado entregue.", job["request_id"])
+        else:
+            log.error("[%s] Falha ao entregar: %s — %s",
+                      job["request_id"], r.status_code, r.text[:200])
+    except Exception as ex:
+        log.error("[%s] Erro HTTP ao entregar: %s", job["request_id"], ex)
 
-    method_name = data.get("method", "")
-    params      = data.get("params", {})
-    raw_layers  = data.get("layers", [])
+# ─────────────────────────────────────────────────────────────────────────────
+# PROCESSADOR DE PEDIDOS
+# ─────────────────────────────────────────────────────────────────────────────
 
-    if method_name not in METHOD_MAP:
-        sys.stdout.write(json.dumps({"success": False, "message": f"Método desconhecido: '{method_name}'"}))
-        return
+def process_job(job: dict) -> None:
+    rid     = job.get("request_id", "?")
+    method  = job.get("method", "?")
+    params  = job.get("params", {})
+    log.info("[%s] Início: método=%s  terrain=%s", rid, method, job.get("terrain_id"))
 
-    if len(raw_layers) < 1:
-        sys.stdout.write(json.dumps({"success": False, "message": "Nenhuma camada fornecida."}))
-        return
-
-    # ── Carregar layers ──────────────────────────────────────────────────────
     try:
-        arrays = [load_layer(l) for l in raw_layers]
-    except Exception as e:
-        sys.stdout.write(json.dumps({"success": False, "message": f"Erro ao carregar layers: {e}"}))
-        return
+        # 1. Buscar PNGs das camadas ao servidor PHP
+        data_url = job.get("data_url", "")
+        api_key  = job.get("api_key") or CFG["API_KEY"]
+        layers   = fetch_layer_data(data_url, api_key, rid)
+        log.info("[%s] %d camadas recebidas.", rid, len(layers))
 
-    # ── Bounds: usar os bounds do primeiro layer (mesmo terreno = mesma bbox) ─
-    b0 = raw_layers[0]["bounds"]
-    bounds = {
-        "min_lat": b0["min_lat"], "max_lat": b0["max_lat"],
-        "min_lng": b0["min_lng"], "max_lng": b0["max_lng"],
-    }
+        # 2. Carregar e empilhar
+        arrays = [load_layer(l) for l in layers]
+        weights = params.get("weights", None)
+        invert  = params.get("invert",  None)
+        X, valid = stack_layers(arrays, weights=weights, invert=invert)
 
-    # ── Extrair pesos/inversão dos params ────────────────────────────────────
-    weights = params.get("weights", None)
-    invert  = params.get("invert",  None)
+        if X.shape[0] < 20:
+            raise RuntimeError("Pixels válidos insuficientes — verifica sobreposição das camadas.")
 
-    # ── Empilhar features ────────────────────────────────────────────────────
-    X, valid = stack_layers(arrays, weights=weights, invert=invert)
-
-    if X.shape[0] < 20:
-        sys.stdout.write(json.dumps({
-            "success": False,
-            "message": "Pixels válidos insuficientes. Verifique se as camadas cobrem a mesma área."
-        }))
-        return
-
-    # ── Executar método ──────────────────────────────────────────────────────
-    try:
-        fn = METHOD_MAP[method_name]
+        # 3. Executar método
+        if method not in METHOD_MAP:
+            raise ValueError(f"Método desconhecido: '{method}'")
+        fn = METHOD_MAP[method]
         labels, n_zones = fn(X, valid, params, arrays)
-    except ImportError as e:
-        sys.stdout.write(json.dumps({"success": False, "message": str(e)}))
-        return
-    except Exception as e:
-        sys.stdout.write(json.dumps({"success": False, "message": f"Erro em {method_name}: {e}"}))
+        log.info("[%s] Zonagem concluída: %d zonas.", rid, n_zones)
+
+        # 4. Renderizar
+        rgba    = render_zones(labels, valid, n_zones)
+        png_b64 = encode_png(rgba)
+        legend  = build_legend(labels, n_zones)
+
+        # Bounds: usa o primeiro layer como referência (mesmo terreno = mesma bbox)
+        b0 = layers[0]["bounds"]
+        bounds = {
+            "min_lat": b0["min_lat"], "max_lat": b0["max_lat"],
+            "min_lng": b0["min_lng"], "max_lng": b0["max_lng"],
+        }
+
+        # 5. Enviar resultado
+        post_result(job, png_b64, bounds, legend)
+
+    except ImportError as ex:
+        log.error("[%s] Biblioteca em falta: %s", rid, ex)
+        post_result(job, None, None, None, error_msg=str(ex))
+    except Exception as ex:
+        log.error("[%s] Erro: %s", rid, ex, exc_info=True)
+        post_result(job, None, None, None, error_msg=str(ex))
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CLIENTE MQTT
+# ─────────────────────────────────────────────────────────────────────────────
+
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        topic = CFG["ZONATION_TOPIC"]
+        client.subscribe(topic, qos=1)
+        log.info("MQTT ligado — subscrito a '%s' (QoS 1).", topic)
+    else:
+        log.error("MQTT falha de ligação, código=%s", rc)
+
+
+def on_disconnect(client, userdata, rc):
+    if rc != 0:
+        log.warning("MQTT desligado inesperadamente (rc=%s). A reconectar…", rc)
+
+
+def on_message(client, userdata, msg):
+    raw = msg.payload.decode("utf-8", errors="replace")
+    log.info("Mensagem recebida: %s…", raw[:120])
+    try:
+        job = json.loads(raw)
+    except json.JSONDecodeError as ex:
+        log.error("JSON inválido: %s", ex)
         return
 
-    # ── Renderizar + codificar ───────────────────────────────────────────────
-    rgba    = render_zones(labels, valid, n_zones)
-    png_b64 = encode_png(rgba)
-    legend  = build_legend(labels, n_zones)
+    # Validação mínima
+    required = ["request_id", "method", "data_url", "callback_url"]
+    missing  = [k for k in required if not job.get(k)]
+    if missing:
+        log.error("Pedido inválido — campos em falta: %s", missing)
+        return
 
-    sys.stdout.write(json.dumps({
-        "success": True,
-        "png":     png_b64,
-        "bounds":  bounds,
-        "legend":  legend,
-    }))
+    # Thread separada para não bloquear o loop MQTT
+    t = threading.Thread(target=process_job, args=(job,), daemon=True)
+    t.start()
+
+
+def build_mqtt_client() -> mqtt.Client:
+    client = mqtt.Client(client_id=CFG["MQTT_CLIENT_ID"], clean_session=False)
+    client.on_connect    = on_connect
+    client.on_disconnect = on_disconnect
+    client.on_message    = on_message
+    if CFG["MQTT_USER"]:
+        client.username_pw_set(CFG["MQTT_USER"], CFG["MQTT_PASS"])
+    return client
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENTRADA PRINCIPAL
+# ─────────────────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    log.info("Zonation.py a iniciar…")
+    log.info("Broker: %s:%s  tópico: %s", CFG["MQTT_HOST"], CFG["MQTT_PORT"], CFG["ZONATION_TOPIC"])
+
+    client = build_mqtt_client()
+    client.connect(CFG["MQTT_HOST"], CFG["MQTT_PORT"], keepalive=60)
+
+    stop_event = threading.Event()
+
+    def _sigterm(sig, frame):
+        log.info("Sinal de paragem — a terminar…")
+        stop_event.set()
+
+    signal.signal(signal.SIGINT,  _sigterm)
+    signal.signal(signal.SIGTERM, _sigterm)
+
+    client.loop_start()
+    log.info("Zonation.py pronto. À espera de pedidos MQTT…")
+
+    try:
+        while not stop_event.is_set():
+            stop_event.wait(timeout=1)
+    finally:
+        client.loop_stop()
+        client.disconnect()
+        log.info("Zonation.py terminado.")
 
 
 if __name__ == "__main__":

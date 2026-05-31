@@ -302,81 +302,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                     break;
                 }
 
-                // Buscar PNGs das camadas seleccionadas
-                $layers = [];
+                // Validar que as camadas existem e pertencem ao terreno
+                $valid_ids = [];
                 foreach ($raster_ids as $rid) {
                     $rid = intval($rid);
-                    $st  = $pdo->prepare("
-                        SELECT id, png_data, min_lat, max_lat, min_lng, max_lng, name, raster_type
-                        FROM raster_results
-                        WHERE id=? AND user_id=? AND terrain_id=? AND status='done'
-                    ");
+                    $st  = $pdo->prepare("SELECT id FROM raster_results
+                                          WHERE id=? AND user_id=? AND terrain_id=? AND status='done'");
                     $st->execute([$rid, $currentUser['id'], $terrain_id]);
-                    $row = $st->fetch(PDO::FETCH_ASSOC);
-                    if ($row && $row['png_data']) {
-                        $layers[] = [
-                            'id'     => (int)$rid,
-                            'name'   => $row['name'],
-                            'type'   => $row['raster_type'],
-                            'png'    => base64_encode($row['png_data']),
-                            'bounds' => [
-                                'min_lat' => (float)$row['min_lat'],
-                                'max_lat' => (float)$row['max_lat'],
-                                'min_lng' => (float)$row['min_lng'],
-                                'max_lng' => (float)$row['max_lng'],
-                            ],
-                        ];
-                    }
+                    if ($st->fetch()) { $valid_ids[] = $rid; }
                 }
-                if (empty($layers)) {
+                if (empty($valid_ids)) {
                     $response['message'] = 'Nenhuma camada válida encontrada para este terreno.';
                     break;
                 }
 
-                // Localizar Python da venv
-                $venvPy = realpath(__DIR__ . '/../python/venv/bin/python');
-                $python = ($venvPy && is_executable($venvPy)) ? $venvPy : 'python3';
-                $script = realpath(__DIR__ . '/../python/Zonation.py');
-                if (!$script) { $response['message'] = 'Zonation.py não encontrado.'; break; }
-
-                $input_json = json_encode([
-                    'method' => $method,
-                    'params' => $params,
-                    'layers' => $layers,
-                ]);
-
-                set_time_limit(90);
-                $desc = [0 => ['pipe','r'], 1 => ['pipe','w'], 2 => ['pipe','w']];
-                $proc = proc_open("$python $script", $desc, $pipes);
-                if (!is_resource($proc)) { $response['message'] = 'Falha ao iniciar Python.'; break; }
-                fwrite($pipes[0], $input_json);
-                fclose($pipes[0]);
-                $stdout = stream_get_contents($pipes[1]);
-                $stderr = stream_get_contents($pipes[2]);
-                fclose($pipes[1]);
-                fclose($pipes[2]);
-                proc_close($proc);
-
-                $result = json_decode($stdout, true);
-                if (!$result || !($result['success'] ?? false)) {
-                    $msg = $result['message'] ?? '';
-                    if (!$msg && $stderr) $msg = substr(strip_tags($stderr), 0, 300);
-                    $response['message'] = $msg ?: 'Erro desconhecido na zonagem.';
-                    break;
-                }
-
-                // Auto-criar tabela e guardar resultado
+                // Auto-criar/migrar tabela com suporte assíncrono
                 $pdo->exec("CREATE TABLE IF NOT EXISTS zonation_results (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    user_id INT NOT NULL, terrain_id INT NOT NULL,
-                    method VARCHAR(20) NOT NULL,
-                    params JSON NULL, name VARCHAR(200) NOT NULL,
-                    png_data MEDIUMBLOB NOT NULL,
-                    min_lat DOUBLE, max_lat DOUBLE, min_lng DOUBLE, max_lng DOUBLE,
-                    legend JSON NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    id               INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id          INT NOT NULL,
+                    terrain_id       INT NOT NULL,
+                    request_id       VARCHAR(36) NULL,
+                    status           ENUM('pending','processing','done','error') NOT NULL DEFAULT 'pending',
+                    method           VARCHAR(20) NOT NULL,
+                    params           JSON NULL,
+                    name             VARCHAR(200) NOT NULL,
+                    input_raster_ids JSON NULL,
+                    png_data         MEDIUMBLOB NULL,
+                    min_lat DOUBLE NULL, max_lat DOUBLE NULL,
+                    min_lng DOUBLE NULL, max_lng DOUBLE NULL,
+                    legend           JSON NULL,
+                    error_msg        TEXT NULL,
+                    created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uidx_zr_req (request_id),
                     INDEX idx_zr (user_id, terrain_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // Migração silenciosa: adicionar colunas se ainda não existirem
+                foreach ([
+                    "ALTER TABLE zonation_results ADD COLUMN request_id VARCHAR(36) NULL AFTER terrain_id",
+                    "ALTER TABLE zonation_results ADD COLUMN status ENUM('pending','processing','done','error') NOT NULL DEFAULT 'pending' AFTER request_id",
+                    "ALTER TABLE zonation_results ADD COLUMN input_raster_ids JSON NULL AFTER name",
+                    "ALTER TABLE zonation_results ADD COLUMN error_msg TEXT NULL AFTER legend",
+                    "ALTER TABLE zonation_results MODIFY COLUMN png_data MEDIUMBLOB NULL",
+                    "ALTER TABLE zonation_results ADD UNIQUE KEY uidx_zr_req (request_id)",
+                ] as $alter) {
+                    try { $pdo->exec($alter); } catch (PDOException $ignored) {}
+                }
+
+                // Gerar UUID
+                $requestId = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+                    mt_rand(0,0xffff), mt_rand(0,0xffff), mt_rand(0,0xffff),
+                    mt_rand(0,0x0fff)|0x4000, mt_rand(0,0x3fff)|0x8000,
+                    mt_rand(0,0xffff), mt_rand(0,0xffff), mt_rand(0,0xffff));
 
                 $method_labels = [
                     'quantiles' => 'Quantis',
@@ -385,42 +362,112 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                     'fcm'       => 'FCM',
                     'gmm'       => 'GMM',
                 ];
-                $name    = ($method_labels[$method] ?? $method) . ' — ' . date('Y-m-d H:i');
-                $png_bin = base64_decode($result['png']);
-                $b       = $result['bounds'];
+                $name = ($method_labels[$method] ?? $method) . ' — ' . date('Y-m-d H:i');
 
+                // Inserir registo pendente
                 $ins = $pdo->prepare("INSERT INTO zonation_results
-                    (user_id, terrain_id, method, params, name, png_data,
-                     min_lat, max_lat, min_lng, max_lng, legend)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?)");
+                    (user_id, terrain_id, request_id, status, method, params, name, input_raster_ids)
+                    VALUES (?,?,?,?,?,?,?,?)");
                 $ins->execute([
-                    $currentUser['id'], $terrain_id, $method,
-                    json_encode($params), $name, $png_bin,
-                    (float)$b['min_lat'], (float)$b['max_lat'],
-                    (float)$b['min_lng'], (float)$b['max_lng'],
-                    json_encode($result['legend'] ?? []),
+                    $currentUser['id'], $terrain_id, $requestId, 'pending',
+                    $method, json_encode($params), $name, json_encode($valid_ids),
                 ]);
+                $newId = (int)$pdo->lastInsertId();
 
-                $response['success'] = true;
-                $response['id']      = (int)$pdo->lastInsertId();
-                $response['name']    = $name;
-                $response['png']     = 'data:image/png;base64,' . $result['png'];
-                $response['bounds']  = $b;
-                $response['legend']  = $result['legend'] ?? [];
+                // Publicar via MQTT
+                $mqttError = null;
+                $zonationTopic = defined('ZONATION_TOPIC') ? ZONATION_TOPIC : '/soilqi/zonation';
+                $siteUrl = defined('SITE_URL') ? rtrim(SITE_URL, '/') : '';
+
+                if (defined('MQTT_HOST') && MQTT_HOST !== '' && MQTT_HOST !== '{{MQTT_HOST}}') {
+                    try {
+                        require_once __DIR__ . '/../lib/MqttPublisher.php';
+                        $mqtt = new MqttPublisher(
+                            MQTT_HOST,
+                            defined('MQTT_PORT') ? (int)MQTT_PORT : 1883,
+                            'soilqi_zon_' . substr($requestId, 0, 8),
+                            defined('MQTT_USER') ? MQTT_USER : '',
+                            defined('MQTT_PASS') ? MQTT_PASS : ''
+                        );
+                        $payload = json_encode([
+                            'request_id'   => $requestId,
+                            'method'       => $method,
+                            'params'       => $params,
+                            'data_url'     => $siteUrl . '/api/zonation_data.php',
+                            'callback_url' => $siteUrl . '/api/zonation_result.php',
+                            'api_key'      => defined('RASTER_API_KEY') ? RASTER_API_KEY : '',
+                        ]);
+                        $mqtt->publish($zonationTopic, $payload, 1, false);
+                        $mqtt->disconnect();
+                    } catch (Throwable $mqttEx) {
+                        $mqttError = $mqttEx->getMessage();
+                    }
+                } else {
+                    $mqttError = 'MQTT não configurado — verifique config.php.';
+                }
+
+                $response['success']    = true;
+                $response['id']         = $newId;
+                $response['request_id'] = $requestId;
+                $response['name']       = $name;
+                if ($mqttError) {
+                    $response['mqtt_warning'] = $mqttError;
+                }
+                break;
+
+            case 'get_zonation_status':
+                $requestId = trim($_POST['request_id'] ?? '');
+                if (!$requestId) { $response['message'] = 'request_id em falta.'; break; }
+                try {
+                    $st = $pdo->prepare("
+                        SELECT id, status, error_msg,
+                               png_data, min_lat, max_lat, min_lng, max_lng,
+                               name, method, legend
+                        FROM zonation_results
+                        WHERE request_id = ? AND user_id = ?
+                    ");
+                    $st->execute([$requestId, $currentUser['id']]);
+                    $row = $st->fetch(PDO::FETCH_ASSOC);
+
+                    if (!$row) { $response['message'] = 'Pedido não encontrado.'; break; }
+
+                    $response['success'] = true;
+                    $response['status']  = $row['status'];
+                    $response['id']      = (int)$row['id'];
+                    $response['name']    = $row['name'];
+
+                    if ($row['status'] === 'error') {
+                        $response['message'] = $row['error_msg'] ?: 'Erro desconhecido na zonagem.';
+                    } elseif ($row['status'] === 'done') {
+                        $response['png']     = 'data:image/png;base64,' . base64_encode($row['png_data']);
+                        $response['min_lat'] = (float)$row['min_lat'];
+                        $response['max_lat'] = (float)$row['max_lat'];
+                        $response['min_lng'] = (float)$row['min_lng'];
+                        $response['max_lng'] = (float)$row['max_lng'];
+                        $response['legend']  = json_decode($row['legend'] ?? '[]', true) ?: [];
+                        $response['bounds']  = [
+                            'min_lat' => (float)$row['min_lat'],
+                            'max_lat' => (float)$row['max_lat'],
+                            'min_lng' => (float)$row['min_lng'],
+                            'max_lng' => (float)$row['max_lng'],
+                        ];
+                    }
+                    // pending / processing: só devolver status, o JS continua a fazer polling
+                } catch (PDOException $e2) {
+                    $response['message'] = $e2->getMessage();
+                }
                 break;
 
             case 'get_zonation_list':
                 $terrain_id = intval($_POST['terrain_id'] ?? 0);
                 try {
-                    $st = $terrain_id > 0
-                        ? $pdo->prepare("SELECT id, name, method, legend, created_at,
+                    if ($terrain_id <= 0) { $response['success'] = true; $response['items'] = []; break; }
+                    $st = $pdo->prepare("SELECT id, name, method, legend, created_at,
                                                 min_lat, max_lat, min_lng, max_lng
                                          FROM zonation_results
-                                         WHERE user_id=? AND terrain_id=?
-                                         ORDER BY created_at DESC LIMIT 20")
-                        : null;
-                    if ($st) { $st->execute([$currentUser['id'], $terrain_id]); }
-                    else     { $response['success'] = true; $response['items'] = []; break; }
+                                         WHERE user_id=? AND terrain_id=? AND status='done'
+                                         ORDER BY created_at DESC LIMIT 20");
+                    $st->execute([$currentUser['id'], $terrain_id]);
                     $response['success'] = true;
                     $response['items']   = $st->fetchAll(PDO::FETCH_ASSOC);
                 } catch (PDOException $e2) {
@@ -434,10 +481,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 try {
                     $st = $pdo->prepare("SELECT png_data, min_lat, max_lat, min_lng, max_lng,
                                                 name, method, legend
-                                         FROM zonation_results WHERE id=? AND user_id=?");
+                                         FROM zonation_results WHERE id=? AND user_id=? AND status='done'");
                     $st->execute([$id, $currentUser['id']]);
                     $row = $st->fetch(PDO::FETCH_ASSOC);
-                    if (!$row) { $response['message'] = 'Zonagem não encontrada.'; break; }
+                    if (!$row || !$row['png_data']) { $response['message'] = 'Zonagem não encontrada.'; break; }
                     $response['success'] = true;
                     $response['png']     = 'data:image/png;base64,' . base64_encode($row['png_data']);
                     $response['min_lat'] = (float)$row['min_lat'];

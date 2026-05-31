@@ -879,7 +879,10 @@ function generateZonation() {
 
     // Feedback visual
     const btn = document.getElementById('zonation-generate-btn');
-    if (btn) { btn.textContent = '⏳ A processar…'; btn.disabled = true; btn.style.opacity = '0.7'; }
+    const _resetBtn = () => {
+        if (btn) { btn.textContent = '🗺️ Gerar Zonagem'; btn.disabled = false; btn.style.opacity = '1'; }
+    };
+    if (btn) { btn.textContent = '⏳ A enviar pedido…'; btn.disabled = true; btn.style.opacity = '0.7'; }
 
     const fd = new FormData();
     fd.append('action',     'generate_zonation');
@@ -891,21 +894,79 @@ function generateZonation() {
     fetch('index.php?tab=map', { method: 'POST', body: fd })
         .then(r => r.json())
         .then(data => {
-            if (btn) { btn.textContent = '🗺️ Gerar Zonagem'; btn.disabled = false; btn.style.opacity = '1'; }
             if (!data.success) {
-                _showAlert('❌ ' + (data.message || 'Erro na zonagem.'), 'error');
+                _resetBtn();
+                _showAlert('❌ ' + (data.message || 'Erro ao criar pedido de zonagem.'), 'error');
                 return;
             }
-            // Mostrar no mapa
-            _showZonationOnMap(data.id, data.name, data.png, data.bounds, data.legend);
-            // Actualizar historial
-            loadZonationHistory(reportTerrainId);
-            _showAlert('✅ Zonagem gerada!', 'success');
+
+            if (data.mqtt_warning) {
+                console.warn('MQTT:', data.mqtt_warning);
+            }
+
+            // Pedido aceite — iniciar polling
+            const requestId = data.request_id;
+            const jobId     = data.id;
+            if (btn) { btn.textContent = '⏳ A processar…'; }
+
+            _pollZonationStatus(requestId, jobId, _resetBtn);
         })
         .catch(err => {
-            if (btn) { btn.textContent = '🗺️ Gerar Zonagem'; btn.disabled = false; btn.style.opacity = '1'; }
+            _resetBtn();
             _showAlert('Erro de rede: ' + err.message, 'error');
         });
+}
+
+// ── Polling de estado da zonagem ──────────────────────────────────────────────
+
+function _pollZonationStatus(requestId, jobId, onDone) {
+    const MAX_ATTEMPTS = 60;   // 60 × 3 s = 3 minutos
+    let   attempts     = 0;
+
+    const timer = setInterval(() => {
+        attempts++;
+        if (attempts > MAX_ATTEMPTS) {
+            clearInterval(timer);
+            if (onDone) onDone();
+            _showAlert('⏱️ Tempo limite excedido. O servidor ainda pode estar a processar — verifique o historial mais tarde.', 'warning');
+            return;
+        }
+
+        const fd = new FormData();
+        fd.append('action',     'get_zonation_status');
+        fd.append('request_id', requestId);
+
+        fetch('index.php?tab=map', { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success && data.message) {
+                    // Erro de rede ou de lógica — parar
+                    clearInterval(timer);
+                    if (onDone) onDone();
+                    _showAlert('❌ ' + data.message, 'error');
+                    return;
+                }
+
+                const st = data.status || '';
+
+                if (st === 'done') {
+                    clearInterval(timer);
+                    if (onDone) onDone();
+                    _showZonationOnMap(data.id, data.name, data.png, data.bounds, data.legend);
+                    loadZonationHistory(reportTerrainId);
+                    _showAlert('✅ Zonagem gerada!', 'success');
+
+                } else if (st === 'error') {
+                    clearInterval(timer);
+                    if (onDone) onDone();
+                    _showAlert('❌ ' + (data.message || 'Erro na zonagem.'), 'error');
+
+                }
+                // pending / processing → continuar polling
+            })
+            .catch(() => { /* ignorar erros de rede temporários */ });
+
+    }, 3000);
 }
 
 // ── Overlay no mapa ───────────────────────────────────────────────────────────
