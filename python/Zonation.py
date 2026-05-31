@@ -1,3 +1,5 @@
+from __future__ import annotations  # permite X | Y type hints em Python < 3.10
+
 """
 Zonation.py — Serviço MQTT para geração de mapas de zonagem
 ============================================================
