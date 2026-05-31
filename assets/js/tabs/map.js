@@ -588,6 +588,47 @@ function _renderNotesList(notes) {
 // GERAR RELATÓRIO PDF (jsPDF)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Remove emoji e outros caracteres fora do Latin-1 que o Helvetica do jsPDF
+ * não suporta — evita o lixo "Ø=ÜÊ" no PDF.
+ */
+function _pdfStr(str) {
+    return (str || '')
+        // remover sequências de emoji (variante + combinação + ZWJ)
+        .replace(/[\u{1F000}-\u{1FFFF}]/gu, '')
+        .replace(/[\u{2600}-\u{27BF}]/gu,   '')
+        .replace(/[️‍]/g,         '')
+        // bullet unicode → hífen simples
+        .replace(/[•·]/g, '-')
+        .trim();
+}
+
+/** Labels de raster SEM emoji (para PDF). */
+const MAP_RASTER_LABELS_PLAIN = {
+    ndvi:          'NDVI',
+    ndmi:          'NDMI',
+    evi:           'EVI',
+    msavi:         'MSAVI',
+    gndvi:         'GNDVI',
+    ndre:          'NDRE',
+    ndwi:          'NDWI',
+    nbr:           'NBR',
+    bsi:           'BSI',
+    ndvi_anomaly:  'NDVI Anomalia',
+    ndvi_diff:     'NDVI Diferenca',
+    lst:           'LST Temperatura',
+    chuva:         'Chuva',
+    humidade_solo: 'Humidade Solo',
+    sar_vv:        'SAR VV',
+    sar_vh:        'SAR VH',
+    sar_ratio:     'SAR VV/VH',
+    sar_rvi:       'SAR RVI',
+    sar_agua:      'SAR Agua',
+    altitude:      'Altitude',
+    declive:       'Declive',
+    aspect:        'Orientacao',
+};
+
 function generateMapReport() {
     // Se jsPDF ainda não foi carregado, injectá-lo dinamicamente e recomeçar
     if (typeof window.jspdf === 'undefined') {
@@ -612,38 +653,68 @@ function generateMapReport() {
 
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const PW = 210, PH = 297, M = 18;
-    const CW = PW - 2 * M;   // largura útil do conteúdo
+    const CW = PW - 2 * M;
+
+    // ── Helpers internos ──────────────────────────────────────────────────────
+
+    const pdfHdr = (r, g, b, title, subtitle) => {
+        doc.setFillColor(r, g, b);
+        doc.rect(0, 0, PW, 18, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(12); doc.setFont('helvetica', 'bold');
+        doc.text(_pdfStr(title), M, 12);
+        if (subtitle) {
+            doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+            doc.setTextColor(220, 230, 255);
+            doc.text(_pdfStr(subtitle), M, 17);
+        }
+    };
+    const pdfFooter = () => {
+        doc.setFontSize(8); doc.setTextColor(156, 163, 175);
+        doc.text('SoilQI · ' + dtStr, M, PH - 8);
+        doc.text('soilqi.com', PW - M, PH - 8, { align: 'right' });
+    };
+    const pdfImage = (png, yStart) => {
+        const imgH = Math.min(PH - yStart - M - 12, CW * 0.80);
+        try {
+            doc.addImage(png, 'PNG', M, yStart, CW, imgH);
+        } catch (_) {
+            doc.setTextColor(239, 68, 68); doc.setFontSize(10);
+            doc.text('Imagem nao disponivel.', M, yStart + 10);
+        }
+    };
 
     // ── Página 1: Resumo ──────────────────────────────────────────────────────
 
-    // Cabeçalho colorido
     doc.setFillColor(102, 126, 234);
     doc.rect(0, 0, PW, 24, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(15); doc.setFont('helvetica', 'bold');
-    doc.text('SoilQI — Relatório de Terreno', M, 10);
+    doc.text('SoilQI - Relatorio de Terreno', M, 10);
     doc.setFontSize(9); doc.setFont('helvetica', 'normal');
     doc.text('soilqi.com', PW - M, 10, { align: 'right' });
 
-    // Metadados
     doc.setTextColor(80, 80, 80); doc.setFontSize(10); doc.setFont('helvetica', 'normal');
     let y = 34;
     doc.setFont('helvetica', 'bold');   doc.text('Terreno:', M, y);
-    doc.setFont('helvetica', 'normal'); doc.text(terrainName, M + 24, y); y += 6;
+    doc.setFont('helvetica', 'normal'); doc.text(_pdfStr(terrainName), M + 24, y); y += 6;
     doc.setFont('helvetica', 'bold');   doc.text('Data:', M, y);
     doc.setFont('helvetica', 'normal'); doc.text(dtStr, M + 24, y); y += 12;
 
-    // Lista de layers activos
+    // Lista de layers activos — SEM emoji, só texto ASCII/Latin-1
     doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(31, 41, 55);
     doc.text('Layers activos:', M, y); y += 7;
     doc.setFontSize(10); doc.setFont('helvetica', 'normal'); doc.setTextColor(55, 65, 81);
 
     const allLayers = [
-        ...Object.entries(rptInterpData).map(([, d]) => '🎨 ' + d.name),
-        ...Object.entries(rptGeoJSONData).map(([, d]) => '🗺️ ' + d.name),
+        ...Object.entries(rptInterpData).map(([, d]) =>
+            '[Campo] ' + _pdfStr(d.name)),
+        ...Object.entries(rptGeoJSONData).map(([, d]) =>
+            '[GeoJSON] ' + _pdfStr(d.name)),
         ...Object.entries(mapRasterData).map(([, d]) =>
-            (MAP_RASTER_LABELS[d.type] || d.type) + ' — ' + d.name),
-        ...Object.entries(zonationData).map(([, d]) => '🗺️ Zonagem — ' + d.name),
+            '[' + (MAP_RASTER_LABELS_PLAIN[d.type] || d.type) + '] ' + _pdfStr(d.name)),
+        ...Object.entries(zonationData).map(([, d]) =>
+            '[Zonagem] ' + _pdfStr(d.name)),
     ];
 
     if (allLayers.length === 0) {
@@ -653,7 +724,7 @@ function generateMapReport() {
     } else {
         allLayers.forEach(txt => {
             if (y > PH - M) { doc.addPage(); y = M; }
-            doc.text('• ' + txt, M + 4, y); y += 6;
+            doc.text('- ' + txt, M + 4, y); y += 6;
         });
     }
     y += 6;
@@ -668,14 +739,12 @@ function generateMapReport() {
         doc.text('(sem notas guardadas)', M + 4, y); y += 7;
     } else {
         mapNotesCache.forEach(n => {
-            const noteDt  = new Date(n.created_at).toLocaleString('pt-PT');
-            const lines   = doc.splitTextToSize(n.content, CW - 8);
-            const needed  = 5 + lines.length * 5 + 6;
+            const noteDt = new Date(n.created_at).toLocaleString('pt-PT');
+            const lines  = doc.splitTextToSize(_pdfStr(n.content), CW - 8);
+            const needed = 5 + lines.length * 5 + 6;
             if (y + needed > PH - M) { doc.addPage(); y = M; }
-            // Data da nota em cinzento
             doc.setFontSize(8); doc.setTextColor(156, 163, 175);
             doc.text(noteDt, M + 4, y); y += 5;
-            // Conteúdo
             doc.setFontSize(10); doc.setTextColor(55, 65, 81);
             lines.forEach(line => {
                 if (y > PH - M) { doc.addPage(); y = M; }
@@ -685,62 +754,55 @@ function generateMapReport() {
         });
     }
 
-    // Rodapé da página 1
     doc.setFontSize(8); doc.setTextColor(156, 163, 175);
     doc.text('Gerado por SoilQI · ' + dtStr, M, PH - 8);
 
-    // ── Páginas seguintes: imagens de raster ─────────────────────────────────
+    // ── Páginas: rasters de satélite ─────────────────────────────────────────
 
     Object.entries(mapRasterData).forEach(([, d]) => {
         doc.addPage();
-        // Mini-cabeçalho
-        doc.setFillColor(102, 126, 234);
-        doc.rect(0, 0, PW, 16, 'F');
-        doc.setTextColor(255, 255, 255);
-        doc.setFontSize(12); doc.setFont('helvetica', 'bold');
-        const typeLabel = MAP_RASTER_LABELS[d.type] || d.type;
-        doc.text(typeLabel, M, 11);
-
-        doc.setFontSize(8); doc.setFont('helvetica', 'normal');
-        doc.setTextColor(80, 80, 80);
-        doc.text(d.name, M, 22);
-
-        // Imagem — proporção aproximada do bbox
-        const imgH = Math.min(180, CW * 0.80);
-        try {
-            doc.addImage(d.png, 'PNG', M, 27, CW, imgH);
-        } catch (imgErr) {
-            doc.setTextColor(239, 68, 68); doc.setFontSize(10);
-            doc.text('Imagem não disponível.', M, 50);
-        }
-        // Rodapé
-        doc.setFontSize(8); doc.setTextColor(156, 163, 175);
-        doc.text('SoilQI · ' + dtStr, M, PH - 8);
+        const typeLabel = MAP_RASTER_LABELS_PLAIN[d.type] || d.type;
+        pdfHdr(102, 126, 234, typeLabel, _pdfStr(d.name));
+        pdfImage(d.png, 24);
+        pdfFooter();
     });
 
     // ── Páginas: interpolações de campo ──────────────────────────────────────
 
     Object.entries(rptInterpData).forEach(([, d]) => {
         doc.addPage();
-        doc.setFillColor(52, 211, 153);
-        doc.rect(0, 0, PW, 16, 'F');
-        doc.setTextColor(255, 255, 255);
-        doc.setFontSize(12); doc.setFont('helvetica', 'bold');
-        doc.text('🎨 ' + d.name, M, 11);
+        pdfHdr(52, 211, 153, 'Campo: ' + _pdfStr(d.name), '');
+        pdfImage(d.png, 24);
+        pdfFooter();
+    });
 
-        const imgH = Math.min(180, CW * 0.80);
-        try {
-            doc.addImage(d.png, 'PNG', M, 24, CW, imgH);
-        } catch (imgErr) {
-            doc.setTextColor(239, 68, 68); doc.setFontSize(10);
-            doc.text('Imagem não disponível.', M, 50);
+    // ── Páginas: mapas de zonagem ─────────────────────────────────────────────
+
+    Object.entries(zonationData).forEach(([, d]) => {
+        doc.addPage();
+        pdfHdr(118, 75, 162, 'Zonagem: ' + _pdfStr(d.name), '');
+        pdfImage(d.png, 24);
+
+        // Legenda das zonas (se existir)
+        if (d.legend && d.legend.length) {
+            let ly = 24 + Math.min(PH - 24 - M - 12, CW * 0.80) + 6;
+            if (ly + d.legend.length * 6 < PH - M) {
+                doc.setFontSize(8); doc.setFont('helvetica', 'bold');
+                doc.setTextColor(80, 80, 80);
+                doc.text('Legenda:', M, ly); ly += 5;
+                doc.setFont('helvetica', 'normal');
+                d.legend.forEach(z => {
+                    if (ly > PH - M) return;
+                    doc.text('- ' + _pdfStr(z.label) + '  ' + z.area_pct + '%', M + 4, ly);
+                    ly += 5;
+                });
+            }
         }
-        doc.setFontSize(8); doc.setTextColor(156, 163, 175);
-        doc.text('SoilQI · ' + dtStr, M, PH - 8);
+        pdfFooter();
     });
 
     // ── Guardar ───────────────────────────────────────────────────────────────
-    const safeName = terrainName.replace(/[^a-zA-Z0-9_\-]/g, '_').toLowerCase();
+    const safeName = _pdfStr(terrainName).replace(/[^a-zA-Z0-9_\-]/g, '_').toLowerCase();
     doc.save('soilqi_relatorio_' + safeName + '_' + now.toISOString().slice(0, 10) + '.pdf');
 }
 
