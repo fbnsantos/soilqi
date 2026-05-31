@@ -143,7 +143,7 @@ function _renderInterpList(items) {
                 <div class="layer-row-meta">${_esc(it.param || '')}  ${dt}</div>
             </div>
             <a href="api/interpolation_download_png.php?id=${it.id}"
-               download title="Download PNG"
+               download title="Download PNG + georeferenciação (.pgw)"
                class="layer-toggle-btn layer-toggle-off"
                style="text-decoration:none;font-size:10px;padding:3px 6px;">⬇</a>
             <button id="interp-btn-${it.id}"
@@ -359,7 +359,7 @@ function _renderRasterList(items) {
                 <div class="layer-row-meta">${dateRange}  ${dt}</div>
             </div>
             <a href="api/raster_download_png.php?id=${r.id}"
-               download title="Download PNG"
+               download title="Download PNG + georeferenciação (.pgw)"
                class="layer-toggle-btn layer-toggle-off"
                style="text-decoration:none;font-size:10px;padding:3px 6px;">⬇</a>
             <button id="raster-btn-${r.id}"
@@ -1203,7 +1203,7 @@ function _renderZonationHistory(items) {
                 ${on ? '✅ ON' : '👁 Ver'}
             </button>
             <a href="api/zonation_download_png.php?id=${it.id}"
-               download title="Download PNG"
+               download title="Download PNG + georeferenciação (.pgw) + legenda CSV"
                class="layer-toggle-btn layer-toggle-off"
                style="text-decoration:none;font-size:10px;padding:3px 6px;">⬇</a>
             <button onclick="_deleteZonation(${it.id})"
@@ -1557,7 +1557,7 @@ function loadPrescriptionHistory(terrainId) {
                         <div style="font-size:10px;color:#9ca3af;">${dt}</div>
                     </div>
                     <a href="api/prescription_download_png.php?id=${it.id}"
-                       download title="Download PNG"
+                       download title="Download PNG + georeferenciação (.pgw) + CSV de valores"
                        style="padding:4px 7px;background:#6366f1;color:#fff;border:none;
                               border-radius:5px;font-size:10px;font-weight:600;
                               cursor:pointer;text-decoration:none;white-space:nowrap;">
