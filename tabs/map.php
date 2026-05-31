@@ -237,6 +237,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                     $response['message'] = 'Erro: ' . $e2->getMessage();
                 }
                 break;
+
+            // ── Notas de relatório ─────────────────────────────────────────────
+            case 'save_map_note':
+                $content    = trim($_POST['content'] ?? '');
+                $terrain_id = intval($_POST['terrain_id'] ?? 0) ?: null;
+                if ($content === '') { $response['message'] = 'Nota vazia.'; break; }
+                $pdo->exec("CREATE TABLE IF NOT EXISTS map_notes (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    terrain_id INT NULL,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_mn_user (user_id),
+                    INDEX idx_mn_terrain (terrain_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                $st = $pdo->prepare("INSERT INTO map_notes (user_id, terrain_id, content) VALUES (?,?,?)");
+                $st->execute([$currentUser['id'], $terrain_id, $content]);
+                $response['success'] = true;
+                $response['id']      = (int)$pdo->lastInsertId();
+                $response['created_at'] = date('Y-m-d H:i:s');
+                break;
+
+            case 'get_map_notes':
+                $terrain_id = intval($_POST['terrain_id'] ?? 0);
+                try {
+                    if ($terrain_id > 0) {
+                        $st = $pdo->prepare("SELECT id, content, terrain_id, created_at
+                            FROM map_notes WHERE user_id=? AND (terrain_id=? OR terrain_id IS NULL)
+                            ORDER BY created_at DESC LIMIT 100");
+                        $st->execute([$currentUser['id'], $terrain_id]);
+                    } else {
+                        $st = $pdo->prepare("SELECT id, content, terrain_id, created_at
+                            FROM map_notes WHERE user_id=? ORDER BY created_at DESC LIMIT 100");
+                        $st->execute([$currentUser['id']]);
+                    }
+                    $response['success'] = true;
+                    $response['notes']   = $st->fetchAll();
+                } catch (PDOException $e2) {
+                    $response['success'] = true; $response['notes'] = [];
+                }
+                break;
+
+            case 'delete_map_note':
+                $note_id = intval($_POST['note_id'] ?? 0);
+                $st = $pdo->prepare("DELETE FROM map_notes WHERE id=? AND user_id=?");
+                $st->execute([$note_id, $currentUser['id']]);
+                $response['success'] = ($st->rowCount() > 0);
+                if (!$response['success']) $response['message'] = 'Nota não encontrada.';
+                break;
         }
     } catch (PDOException $e) {
         $response['message'] = 'Erro no sistema: ' . $e->getMessage();
@@ -267,153 +316,231 @@ if ($isLoggedIn) {
 
 <!-- Banner para visitantes -->
 <?php if (!$isLoggedIn): ?>
-    <div class="guest-banner">
-        👋 Está a visualizar o mapa como visitante. 
-        <a href="login.php">Faça login</a> para desenhar e guardar os seus próprios terrenos.
-    </div>
+<div class="guest-banner">
+    👋 Está a visualizar o mapa como visitante.
+    <a href="login.php">Faça login</a> para desenhar e guardar os seus próprios terrenos.
+</div>
 <?php endif; ?>
 
-<!-- Stats Grid (apenas para utilizadores logados) -->
-<?php if ($isLoggedIn): ?>
-    <div class="stats-grid">
-        <div class="stat-card">
-            <div class="stat-number" id="total-terrains"><?php echo $stats['total_terrains']; ?></div>
-            <div class="stat-label">Terrenos Registados</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-number" id="total-area"><?php echo number_format($stats['total_area'], 1); ?></div>
-            <div class="stat-label">Área Total (ha)</div>
-        </div>
-    </div>
-<?php endif; ?>
-
-<!-- Main Grid -->
+<!-- Main Grid: mapa + sidebar unificada -->
 <div class="main-grid <?php echo !$isLoggedIn ? 'full-width' : ''; ?>">
-    <!-- Map Section -->
+
+    <!-- Mapa -->
     <div class="map-section">
         <?php if ($isLoggedIn): ?>
-            <div class="controls">
-                <button class="btn btn-primary" onclick="startDrawing()">✏️ Desenhar Terreno</button>
-                <button class="btn btn-secondary" onclick="clearMap()">🗑️ Limpar Mapa</button>
+        <div class="controls" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <button class="btn btn-primary btn-sm" onclick="startDrawing()">✏️ Desenhar</button>
+            <button class="btn btn-secondary btn-sm" onclick="clearMap()">🗑️ Limpar</button>
+        </div>
+        <!-- Formulário de guardar terreno (aparece ao desenhar) -->
+        <div id="save-form" class="section" style="display:none; margin:8px 0; padding:12px;">
+            <h3 style="margin:0 0 10px;">Guardar Terreno</h3>
+            <div class="form-group"><label>Nome *</label>
+                <input type="text" id="terrain-name" placeholder="Ex: Campo Norte"></div>
+            <div class="form-group"><label>Descrição</label>
+                <textarea id="terrain-description" placeholder="Opcional…" rows="2"></textarea></div>
+            <div style="display:flex; gap:8px;">
+                <button class="btn btn-primary btn-sm" onclick="saveTerrain()">💾 Guardar</button>
+                <button class="btn btn-secondary btn-sm" onclick="stopDrawing()">✖ Cancelar</button>
             </div>
+        </div>
         <?php endif; ?>
         <div id="map"></div>
     </div>
 
-    <!-- Sidebar (apenas para utilizadores logados) -->
     <?php if ($isLoggedIn): ?>
-        <div class="sidebar">
-            <!-- Formulário de guardar -->
-            <div id="save-form" class="section" style="display: none;">
-                <h3>Guardar Terreno</h3>
-                <div class="form-group">
-                    <label for="terrain-name">Nome *</label>
-                    <input type="text" id="terrain-name" placeholder="Ex: Campo Norte">
-                </div>
-                <div class="form-group">
-                    <label for="terrain-description">Descrição</label>
-                    <textarea id="terrain-description" placeholder="Descrição opcional..."></textarea>
-                </div>
-                <div style="display: flex; gap: 10px;">
-                    <button class="btn btn-primary" onclick="saveTerrain()">💾 Guardar</button>
-                    <button class="btn btn-secondary" onclick="stopDrawing()">✖️ Cancelar</button>
-                </div>
-            </div>
+    <!-- Sidebar unificada -->
+    <div class="sidebar" style="display:flex; flex-direction:column; gap:0;">
 
-            <!-- Lista de terrenos -->
-            <div class="section">
-                <h3>Meus Terrenos</h3>
-                <div id="terrain-list" class="terrain-list">
-                    <div class="empty-state">
-                        <h4>A carregar...</h4>
+        <!-- ── Selector de terreno (controla tudo) ─── -->
+        <div class="section" style="padding:14px 16px;">
+            <h3 style="margin:0 0 10px; font-size:14px; color:#1f2937;">📄 Relatório de Terreno</h3>
+            <select id="report-terrain"
+                    onchange="onReportTerrainChange(this.value)"
+                    style="width:100%; padding:8px 10px; border:1.5px solid #e5e7eb;
+                           border-radius:8px; font-size:13px; background:#fff; cursor:pointer;">
+                <option value="">— Selecione um terreno —</option>
+                <?php foreach ($mapTerrains as $t): ?>
+                    <option value="<?php echo (int)$t['id']; ?>">
+                        <?php echo htmlspecialchars($t['name']); ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+            <!-- Opacidade global dos layers -->
+            <div id="opacity-ctrl" style="display:none; margin-top:10px;">
+                <label style="font-size:11px; font-weight:600; color:#6b7280;
+                               display:flex; justify-content:space-between;">
+                    <span>Opacidade layers</span>
+                    <span id="global-opacity-val">80%</span>
+                </label>
+                <input type="range" id="global-opacity" min="0" max="100" value="80"
+                       oninput="setGlobalOpacity(this.value)"
+                       style="width:100%; accent-color:#667eea; height:4px; cursor:pointer; margin-top:4px;">
+            </div>
+        </div>
+
+        <!-- ── Grupos de layers (mostrados após selecionar terreno) ── -->
+        <div id="report-layers" style="display:none; flex:1; overflow-y:auto;">
+
+            <!-- 🎨 Layers de Campo -->
+            <div class="layer-group">
+                <div class="layer-group-hdr" onclick="toggleLayerGroup('interp')">
+                    <span>🎨 Layers de Campo</span>
+                    <span style="display:flex; align-items:center; gap:6px;">
+                        <span id="interp-badge" class="layer-badge">0</span>
+                        <span id="interp-arrow">▶</span>
+                    </span>
+                </div>
+                <div id="lg-interp" class="layer-group-body" style="display:none;">
+                    <div id="report-interp-list" class="layer-items">
+                        <div class="layer-empty">A carregar…</div>
                     </div>
                 </div>
             </div>
 
-            <!-- Interpolações de Campo como Layers -->
-            <div class="section">
-                <h3>🎨 Layers de Campo</h3>
-                <p style="font-size:12px; color:#9ca3af; margin:-4px 0 10px;">
-                    Interpolações IDW guardadas no separador Medições de Campo.
-                </p>
-                <div class="form-group" style="margin-bottom:10px;">
-                    <label style="font-size:12px; font-weight:600; color:#6b7280;
-                                  display:block; margin-bottom:4px;">Terreno</label>
-                    <select id="map-interp-terrain" onchange="loadMapInterpolations(this.value)"
-                            style="width:100%; padding:7px 10px; border:1.5px solid #e5e7eb;
-                                   border-radius:7px; font-size:13px; background:#fff;">
-                        <option value="">— Selecione um terreno —</option>
-                        <?php foreach ($mapTerrains as $t): ?>
-                            <option value="<?php echo (int)$t['id']; ?>">
-                                <?php echo htmlspecialchars($t['name']); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
+            <!-- 🗺️ Camadas GeoJSON -->
+            <div class="layer-group">
+                <div class="layer-group-hdr" onclick="toggleLayerGroup('geojson')">
+                    <span>🗺️ Camadas GeoJSON</span>
+                    <span style="display:flex; align-items:center; gap:6px;">
+                        <span id="geojson-badge" class="layer-badge">0</span>
+                        <span id="geojson-arrow">▶</span>
+                    </span>
                 </div>
-                <div class="form-group" style="margin-bottom:10px;">
-                    <label style="font-size:12px; font-weight:600; color:#6b7280;
-                                  display:flex; justify-content:space-between; align-items:center;
-                                  margin-bottom:4px;">
-                        <span>Opacidade</span>
-                        <span id="map-interp-opacity-val" style="font-weight:400; color:#9ca3af;">100%</span>
-                    </label>
-                    <input type="range" id="map-interp-opacity" min="0" max="100" value="100"
-                           oninput="setMapInterpOpacity(this.value)"
-                           style="width:100%; accent-color:#667eea; cursor:pointer; height:4px;">
-
-                </div>
-                <div id="map-interp-list" style="color:#9ca3af; font-size:13px; padding:2px 0;">
-                    Selecione um terreno para ver as interpolações guardadas.
+                <div id="lg-geojson" class="layer-group-body" style="display:none;">
+                    <div id="report-geojson-list" class="layer-items">
+                        <div class="layer-empty">A carregar…</div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Camadas GeoJSON -->
-            <div class="section">
-                <h3>🗺️ Camadas GeoJSON</h3>
-                <p style="font-size:12px; color:#9ca3af; margin:-4px 0 10px;">
-                    Ficheiros GeoJSON importados no separador Medições de Campo.
-                </p>
-                <div id="map-geojson-list" style="font-size:13px; color:#9ca3af; padding:2px 0;">
-                    <div style="text-align:center; padding:10px;">A carregar…</div>
+            <!-- 🛰️ Imagens de Satélite -->
+            <div class="layer-group">
+                <div class="layer-group-hdr" onclick="toggleLayerGroup('raster')">
+                    <span>🛰️ Imagens de Satélite</span>
+                    <span style="display:flex; align-items:center; gap:6px;">
+                        <span id="raster-badge" class="layer-badge">0</span>
+                        <span id="raster-arrow">▶</span>
+                    </span>
+                </div>
+                <div id="lg-raster" class="layer-group-body" style="display:none;">
+                    <div id="report-raster-list" class="layer-items">
+                        <div class="layer-empty">A carregar…</div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Rasters de Satélite -->
-            <div class="section">
-                <h3>🛰️ Imagens de Satélite</h3>
-                <p style="font-size:12px; color:#9ca3af; margin:-4px 0 10px;">
-                    Rasters gerados pelo Sentinel.py (NDVI, NDMI, LST…).
-                    Gere novos rasters no separador <strong>📊 Medições de Campo</strong>.
-                </p>
-                <div class="form-group" style="margin-bottom:10px;">
-                    <label style="font-size:12px; font-weight:600; color:#6b7280;
-                                  display:block; margin-bottom:4px;">Terreno</label>
-                    <select id="map-raster-terrain" onchange="loadMapRasterLayers(this.value)"
-                            style="width:100%; padding:7px 10px; border:1.5px solid #e5e7eb;
-                                   border-radius:7px; font-size:13px; background:#fff;">
-                        <option value="">— Selecione um terreno —</option>
-                        <?php foreach ($mapTerrains as $t): ?>
-                            <option value="<?php echo (int)$t['id']; ?>">
-                                <?php echo htmlspecialchars($t['name']); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
+            <!-- 📍 Meus Terrenos (lista compacta) -->
+            <div class="layer-group">
+                <div class="layer-group-hdr" onclick="toggleLayerGroup('terrains')">
+                    <span>📍 Meus Terrenos</span>
+                    <span id="terrains-arrow">▶</span>
                 </div>
-                <div class="form-group" style="margin-bottom:10px;">
-                    <label style="font-size:12px; font-weight:600; color:#6b7280;
-                                  display:flex; justify-content:space-between; align-items:center;
-                                  margin-bottom:4px;">
-                        <span>Opacidade</span>
-                        <span id="map-raster-opacity-val" style="font-weight:400; color:#9ca3af;">80%</span>
-                    </label>
-                    <input type="range" id="map-raster-opacity" min="0" max="100" value="80"
-                           oninput="setMapRasterOpacity(this.value)"
-                           style="width:100%; accent-color:#0ea5e9; cursor:pointer; height:4px;">
-                </div>
-                <div id="map-raster-list" style="color:#9ca3af; font-size:13px; padding:2px 0;">
-                    Selecione um terreno para ver os rasters disponíveis.
+                <div id="lg-terrains" class="layer-group-body" style="display:none;">
+                    <div id="terrain-list" class="terrain-list" style="max-height:220px; overflow-y:auto;">
+                        <div class="layer-empty">A carregar…</div>
+                    </div>
                 </div>
             </div>
-        </div>
+
+        </div><!-- #report-layers -->
+    </div><!-- .sidebar -->
     <?php endif; ?>
+
+</div><!-- .main-grid -->
+
+<?php if ($isLoggedIn): ?>
+<!-- ── Secção de Notas e Relatório PDF (abaixo do mapa) ── -->
+<div class="section" id="notes-section"
+     style="margin:16px 0; padding:20px; background:#fff;
+            border:1px solid #e5e7eb; border-radius:12px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+        <h3 style="margin:0; font-size:15px; color:#1f2937;">📝 Notas do Relatório</h3>
+        <button class="btn btn-primary btn-sm"
+                onclick="generateMapReport()"
+                style="background:linear-gradient(135deg,#7c3aed,#4f46e5);">
+            📄 Gerar PDF
+        </button>
+    </div>
+
+    <!-- Editor de nota -->
+    <div style="display:flex; gap:10px; align-items:flex-end; margin-bottom:14px;">
+        <textarea id="note-content" rows="3"
+                  placeholder="Escreva uma observação sobre o terreno ou os layers activos…"
+                  style="flex:1; padding:10px; border:1.5px solid #e5e7eb; border-radius:8px;
+                         font-size:13px; resize:vertical; font-family:inherit; line-height:1.5;">
+        </textarea>
+        <button class="btn btn-primary btn-sm" onclick="saveMapNote()"
+                style="white-space:nowrap; align-self:flex-end;">
+            💾 Guardar
+        </button>
+    </div>
+
+    <!-- Banco de notas guardadas -->
+    <div style="border-top:1px solid #f1f5f9; padding-top:12px;">
+        <div style="font-size:12px; font-weight:600; color:#6b7280; margin-bottom:8px;">
+            📖 Banco de Notas
+        </div>
+        <div id="notes-list">
+            <div style="text-align:center; padding:10px; color:#9ca3af; font-size:13px;">A carregar…</div>
+        </div>
+    </div>
 </div>
+<?php endif; ?>
+
+<!-- jsPDF CDN (apenas para este tab) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
+        integrity="sha512-qZvrmS2ekKPF2mSznTQsxqPgnpkI4DNTlrdUmTzrDgektczlKNRRhy5X5AAOnx5S09ydFYWWNSfYEqbZHed/g=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+<style>
+/* ── Grupos de layers na sidebar ── */
+.layer-group { border-bottom: 1px solid #f1f5f9; }
+.layer-group-hdr {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 16px; font-size: 13px; font-weight: 600; color: #374151;
+    cursor: pointer; user-select: none; transition: background .15s;
+}
+.layer-group-hdr:hover { background: #f9fafb; }
+.layer-group-body { padding: 8px 12px 10px; background: #fafafa; }
+.layer-badge {
+    font-size: 10px; font-weight: 700; color: #fff;
+    background: #6b7280; border-radius: 10px; padding: 1px 6px;
+}
+.layer-badge.has-items { background: #667eea; }
+.layer-items { display: flex; flex-direction: column; gap: 4px; }
+.layer-empty { font-size: 12px; color: #9ca3af; padding: 4px 2px; }
+
+/* Linha de layer individual */
+.layer-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; border-radius: 7px; font-size: 12px;
+    background: #fff; border: 1px solid #f1f5f9;
+}
+.layer-row-info { flex: 1; min-width: 0; }
+.layer-row-name { font-weight: 600; color: #1f2937;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.layer-row-meta { font-size: 10px; color: #9ca3af; margin-top:1px; }
+.layer-toggle-btn {
+    font-size: 11px; padding: 3px 7px; border-radius: 5px; white-space: nowrap;
+    cursor: pointer; border: none; font-weight: 600; transition: all .15s;
+}
+.layer-toggle-off { background: #f3f4f6; color: #6b7280; }
+.layer-toggle-off:hover { background: #e5e7eb; }
+.layer-toggle-on  { background: #ede9fe; color: #7c3aed; }
+
+/* Nota individual */
+.note-item {
+    display: flex; gap: 8px; align-items: flex-start;
+    padding: 9px 12px; border-radius: 8px; background: #f8fafc;
+    border: 1px solid #e5e7eb; margin-bottom: 6px; font-size: 13px;
+}
+.note-item-text { flex: 1; color: #374151; line-height: 1.5; white-space: pre-wrap; }
+.note-item-date { font-size: 10px; color: #9ca3af; white-space: nowrap; }
+.note-delete-btn {
+    background: none; border: none; cursor: pointer;
+    color: #d1d5db; font-size: 14px; padding: 0 2px; line-height: 1;
+    transition: color .15s;
+}
+.note-delete-btn:hover { color: #ef4444; }
+</style>
