@@ -2,8 +2,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # install_service.sh — Instala o Sentinel.py como serviço systemd
 # Uso: sudo bash install_service.sh [--user UTILIZADOR]
+#
+# Nota: a parte do serviço systemd requer um VPS/servidor dedicado com systemd.
+# Em hosting partilhado (cPanel/Plesk), corre sem sudo para instalar só as
+# dependências Python: bash install_service.sh --deps-only
 # ─────────────────────────────────────────────────────────────────────────────
-set -euo pipefail
+set -uo pipefail   # sem -e para não sair silenciosamente em erros systemd
 
 # ── Configuração ──────────────────────────────────────────────────────────────
 SERVICE_NAME="sentinel"
@@ -11,10 +15,12 @@ SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
 # Detectar utilizador: argumento --user, ou SUDO_USER, ou utilizador actual
 TARGET_USER="${SUDO_USER:-$USER}"
+DEPS_ONLY=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --user) TARGET_USER="$2"; shift 2 ;;
-        *)      shift ;;
+        --user)       TARGET_USER="$2"; shift 2 ;;
+        --deps-only)  DEPS_ONLY=true;   shift ;;
+        *)            shift ;;
     esac
 done
 
@@ -24,9 +30,12 @@ PYTHON_SCRIPT="$SCRIPT_DIR/Sentinel.py"
 REQUIREMENTS="$SCRIPT_DIR/requirements.txt"
 
 # ── Validações ────────────────────────────────────────────────────────────────
-if [[ $EUID -ne 0 ]]; then
-    echo "❌  Este script precisa de ser corrido com sudo."
+if [[ "$DEPS_ONLY" == false && $EUID -ne 0 ]]; then
+    echo "❌  Para instalar o serviço systemd este script precisa de sudo."
     echo "    Uso: sudo bash install_service.sh"
+    echo ""
+    echo "    Para instalar apenas as dependências Python (sem systemd):"
+    echo "    bash install_service.sh --deps-only"
     exit 1
 fi
 
@@ -89,11 +98,26 @@ fi
 # ── Instalar dependências ──────────────────────────────────────────────────────
 if [[ -f "$REQUIREMENTS" ]]; then
     echo "📦  A instalar dependências de $REQUIREMENTS …"
-    sudo -u "$TARGET_USER" "$VENV_PYTHON" -m pip install --upgrade pip -q
-    sudo -u "$TARGET_USER" "$VENV_PYTHON" -m pip install -r "$REQUIREMENTS" -q
+    if [[ "$DEPS_ONLY" == true ]]; then
+        # Sem sudo em hosting partilhado
+        "$VENV_PYTHON" -m pip install --upgrade pip -q
+        "$VENV_PYTHON" -m pip install -r "$REQUIREMENTS" -q
+    else
+        sudo -u "$TARGET_USER" "$VENV_PYTHON" -m pip install --upgrade pip -q
+        sudo -u "$TARGET_USER" "$VENV_PYTHON" -m pip install -r "$REQUIREMENTS" -q
+    fi
     echo "✅  Dependências instaladas."
 else
     echo "⚠️   requirements.txt não encontrado — dependências não instaladas."
+fi
+
+# Em modo --deps-only terminar aqui (sem systemd)
+if [[ "$DEPS_ONLY" == true ]]; then
+    echo ""
+    echo "✅  Dependências Python instaladas com sucesso!"
+    echo "   Venv: $VENV_DIR"
+    echo "   Para instalar o serviço systemd: sudo bash install_service.sh"
+    exit 0
 fi
 
 # ── Criar ficheiro de serviço systemd ─────────────────────────────────────────
