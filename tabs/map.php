@@ -77,8 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
             // ── Interpolações de campo guardadas ───────────────────────────────
 
             case 'get_terrain_interpolations':
-                // Mostra TODAS as interpolações do utilizador.
-                // Se terrain_id for fornecido, as do terreno selecionado aparecem primeiro.
+                // Filtra ESTRITAMENTE pelo terreno seleccionado.
                 $terrain_id = intval($_POST['terrain_id'] ?? 0);
                 try {
                     if ($terrain_id > 0) {
@@ -87,25 +86,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                                    min_lat, max_lat, min_lng, max_lng,
                                    min_val, max_val, created_at, terrain_id
                             FROM field_interpolations
-                            WHERE user_id = ?
-                            ORDER BY (terrain_id = ?) DESC, created_at DESC
+                            WHERE user_id = ? AND terrain_id = ?
+                            ORDER BY created_at DESC
                         ");
                         $stmt->execute([$currentUser['id'], $terrain_id]);
                     } else {
-                        $stmt = $pdo->prepare("
-                            SELECT id, name, param, colormap, resolution,
-                                   min_lat, max_lat, min_lng, max_lng,
-                                   min_val, max_val, created_at, terrain_id
-                            FROM field_interpolations
-                            WHERE user_id = ?
-                            ORDER BY created_at DESC
-                        ");
-                        $stmt->execute([$currentUser['id']]);
+                        // Sem terreno selecionado → lista vazia
+                        $response['success']        = true;
+                        $response['interpolations'] = [];
+                        break;
                     }
                     $response['success']        = true;
                     $response['interpolations'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 } catch (PDOException $tableErr) {
-                    // Tabela ainda não existe (migração 002 não aplicada)
                     $response['success']        = true;
                     $response['interpolations'] = [];
                 }
@@ -138,22 +131,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
             // ── Camadas GeoJSON ────────────────────────────────────────────────
 
             case 'get_geojson_layers':
+                $terrain_id = intval($_POST['terrain_id'] ?? 0);
                 try {
-                    $stmt = $pdo->prepare("
-                        SELECT g.id, g.name, g.description, g.feature_count,
-                               g.bbox_min_lat, g.bbox_max_lat, g.bbox_min_lng, g.bbox_max_lng,
-                               g.created_at, t.name AS terrain_name
-                        FROM field_geojson g
-                        LEFT JOIN terrains t ON t.id = g.terrain_id
-                        WHERE g.user_id = ?
-                        ORDER BY g.created_at DESC
-                    ");
-                    $stmt->execute([$currentUser['id']]);
+                    if ($terrain_id > 0) {
+                        $stmt = $pdo->prepare("
+                            SELECT g.id, g.name, g.description, g.feature_count,
+                                   g.bbox_min_lat, g.bbox_max_lat, g.bbox_min_lng, g.bbox_max_lng,
+                                   g.created_at, t.name AS terrain_name
+                            FROM field_geojson g
+                            LEFT JOIN terrains t ON t.id = g.terrain_id
+                            WHERE g.user_id = ? AND g.terrain_id = ?
+                            ORDER BY g.created_at DESC
+                        ");
+                        $stmt->execute([$currentUser['id'], $terrain_id]);
+                    } else {
+                        // Sem terreno selecionado → lista vazia
+                        $response['success'] = true;
+                        $response['layers']  = [];
+                        break;
+                    }
                     $response['success'] = true;
                     $response['layers']  = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 } catch (PDOException $tableErr) {
                     $response['success'] = true;
-                    $response['layers']  = [];   // tabela ainda não existe — ignorar
+                    $response['layers']  = [];
                 }
                 break;
 
