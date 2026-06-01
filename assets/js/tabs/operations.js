@@ -19,8 +19,11 @@ let opsCalMonth        = 0;
 let opsCalSelDay       = null;  // dia seleccionado no calendário
 let opsAllOps          = [];    // cache todas as operações do terreno
 let opsListFilter      = '';    // filtro de estado activo
-let opsGeoJSONLayers   = {};    // id → L.layer (camadas de referência)
-let opsGeoJSONList     = [];    // lista de camadas disponíveis
+let opsGeoJSONLayers   = {};    // id → L.layer (camadas de referência GeoJSON)
+let opsGeoJSONList     = [];    // lista de camadas GeoJSON disponíveis
+let opsFieldObjLayer   = null;  // L.layerGroup com objectos de campo (árvores, postes)
+let opsFieldObjCount   = 0;     // total de objectos carregados
+let opsFieldObjVisible = true;  // toggle activo
 
 // ── Definições de tipos e estados ────────────────────────────────────────────
 const OPS_TYPES = {
@@ -120,12 +123,17 @@ function opsTerrainChange(val) {
     // Limpar camadas de referência
     Object.values(opsGeoJSONLayers).forEach(l => { try { opsMap.removeLayer(l); } catch(e) {} });
     opsGeoJSONLayers = {}; opsGeoJSONList = [];
+    if (opsFieldObjLayer) { try { opsMap.removeLayer(opsFieldObjLayer); } catch(e) {} opsFieldObjLayer = null; }
+    opsFieldObjCount = 0; opsFieldObjVisible = true;
 
     document.getElementById('ops-list').innerHTML = '<div class="layer-empty">A carregar…</div>';
+    const refEl = document.getElementById('ops-ref-list');
+    if (refEl) refEl.innerHTML = '<div class="layer-empty" style="font-size:10px;">A carregar…</div>';
     _opsHideSeasonSummary();
 
     if (!opsTerrainId) {
         document.getElementById('ops-list').innerHTML = '<div class="layer-empty">Selecione um terreno.</div>';
+        if (refEl) refEl.innerHTML = '<div class="layer-empty" style="font-size:10px;">Selecione um terreno.</div>';
         document.getElementById('ops-list-badge').textContent = '0';
         document.getElementById('ops-list-badge').classList.remove('has-items');
         document.getElementById('ops-prescription').innerHTML = '<option value="">— Sem prescrição associada —</option>';
@@ -160,6 +168,7 @@ function opsTerrainChange(val) {
 
     _opsLoadPrescriptions(opsTerrainId);
     _opsLoadOps();
+    _opsLoadFieldObjects(opsTerrainId);
     _opsLoadGeoJSONLayers(opsTerrainId);
 }
 
@@ -180,17 +189,89 @@ function _opsLoadPrescriptions(terrainId) {
     });
 }
 
+// ── Objectos de campo: árvores, plantas, postes ───────────────────────────────
+
+// Estilo visual por tipo/espécie
+const OPS_OBJ_STYLE = {
+    tree: {
+        _default:    { border: '#15803d', fill: '#22c55e', r: 4 },
+        oliveira:    { border: '#65a30d', fill: '#a3e635', r: 5 },
+        videira:     { border: '#6d28d9', fill: '#a78bfa', r: 4 },
+        macieira:    { border: '#0f766e', fill: '#2dd4bf', r: 5 },
+        macieira_2d: { border: '#0f766e', fill: '#2dd4bf', r: 4 },
+        pereira:     { border: '#166534', fill: '#4ade80', r: 5 },
+    },
+    pole: { border: '#78716c', fill: '#a8a29e', r: 5 },
+};
+
+const OPS_OBJ_SPECIES_LABEL = {
+    oliveira: '🫒 Oliveira', videira: '🍇 Videira',
+    macieira: '🍎 Macieira', macieira_2d: '🍎 Macieira 2D',
+    pereira:  '🍐 Pereira',  outro: '🌳 Outro',
+};
+
+function _opsLoadFieldObjects(terrainId) {
+    const fd = new FormData();
+    fd.append('action',     'get_ops_field_objects');
+    fd.append('terrain_id', terrainId);
+    _opsFetch(fd, data => {
+        const objs = data.objects || [];
+        if (objs.length) {
+            _opsRenderFieldObjects(objs);
+        } else {
+            opsFieldObjCount = 0;
+        }
+        _opsRenderRefList(); // atualiza painel (entrada de objectos + GeoJSON)
+    });
+}
+
+function _opsRenderFieldObjects(objects) {
+    // Remover camada anterior
+    if (opsFieldObjLayer) { try { opsMap.removeLayer(opsFieldObjLayer); } catch(e) {} }
+
+    const markers = objects.map(o => {
+        const st = o.type === 'pole'
+            ? OPS_OBJ_STYLE.pole
+            : (OPS_OBJ_STYLE.tree[o.species] || OPS_OBJ_STYLE.tree._default);
+
+        const m = L.circleMarker([parseFloat(o.lat), parseFloat(o.lng)], {
+            radius: st.r, color: st.border, fillColor: st.fill,
+            weight: 1, fillOpacity: 0.85, opacity: 0.9
+        });
+
+        // Popup compacto
+        const parts = [];
+        if (o.label)   parts.push(`<b>${_opsEsc(o.label)}</b>`);
+        if (o.species) parts.push(OPS_OBJ_SPECIES_LABEL[o.species] || _opsEsc(o.species));
+        if (o.notes)   parts.push(`<span style="color:#6b7280;font-size:11px;">${_opsEsc(o.notes.slice(0,80))}</span>`);
+        if (!parts.length) parts.push(o.type === 'pole' ? '🪵 Poste' : '🌳 Árvore/Planta');
+        m.bindPopup(parts.join('<br>'), { maxWidth: 200 });
+        return m;
+    });
+
+    opsFieldObjLayer  = L.layerGroup(markers);
+    opsFieldObjCount  = objects.length;
+    opsFieldObjVisible = true;
+    opsFieldObjLayer.addTo(opsMap);
+}
+
+function opsToggleFieldObjLayer() {
+    if (!opsFieldObjLayer) return;
+    opsFieldObjVisible = !opsFieldObjVisible;
+    if (opsFieldObjVisible) opsMap.addLayer(opsFieldObjLayer);
+    else                    opsMap.removeLayer(opsFieldObjLayer);
+    _opsRenderRefList();
+}
+
 // ── Camadas GeoJSON de referência (árvores, linhas de cultura…) ──────────────
 function _opsLoadGeoJSONLayers(terrainId) {
-    const el = document.getElementById('ops-ref-list');
-    if (el) el.innerHTML = '<div class="layer-empty" style="font-size:10px;">A carregar…</div>';
     const fd = new FormData();
     fd.append('action',     'get_ops_geojson_layers');
     fd.append('terrain_id', terrainId);
     _opsFetch(fd, data => {
         opsGeoJSONList = data.layers || [];
         _opsRenderRefList();
-        // Auto-mostrar todas as camadas
+        // Auto-mostrar todas as camadas GeoJSON
         opsGeoJSONList.forEach(lyr => _opsShowRefLayer(lyr.id));
     });
 }
@@ -198,15 +279,38 @@ function _opsLoadGeoJSONLayers(terrainId) {
 function _opsRenderRefList() {
     const el = document.getElementById('ops-ref-list');
     if (!el) return;
-    if (!opsGeoJSONList.length) {
-        el.innerHTML = '<div class="layer-empty" style="font-size:10px;">Sem camadas GeoJSON para este terreno.</div>';
-        return;
+
+    const parts = [];
+
+    // ── Entrada: Objectos de campo (árvores / postes) ─────────────────────
+    if (opsFieldObjCount > 0 || opsFieldObjLayer) {
+        const on  = opsFieldObjVisible && !!opsFieldObjLayer;
+        const cnt = opsFieldObjCount ? ` · ${opsFieldObjCount} obj.` : '';
+        parts.push(`
+        <div style="display:flex;align-items:center;gap:5px;padding:5px 6px;
+                    background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;margin-bottom:4px;">
+            <span style="font-size:13px;">🌳</span>
+            <span style="flex:1;font-size:11px;font-weight:600;color:#166534;">
+                Árvores / Postes
+                <span style="color:#16a34a;font-weight:400;">${cnt}</span>
+            </span>
+            <button onclick="opsToggleFieldObjLayer()"
+                    style="font-size:9px;padding:2px 7px;border:none;border-radius:4px;
+                           cursor:pointer;white-space:nowrap;font-weight:600;flex-shrink:0;
+                           background:${on?'#dcfce7':'#f3f4f6'};
+                           color:${on?'#15803d':'#6b7280'};">
+                ${on ? '✅ ON' : '👁 Ver'}
+            </button>
+        </div>`);
     }
-    el.innerHTML = opsGeoJSONList.map(lyr => {
+
+    // ── Entradas: camadas GeoJSON importadas ──────────────────────────────
+    opsGeoJSONList.forEach(lyr => {
         const on  = !!opsGeoJSONLayers[lyr.id];
-        const cnt = lyr.feature_count ? ' · ' + lyr.feature_count + ' feat.' : '';
-        return `<div style="display:flex;align-items:center;gap:5px;padding:4px 5px;
-                            background:#f8fafc;border-radius:5px;margin-bottom:3px;">
+        const cnt = lyr.feature_count ? ` · ${lyr.feature_count} feat.` : '';
+        parts.push(`
+        <div style="display:flex;align-items:center;gap:5px;padding:4px 5px;
+                    background:#f8fafc;border-radius:5px;margin-bottom:3px;">
             <span style="flex:1;font-size:11px;font-weight:500;color:#374151;
                          overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
                   title="${_opsEsc(lyr.name)}">${_opsEsc(lyr.name)}
@@ -219,8 +323,14 @@ function _opsRenderRefList() {
                            color:${on?'#7c3aed':'#6b7280'};">
                 ${on ? '✅ ON' : '👁 Ver'}
             </button>
-        </div>`;
-    }).join('');
+        </div>`);
+    });
+
+    if (!parts.length) {
+        el.innerHTML = '<div class="layer-empty" style="font-size:10px;">Sem camadas de referência para este terreno.</div>';
+        return;
+    }
+    el.innerHTML = parts.join('');
 }
 
 function opsToggleRefLayer(id) {

@@ -209,6 +209,27 @@ if (isset($_POST['action'])) {
                 break;
             }
 
+            // ── Objectos de campo (árvores, plantas, postes) ─────────────────
+            case 'get_ops_field_objects': {
+                $tid = intval($_POST['terrain_id'] ?? 0);
+                if (!$tid) { $resp['success'] = true; $resp['objects'] = []; break; }
+                try {
+                    $st = $pdo->prepare("
+                        SELECT id, type, species, label, lat, lng, altitude, notes, created_at
+                        FROM field_objects
+                        WHERE user_id = ? AND terrain_id = ?
+                          AND lat IS NOT NULL AND lng IS NOT NULL
+                        ORDER BY type, species, label, created_at
+                    ");
+                    $st->execute([$userId, $tid]);
+                    $resp['success'] = true;
+                    $resp['objects'] = $st->fetchAll(PDO::FETCH_ASSOC);
+                } catch (PDOException $e) {
+                    $resp['success'] = true; $resp['objects'] = [];
+                }
+                break;
+            }
+
             // ── Camadas GeoJSON de referência (árvores, linhas…) ─────────────
             case 'get_ops_geojson_layers': {
                 $tid = intval($_POST['terrain_id'] ?? 0);
