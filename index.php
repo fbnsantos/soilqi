@@ -39,6 +39,13 @@ $availableTabs = [
         'requiresAuth' => true,
         'requiresAdmin' => false
     ],
+    'operations' => [
+        'title' => 'Operações',
+        'icon'  => '🚜',
+        'file'  => 'tabs/operations.php',
+        'requiresAuth'  => true,
+        'requiresAdmin' => false
+    ],
     'semantic' => [
         'title' => 'Mapa Semântico',
         'icon'  => '🤖',
