@@ -140,7 +140,7 @@ if (isset($_POST['action'])) {
                     $where .= " AND YEAR(scheduled_date)=?"; $params[] = $year;
                 }
                 $st = $pdo->prepare("SELECT id,terrain_id,prescription_id,type,name,description,
-                    status,scheduled_date,completed_date,season,trajectory_type,
+                    status,scheduled_date,completed_date,season,trajectory,trajectory_type,
                     area_ha,cost_per_ha,fixed_cost,total_cost,notes,created_at
                     FROM field_operations WHERE $where
                     ORDER BY scheduled_date ASC, created_at DESC");
@@ -206,6 +206,45 @@ if (isset($_POST['action'])) {
                     $resp['prescriptions'] = []; // tabela pode não existir ainda
                 }
                 $resp['success'] = true;
+                break;
+            }
+
+            // ── Camadas GeoJSON de referência (árvores, linhas…) ─────────────
+            case 'get_ops_geojson_layers': {
+                $tid = intval($_POST['terrain_id'] ?? 0);
+                if (!$tid) { $resp['success'] = true; $resp['layers'] = []; break; }
+                try {
+                    $st = $pdo->prepare("
+                        SELECT id, name, description, feature_count, created_at
+                        FROM field_geojson
+                        WHERE user_id = ? AND terrain_id = ?
+                        ORDER BY created_at DESC
+                    ");
+                    $st->execute([$userId, $tid]);
+                    $resp['success'] = true;
+                    $resp['layers']  = $st->fetchAll(PDO::FETCH_ASSOC);
+                } catch (PDOException $e) {
+                    $resp['success'] = true; $resp['layers'] = [];
+                }
+                break;
+            }
+
+            case 'get_ops_geojson_data': {
+                $gid = intval($_POST['id'] ?? 0);
+                if (!$gid) { $resp['message'] = 'ID inválido.'; break; }
+                try {
+                    $st = $pdo->prepare("SELECT id, name, geojson_data
+                        FROM field_geojson WHERE id = ? AND user_id = ?");
+                    $st->execute([$gid, $userId]);
+                    $row = $st->fetch(PDO::FETCH_ASSOC);
+                    if (!$row) { $resp['message'] = 'Camada não encontrada.'; break; }
+                    $resp['success'] = true;
+                    $resp['id']      = (int)$row['id'];
+                    $resp['name']    = $row['name'];
+                    $resp['geojson'] = $row['geojson_data'];
+                } catch (PDOException $e) {
+                    $resp['message'] = 'Erro: ' . $e->getMessage();
+                }
                 break;
             }
 
@@ -328,6 +367,9 @@ if (!$isLoggedIn): ?>
     transition:all .15s; opacity:1;
 }
 .ops-draw-btn.active { box-shadow:0 0 0 2px #fff, 0 0 0 4px currentColor; }
+
+/* Painel colapsável genérico */
+.hidden-panel { display: none !important; }
 
 /* Resumo custo no topo do mapa */
 #ops-season-summary {
@@ -504,6 +546,59 @@ if (!$isLoggedIn): ?>
                         ou <strong>📍 Pontos</strong> abaixo do mapa para definir o trajecto.
                     </div>
                     <div id="ops-traj-summary" class="ops-traj-summary" style="display:none;"></div>
+
+                    <!-- Importar / Exportar / Gerar -->
+                    <div style="margin-top:8px;display:flex;gap:5px;flex-wrap:wrap;align-items:center;">
+                        <label style="display:inline-flex;align-items:center;gap:3px;
+                                      padding:4px 9px;background:#eff6ff;color:#2563eb;
+                                      border-radius:6px;font-size:10px;font-weight:600;cursor:pointer;">
+                            📂 Importar
+                            <input type="file" id="ops-traj-import" accept=".geojson,.json,.gpx"
+                                   style="display:none;" onchange="opsImportTrajectory(this)">
+                        </label>
+                        <button onclick="opsDownloadTrajectory()"
+                                style="padding:4px 9px;background:#ecfdf5;color:#059669;border:none;
+                                       border-radius:6px;font-size:10px;font-weight:600;cursor:pointer;">
+                            ⬇ GeoJSON
+                        </button>
+                        <button onclick="document.getElementById('ops-gen-panel').classList.toggle('hidden-panel')"
+                                style="padding:4px 9px;background:#fff3cd;color:#92400e;border:none;
+                                       border-radius:6px;font-size:10px;font-weight:600;cursor:pointer;">
+                            🔲 Gerar linhas
+                        </button>
+                    </div>
+
+                    <!-- Gerador de passagens paralelas -->
+                    <div id="ops-gen-panel" class="hidden-panel"
+                         style="margin-top:8px;padding:9px 10px;background:#fffbeb;
+                                border-radius:6px;border:1px solid #fde68a;">
+                        <div style="font-size:10px;font-weight:700;color:#92400e;margin-bottom:7px;">
+                            ⚙️ Gerar passagens paralelas (serpentina)
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:7px;">
+                            <div>
+                                <label class="ops-lbl">Espaçamento (m)</label>
+                                <input type="number" id="ops-gen-spacing" class="ops-inp"
+                                       value="12" min="1" step="1" placeholder="12">
+                            </div>
+                            <div>
+                                <label class="ops-lbl">Ângulo (0–180°)</label>
+                                <input type="number" id="ops-gen-angle" class="ops-inp"
+                                       value="0" min="0" max="180" step="5" placeholder="0=E-W">
+                            </div>
+                        </div>
+                        <div style="font-size:10px;color:#a16207;margin-bottom:6px;">
+                            0° = passagens E-W · 90° = passagens N-S
+                        </div>
+                        <button onclick="opsGenerateSerpentine(
+                                    parseFloat(document.getElementById('ops-gen-spacing').value)||12,
+                                    parseFloat(document.getElementById('ops-gen-angle').value)||0)"
+                                style="width:100%;padding:5px 0;background:#f59e0b;color:#fff;
+                                       border:none;border-radius:5px;font-size:11px;
+                                       font-weight:600;cursor:pointer;">
+                            ✅ Gerar percurso serpentina
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Notas -->
@@ -530,6 +625,23 @@ if (!$isLoggedIn): ?>
                 </div>
                 <div id="ops-form-status" style="display:none;margin-top:8px;font-size:11px;
                      border-radius:5px;padding:7px 9px;"></div>
+            </div>
+        </div>
+
+        <!-- ── CAMADAS DE REFERÊNCIA (árvores, linhas, GeoJSON) ── -->
+        <div class="layer-group">
+            <div class="layer-group-hdr" onclick="opsToggleGroup('reflayers')">
+                <span>🗺️ Camadas de Referência</span>
+                <span id="reflayers-arrow">▶</span>
+            </div>
+            <div id="lg-reflayers" class="layer-group-body" style="display:none;padding:10px 12px;">
+                <div style="font-size:10px;color:#9ca3af;margin-bottom:7px;line-height:1.4;">
+                    Camadas GeoJSON do terreno (árvores, linhas de cultura…) para
+                    orientar a trajectória.
+                </div>
+                <div id="ops-ref-list">
+                    <div class="layer-empty" style="font-size:10px;">Selecione um terreno.</div>
+                </div>
             </div>
         </div>
 

@@ -19,6 +19,8 @@ let opsCalMonth        = 0;
 let opsCalSelDay       = null;  // dia seleccionado no calendário
 let opsAllOps          = [];    // cache todas as operações do terreno
 let opsListFilter      = '';    // filtro de estado activo
+let opsGeoJSONLayers   = {};    // id → L.layer (camadas de referência)
+let opsGeoJSONList     = [];    // lista de camadas disponíveis
 
 // ── Definições de tipos e estados ────────────────────────────────────────────
 const OPS_TYPES = {
@@ -115,6 +117,9 @@ function opsTerrainChange(val) {
     Object.values(opsOpLayers).forEach(l => { try { opsMap.removeLayer(l); } catch(e) {} });
     opsOpLayers = {};
     if (opsTerrainLayer) { opsMap.removeLayer(opsTerrainLayer); opsTerrainLayer = null; }
+    // Limpar camadas de referência
+    Object.values(opsGeoJSONLayers).forEach(l => { try { opsMap.removeLayer(l); } catch(e) {} });
+    opsGeoJSONLayers = {}; opsGeoJSONList = [];
 
     document.getElementById('ops-list').innerHTML = '<div class="layer-empty">A carregar…</div>';
     _opsHideSeasonSummary();
@@ -155,6 +160,7 @@ function opsTerrainChange(val) {
 
     _opsLoadPrescriptions(opsTerrainId);
     _opsLoadOps();
+    _opsLoadGeoJSONLayers(opsTerrainId);
 }
 
 function _opsLoadPrescriptions(terrainId) {
@@ -172,6 +178,313 @@ function _opsLoadPrescriptions(terrainId) {
             sel.appendChild(opt);
         });
     });
+}
+
+// ── Camadas GeoJSON de referência (árvores, linhas de cultura…) ──────────────
+function _opsLoadGeoJSONLayers(terrainId) {
+    const el = document.getElementById('ops-ref-list');
+    if (el) el.innerHTML = '<div class="layer-empty" style="font-size:10px;">A carregar…</div>';
+    const fd = new FormData();
+    fd.append('action',     'get_ops_geojson_layers');
+    fd.append('terrain_id', terrainId);
+    _opsFetch(fd, data => {
+        opsGeoJSONList = data.layers || [];
+        _opsRenderRefList();
+        // Auto-mostrar todas as camadas
+        opsGeoJSONList.forEach(lyr => _opsShowRefLayer(lyr.id));
+    });
+}
+
+function _opsRenderRefList() {
+    const el = document.getElementById('ops-ref-list');
+    if (!el) return;
+    if (!opsGeoJSONList.length) {
+        el.innerHTML = '<div class="layer-empty" style="font-size:10px;">Sem camadas GeoJSON para este terreno.</div>';
+        return;
+    }
+    el.innerHTML = opsGeoJSONList.map(lyr => {
+        const on  = !!opsGeoJSONLayers[lyr.id];
+        const cnt = lyr.feature_count ? ' · ' + lyr.feature_count + ' feat.' : '';
+        return `<div style="display:flex;align-items:center;gap:5px;padding:4px 5px;
+                            background:#f8fafc;border-radius:5px;margin-bottom:3px;">
+            <span style="flex:1;font-size:11px;font-weight:500;color:#374151;
+                         overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                  title="${_opsEsc(lyr.name)}">${_opsEsc(lyr.name)}
+                <span style="color:#9ca3af;font-weight:400;font-size:10px;">${cnt}</span>
+            </span>
+            <button id="ops-ref-btn-${lyr.id}" onclick="opsToggleRefLayer(${lyr.id})"
+                    style="font-size:9px;padding:2px 7px;border:none;border-radius:4px;
+                           cursor:pointer;white-space:nowrap;font-weight:600;flex-shrink:0;
+                           background:${on?'#ede9fe':'#f3f4f6'};
+                           color:${on?'#7c3aed':'#6b7280'};">
+                ${on ? '✅ ON' : '👁 Ver'}
+            </button>
+        </div>`;
+    }).join('');
+}
+
+function opsToggleRefLayer(id) {
+    if (opsGeoJSONLayers[id]) {
+        try { opsMap.removeLayer(opsGeoJSONLayers[id]); } catch(e) {}
+        delete opsGeoJSONLayers[id];
+        _opsRenderRefList();
+    } else {
+        _opsShowRefLayer(id);
+    }
+}
+
+function _opsShowRefLayer(id) {
+    const fd = new FormData();
+    fd.append('action', 'get_ops_geojson_data');
+    fd.append('id', id);
+    _opsFetch(fd, data => {
+        if (!data.success || !data.geojson) return;
+        let gj;
+        try { gj = typeof data.geojson === 'string' ? JSON.parse(data.geojson) : data.geojson; }
+        catch(e) { return; }
+        const layer = L.geoJSON(gj, {
+            style: { color: '#6b7280', weight: 1.5, fillOpacity: 0.08,
+                     fillColor: '#6b7280', opacity: 0.55, dashArray: '3,3' },
+            pointToLayer: (f, ll) => L.circleMarker(ll, {
+                radius: 4, fillColor: '#78716c', color: '#fff',
+                weight: 1, fillOpacity: 0.75, opacity: 0.8
+            }),
+            onEachFeature: (f, l) => {
+                if (f.properties && Object.keys(f.properties).length) {
+                    const props = Object.entries(f.properties)
+                        .filter(([, v]) => v !== null && v !== undefined)
+                        .map(([k, v]) => `<b>${_opsEsc(k)}:</b> ${_opsEsc(String(v))}`).join('<br>');
+                    if (props) l.bindPopup(props, { maxWidth: 220 });
+                }
+            }
+        }).addTo(opsMap);
+        opsGeoJSONLayers[id] = layer;
+        _opsRenderRefList();
+    });
+}
+
+// ── Importar / Exportar / Gerar trajectórias ──────────────────────────────────
+
+/** Importa um ficheiro GeoJSON ou GPX como trajectória actual */
+function opsImportTrajectory(inputEl) {
+    const file = inputEl.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const txt = e.target.result;
+            const name = file.name.toLowerCase();
+            let pts = null, type = 'line';
+
+            if (name.endsWith('.gpx')) {
+                // Parsear GPX
+                const doc = new DOMParser().parseFromString(txt, 'text/xml');
+                const trkpts = Array.from(doc.querySelectorAll('trkpt'));
+                const wpts   = Array.from(doc.querySelectorAll('wpt'));
+                if (trkpts.length) {
+                    pts  = trkpts.map(p => ({ lat: parseFloat(p.getAttribute('lat')),
+                                              lng: parseFloat(p.getAttribute('lon')) }));
+                    type = 'line';
+                } else if (wpts.length) {
+                    pts  = wpts.map(p => ({ lat: parseFloat(p.getAttribute('lat')),
+                                            lng: parseFloat(p.getAttribute('lon')) }));
+                    type = 'point';
+                } else throw new Error('Sem pontos GPX (trkpt/wpt)');
+            } else {
+                // GeoJSON
+                const gj = JSON.parse(txt);
+                const features = gj.type === 'FeatureCollection' ? gj.features
+                               : gj.type === 'Feature'           ? [gj]
+                               : [{ geometry: gj }];
+                for (const feat of features) {
+                    const g = feat.geometry || feat;
+                    if (!g || !g.type) continue;
+                    if (g.type === 'LineString') {
+                        pts  = g.coordinates.map(c => ({ lat: c[1], lng: c[0] }));
+                        type = 'line'; break;
+                    } else if (g.type === 'MultiLineString') {
+                        pts  = g.coordinates.flat().map(c => ({ lat: c[1], lng: c[0] }));
+                        type = 'line'; break;
+                    } else if (g.type === 'Polygon') {
+                        pts  = g.coordinates[0].map(c => ({ lat: c[1], lng: c[0] }));
+                        type = 'area'; break;
+                    } else if (g.type === 'MultiPoint') {
+                        pts = g.coordinates.map(c => ({ lat: c[1], lng: c[0] }));
+                        type = 'point'; break;
+                    } else if (g.type === 'Point') {
+                        pts = pts || [];
+                        pts.push({ lat: g.coordinates[1], lng: g.coordinates[0] });
+                        type = 'point';
+                    }
+                }
+                if (!pts || !pts.length) throw new Error('Nenhuma geometria compatível (LineString, Polygon, Point)');
+            }
+
+            // Aplicar
+            if (opsDrawnItems) opsDrawnItems.clearLayers();
+            opsCurrentTrajectory = pts;
+            opsCurrentTrajType   = type;
+            const color = (OPS_TYPES[document.getElementById('ops-type')?.value || 'outro'] || OPS_TYPES.outro).color;
+            const layer = _opsDrawFromData(pts, type, color, true);
+            _opsUpdateTrajSummary();
+            // Zoom
+            if (layer) {
+                try {
+                    const b = layer.getBounds ? layer.getBounds() : null;
+                    if (b && b.isValid()) opsMap.fitBounds(b, { padding: [30, 30] });
+                } catch(e2) {}
+            }
+            _opsFormStatus(`✅ Importado: ${pts.length} pontos (${name.endsWith('.gpx') ? 'GPX' : 'GeoJSON'})`, 'success');
+        } catch(ex) {
+            _opsFormStatus('❌ Erro ao importar: ' + ex.message, 'error');
+        }
+    };
+    reader.readAsText(file);
+    inputEl.value = ''; // reset para permitir re-importar o mesmo ficheiro
+}
+
+/** Exporta a trajectória actual como ficheiro GeoJSON */
+function opsDownloadTrajectory() {
+    if (!opsCurrentTrajectory || !opsCurrentTrajectory.length) {
+        _opsFormStatus('Não há trajectória para exportar.', 'warning');
+        return;
+    }
+    const opName = document.getElementById('ops-name')?.value?.trim() || 'trajectoria';
+    const opType = document.getElementById('ops-type')?.value || 'outro';
+    const opDate = document.getElementById('ops-date')?.value || '';
+    let gj;
+
+    if (opsCurrentTrajType === 'line') {
+        gj = {
+            type: 'Feature',
+            geometry: {
+                type: 'LineString',
+                coordinates: opsCurrentTrajectory.map(p => [p.lng, p.lat, 0])
+            },
+            properties: { name: opName, tipo: opType, data: opDate }
+        };
+    } else if (opsCurrentTrajType === 'area') {
+        const coords = opsCurrentTrajectory.map(p => [p.lng, p.lat]);
+        // Fechar anel
+        if (coords.length && (coords[0][0] !== coords[coords.length-1][0] ||
+                               coords[0][1] !== coords[coords.length-1][1])) {
+            coords.push([...coords[0]]);
+        }
+        gj = {
+            type: 'Feature',
+            geometry: { type: 'Polygon', coordinates: [coords] },
+            properties: { name: opName, tipo: opType }
+        };
+    } else {
+        gj = {
+            type: 'FeatureCollection',
+            features: opsCurrentTrajectory.map((p, i) => ({
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
+                properties: { index: i, name: opName }
+            }))
+        };
+    }
+
+    const blob = new Blob([JSON.stringify(gj, null, 2)], { type: 'application/geo+json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = opName.replace(/[^a-zA-Z0-9_\- ]/g, '_') + '_trajectoria.geojson';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+/**
+ * Gera um percurso em serpentina sobre o terreno seleccionado.
+ * @param {number} spacingM  - Espaçamento entre passagens em metros
+ * @param {number} angleDeg  - Ângulo das passagens: 0 = E-W, 90 = N-S
+ */
+function opsGenerateSerpentine(spacingM, angleDeg) {
+    if (!opsTerrainLayer) {
+        _opsFormStatus('Selecione um terreno para gerar o percurso.', 'warning'); return;
+    }
+    if (!spacingM || spacingM <= 0) {
+        _opsFormStatus('Espaçamento inválido.', 'warning'); return;
+    }
+
+    const bounds = opsTerrainLayer.getBounds();
+    const S = bounds.getSouth(), N = bounds.getNorth();
+    const W = bounds.getWest(),  E = bounds.getEast();
+    const centerLat = (S + N) / 2;
+
+    // Metros por grau
+    const mPDLat = 111320;
+    const mPDLng = 111320 * Math.cos(centerLat * Math.PI / 180);
+
+    // Dimensões do bbox em metros
+    const wM = (E - W) * mPDLng;
+    const hM = (N - S) * mPDLat;
+
+    // Ângulo em radianos (0 = passagens E-W, sweepN-S; 90 = passagens N-S, sweep E-W)
+    const rad  = angleDeg * Math.PI / 180;
+    const cosA = Math.cos(rad);
+    const sinA = Math.sin(rad);
+
+    // Vectores unitários em metros (x = leste, y = norte)
+    const passDir  = [cosA, sinA];           // direcção das passagens
+    const sweepDir = [-sinA, cosA];          // direcção da progressão lateral
+
+    // Cantos do bbox em coordenadas métricas relativas ao SW
+    const corners = [[0, 0], [wM, 0], [wM, hM], [0, hM]];
+
+    // Projeccionar nos vectores para obter extensões
+    const sweepProjs = corners.map(c => c[0]*sweepDir[0] + c[1]*sweepDir[1]);
+    const passProjs  = corners.map(c => c[0]*passDir[0]  + c[1]*passDir[1]);
+    const swMin = Math.min(...sweepProjs);
+    const swMax = Math.max(...sweepProjs);
+    const paMin = Math.min(...passProjs) - spacingM * 0.5;
+    const paMax = Math.max(...passProjs) + spacingM * 0.5;
+
+    // Centro do bbox em métricas
+    const cx = wM / 2, cy = hM / 2;
+
+    const points = [];
+    let forward  = true;
+    let n        = 0;
+
+    for (let sw = swMin; sw <= swMax + 0.001; sw += spacingM) {
+        const lx = cx + sw * sweepDir[0];
+        const ly = cy + sw * sweepDir[1];
+
+        // Pontos início e fim da passagem
+        const ax = lx + (forward ? paMin : paMax) * passDir[0];
+        const ay = ly + (forward ? paMin : paMax) * passDir[1];
+        const bx = lx + (forward ? paMax : paMin) * passDir[0];
+        const by = ly + (forward ? paMax : paMin) * passDir[1];
+
+        // Converter para lat/lng
+        points.push({ lat: S + ay / mPDLat, lng: W + ax / mPDLng });
+        points.push({ lat: S + by / mPDLat, lng: W + bx / mPDLng });
+
+        forward = !forward;
+        n++;
+    }
+
+    if (!points.length) {
+        _opsFormStatus('Espaçamento demasiado grande para o terreno. Reduza o valor.', 'warning'); return;
+    }
+
+    // Aplicar como trajectória actual
+    if (opsDrawnItems) opsDrawnItems.clearLayers();
+    opsCurrentTrajectory = points;
+    opsCurrentTrajType   = 'line';
+    const color = (OPS_TYPES[document.getElementById('ops-type')?.value || 'outro'] || OPS_TYPES.outro).color;
+    _opsDrawFromData(points, 'line', color, true);
+    _opsUpdateTrajSummary();
+
+    // Fechar o painel gerador
+    document.getElementById('ops-gen-panel')?.classList.add('hidden-panel');
+
+    const totalKm = ((paMax - paMin) / 1000 * n).toFixed(1);
+    _opsFormStatus(`✅ ${n} passagens geradas · espaçamento ${spacingM} m · ~${totalKm} km total`, 'success');
 }
 
 // ── CRUD de operações ─────────────────────────────────────────────────────────
