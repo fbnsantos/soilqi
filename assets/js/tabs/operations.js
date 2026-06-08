@@ -103,7 +103,9 @@ function _opsLoadTerrains() {
         (data.terrains || []).forEach(t => {
             const opt = document.createElement('option');
             opt.value = t.id;
-            opt.textContent = t.name + (t.area ? '  (' + parseFloat(t.area).toFixed(2) + ' ha)' : '');
+            opt.textContent = t.name
+                + (t.area ? '  (' + parseFloat(t.area).toFixed(2) + ' ha)' : '')
+                + (t.shared_by ? '  🤝 ' + t.shared_by : '');
             opt.dataset.area   = t.area        || '';
             opt.dataset.coords = t.coordinates || '';
             sel.appendChild(opt);

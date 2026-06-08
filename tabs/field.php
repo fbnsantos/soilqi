@@ -255,8 +255,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                     $stmt = $pdo->prepare("SELECT id, name, coordinates FROM terrains WHERE id = ?");
                     $stmt->execute([$tid]);
                 } else {
-                    $stmt = $pdo->prepare("SELECT id, name, coordinates FROM terrains WHERE id = ? AND user_id = ?");
-                    $stmt->execute([$tid, $currentUser['id']]);
+                    try {
+                        $stmt = $pdo->prepare("
+                            SELECT t.id, t.name, t.coordinates FROM terrains t
+                            WHERE t.id = ?
+                              AND (t.user_id = ?
+                                   OR EXISTS (SELECT 1 FROM terrain_shares s
+                                              WHERE s.terrain_id = t.id AND s.shared_with = ? AND s.status = 'accepted'))
+                        ");
+                        $stmt->execute([$tid, $currentUser['id'], $currentUser['id']]);
+                    } catch (PDOException $e) {
+                        $stmt = $pdo->prepare("SELECT id, name, coordinates FROM terrains WHERE id = ? AND user_id = ?");
+                        $stmt->execute([$tid, $currentUser['id']]);
+                    }
                 }
                 $t = $stmt->fetch();
                 if (!$t) { $response['message'] = 'Terreno não encontrado.'; break; }
@@ -1001,8 +1012,21 @@ try {
             $filterTerrains = $pdo->query("SELECT id, name FROM terrains ORDER BY name")->fetchAll();
             $filterUsers    = $pdo->query("SELECT id, username FROM users ORDER BY username")->fetchAll();
         } else {
-            $stmt = $pdo->prepare("SELECT id, name FROM terrains WHERE user_id = ? ORDER BY name");
-            $stmt->execute([$currentUser['id']]);
+            try {
+                $stmt = $pdo->prepare("
+                    SELECT id, name, 0 AS is_shared, '' AS shared_by FROM terrains WHERE user_id = ?
+                    UNION ALL
+                    SELECT t.id, t.name, 1 AS is_shared, u.username AS shared_by
+                    FROM terrains t
+                    JOIN terrain_shares s ON s.terrain_id = t.id AND s.shared_with = ? AND s.status = 'accepted'
+                    JOIN users u ON u.id = t.user_id
+                    ORDER BY is_shared ASC, name ASC
+                ");
+                $stmt->execute([$currentUser['id'], $currentUser['id']]);
+            } catch (PDOException $e) {
+                $stmt = $pdo->prepare("SELECT id, name, 0 AS is_shared, '' AS shared_by FROM terrains WHERE user_id = ? ORDER BY name");
+                $stmt->execute([$currentUser['id']]);
+            }
             $filterTerrains = $stmt->fetchAll();
         }
     }
@@ -1056,7 +1080,7 @@ try {
             <select id="filter-terrain">
                 <option value="">Todos</option>
                 <?php foreach ($filterTerrains as $t): ?>
-                    <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); ?></option>
+                    <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); if (!empty($t['shared_by'])) echo ' 🤝 ' . htmlspecialchars($t['shared_by']); ?></option>
                 <?php endforeach; ?>
             </select>
         </div>
@@ -1161,7 +1185,7 @@ try {
                     style="width:100%;padding:9px 10px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;appearance:none;background:white;">
                 <option value="">— Sem terreno associado —</option>
                 <?php foreach ($filterTerrains as $t): ?>
-                    <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); ?></option>
+                    <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); if (!empty($t['shared_by'])) echo ' 🤝 ' . htmlspecialchars($t['shared_by']); ?></option>
                 <?php endforeach; ?>
             </select>
         </div>
@@ -1375,7 +1399,7 @@ try {
                     style="width:100%; padding:9px 10px; border:1.5px solid #e5e7eb; border-radius:8px; font-size:14px; appearance:none; background:#fff;">
                 <option value="">— Sem terreno —</option>
                 <?php foreach ($filterTerrains as $t): ?>
-                    <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); ?></option>
+                    <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); if (!empty($t['shared_by'])) echo ' 🤝 ' . htmlspecialchars($t['shared_by']); ?></option>
                 <?php endforeach; ?>
             </select>
         </div>
@@ -1414,7 +1438,7 @@ try {
                 <select id="interp-terrain-sel" style="min-width:160px;">
                     <option value="">— Selecione —</option>
                     <?php foreach ($filterTerrains as $t): ?>
-                        <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); ?></option>
+                        <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); if (!empty($t['shared_by'])) echo ' 🤝 ' . htmlspecialchars($t['shared_by']); ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>
@@ -1585,7 +1609,7 @@ try {
                     <select id="gj-terrain" style="width:100%;">
                         <option value="">— Nenhum —</option>
                         <?php foreach ($filterTerrains as $t): ?>
-                            <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); ?></option>
+                            <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); if (!empty($t['shared_by'])) echo ' 🤝 ' . htmlspecialchars($t['shared_by']); ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
@@ -1644,7 +1668,7 @@ try {
                 <select id="obj-filter-terrain" onchange="loadFieldObjects()">
                     <option value="">Todos os terrenos</option>
                     <?php foreach ($filterTerrains as $t): ?>
-                        <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); ?></option>
+                        <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); if (!empty($t['shared_by'])) echo ' 🤝 ' . htmlspecialchars($t['shared_by']); ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>
@@ -1684,7 +1708,7 @@ try {
                     <select id="raster-terrain">
                         <option value="">— Selecionar —</option>
                         <?php foreach ($filterTerrains as $t): ?>
-                            <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); ?></option>
+                            <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); if (!empty($t['shared_by'])) echo ' 🤝 ' . htmlspecialchars($t['shared_by']); ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
@@ -1795,7 +1819,7 @@ try {
             <select id="raster-list-terrain" onchange="loadRastersList()">
                 <option value="">Todos os terrenos</option>
                 <?php foreach ($filterTerrains as $t): ?>
-                    <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); ?></option>
+                    <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); if (!empty($t['shared_by'])) echo ' 🤝 ' . htmlspecialchars($t['shared_by']); ?></option>
                 <?php endforeach; ?>
             </select>
         </div>

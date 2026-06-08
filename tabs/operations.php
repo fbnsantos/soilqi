@@ -186,9 +186,23 @@ if (isset($_POST['action'])) {
 
             // ── Terrenos ──────────────────────────────────────────────────────
             case 'get_ops_terrains': {
-                $st = $pdo->prepare("SELECT id,name,area,coordinates FROM terrains
-                    WHERE user_id=? ORDER BY name ASC");
-                $st->execute([$userId]);
+                try {
+                    $st = $pdo->prepare("
+                        SELECT id, name, area, coordinates, 0 AS is_shared, '' AS shared_by
+                        FROM terrains WHERE user_id = ?
+                        UNION ALL
+                        SELECT t.id, t.name, t.area, t.coordinates, 1 AS is_shared, u.username AS shared_by
+                        FROM terrains t
+                        JOIN terrain_shares s ON s.terrain_id = t.id AND s.shared_with = ? AND s.status = 'accepted'
+                        JOIN users u ON u.id = t.user_id
+                        ORDER BY is_shared ASC, name ASC
+                    ");
+                    $st->execute([$userId, $userId]);
+                } catch (PDOException $e) {
+                    $st = $pdo->prepare("SELECT id, name, area, coordinates, 0 AS is_shared, '' AS shared_by
+                        FROM terrains WHERE user_id=? ORDER BY name ASC");
+                    $st->execute([$userId]);
+                }
                 $resp['success']  = true;
                 $resp['terrains'] = $st->fetchAll(PDO::FETCH_ASSOC);
                 break;

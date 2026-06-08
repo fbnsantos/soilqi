@@ -80,8 +80,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
             case 'get_terrain':
                 $terrain_id = intval($_POST['terrain_id']);
 
-                $stmt = $pdo->prepare("SELECT * FROM terrains WHERE id = ? AND user_id = ?");
-                $stmt->execute([$terrain_id, $currentUser['id']]);
+                // Próprio ou partilhado (aceite)
+                try {
+                    $stmt = $pdo->prepare("
+                        SELECT t.* FROM terrains t
+                        WHERE t.id = ?
+                          AND (t.user_id = ?
+                               OR EXISTS (SELECT 1 FROM terrain_shares s
+                                          WHERE s.terrain_id = t.id
+                                            AND s.shared_with = ? AND s.status = 'accepted'))
+                    ");
+                    $stmt->execute([$terrain_id, $currentUser['id'], $currentUser['id']]);
+                } catch (PDOException $e) {
+                    $stmt = $pdo->prepare("SELECT * FROM terrains WHERE id = ? AND user_id = ?");
+                    $stmt->execute([$terrain_id, $currentUser['id']]);
+                }
                 $terrain = $stmt->fetch();
 
                 if ($terrain) {
@@ -701,8 +714,21 @@ if ($isLoggedIn) {
         $stmt->execute([$currentUser['id']]);
         $stats = $stmt->fetch();
 
-        $stmtT = $pdo->prepare("SELECT id, name FROM terrains WHERE user_id = ? ORDER BY name ASC");
-        $stmtT->execute([$currentUser['id']]);
+        try {
+            $stmtT = $pdo->prepare("
+                SELECT id, name, 0 AS is_shared, '' AS shared_by FROM terrains WHERE user_id = ?
+                UNION ALL
+                SELECT t.id, t.name, 1 AS is_shared, u.username AS shared_by
+                FROM terrains t
+                JOIN terrain_shares s ON s.terrain_id = t.id AND s.shared_with = ? AND s.status = 'accepted'
+                JOIN users u ON u.id = t.user_id
+                ORDER BY is_shared ASC, name ASC
+            ");
+            $stmtT->execute([$currentUser['id'], $currentUser['id']]);
+        } catch (PDOException $e) {
+            $stmtT = $pdo->prepare("SELECT id, name, 0 AS is_shared, '' AS shared_by FROM terrains WHERE user_id = ? ORDER BY name ASC");
+            $stmtT->execute([$currentUser['id']]);
+        }
         $mapTerrains = $stmtT->fetchAll();
     } catch (PDOException $e) {
         $stats = ['total_terrains' => 0, 'total_area' => 0];
@@ -758,7 +784,8 @@ if ($isLoggedIn) {
                 <option value="">— Selecione um terreno —</option>
                 <?php foreach ($mapTerrains as $t): ?>
                     <option value="<?php echo (int)$t['id']; ?>">
-                        <?php echo htmlspecialchars($t['name']); ?>
+                        <?php echo htmlspecialchars($t['name']);
+                              if (!empty($t['shared_by'])) echo ' 🤝 ' . htmlspecialchars($t['shared_by']); ?>
                     </option>
                 <?php endforeach; ?>
             </select>
