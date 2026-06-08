@@ -240,9 +240,66 @@ async function generateAndStoreToken() {
 }
 
 function showLogin() {
-    document.getElementById('main-ui').style.display     = 'none';
-    document.getElementById('nav-bar').style.display     = 'none';
+    document.getElementById('main-ui').style.display      = 'none';
+    document.getElementById('nav-bar').style.display      = 'none';
     document.getElementById('login-screen').style.display = 'flex';
+    // Focar o campo de API key após pequeno delay (teclado móvel)
+    setTimeout(() => document.getElementById('apikey-input')?.focus(), 350);
+}
+
+/**
+ * Valida e guarda a API Key introduzida pelo utilizador.
+ * A chave é um Bearer token da tabela api_tokens (device_name='permanent').
+ */
+async function submitApiKey() {
+    const inp = document.getElementById('apikey-input');
+    const btn = document.getElementById('apikey-submit-btn');
+    const err = document.getElementById('apikey-error');
+    const key = inp?.value?.trim();
+
+    if (err) err.style.display = 'none';
+
+    if (!key || key.length < 20) {
+        if (err) { err.textContent = 'Introduza uma API Key válida.'; err.style.display = 'block'; }
+        return;
+    }
+
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ A validar…'; }
+
+    try {
+        const res  = await fetch(`${API}?action=check_auth`, {
+            headers: { 'Authorization': `Bearer ${key}` }
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            setToken(key);
+            // Esconder ecrã de login e inicializar a app
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('main-ui').style.display      = '';
+            document.getElementById('nav-bar').style.display      = '';
+            window.addEventListener('online',  onOnline);
+            window.addEventListener('offline', onOffline);
+            updateOnlineUI();
+            startGPS();
+            await Promise.all([loadTerrains(), loadMeasurements()]);
+            await refreshPendingUI();
+            if (isOnline) syncPending();
+            document.getElementById('measurement-form')
+                    ?.addEventListener('submit', handleSubmit);
+            showTab('capture');
+            toast('✅ Conectado com sucesso!', 'success');
+        } else {
+            if (err) {
+                err.textContent = 'API Key inválida ou expirada. Verifique e tente novamente.';
+                err.style.display = 'block';
+            }
+            if (btn) { btn.disabled = false; btn.textContent = '🔑 Conectar'; }
+        }
+    } catch {
+        if (err) { err.textContent = 'Erro de ligação. Verifique a sua rede.'; err.style.display = 'block'; }
+        if (btn) { btn.disabled = false; btn.textContent = '🔑 Conectar'; }
+    }
 }
 
 // ── API low-level ─────────────────────────────────────────────────────────────

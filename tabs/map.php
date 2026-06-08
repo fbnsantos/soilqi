@@ -51,8 +51,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 break;
                 
             case 'get_terrains':
-                $stmt = $pdo->prepare("SELECT * FROM terrains WHERE user_id = ? ORDER BY created_at DESC");
-                $stmt->execute([$currentUser['id']]);
+                // Terrenos próprios + terrenos partilhados comigo (aceites)
+                try {
+                    $stmt = $pdo->prepare("
+                        SELECT t.*, 0 AS is_shared, '' AS shared_by, 'edit' AS share_perm
+                        FROM terrains t WHERE t.user_id = ?
+                        UNION ALL
+                        SELECT t.*, 1 AS is_shared, u.username AS shared_by, s.permission AS share_perm
+                        FROM terrains t
+                        JOIN terrain_shares s ON s.terrain_id = t.id
+                            AND s.shared_with = ? AND s.status = 'accepted'
+                        JOIN users u ON u.id = t.user_id
+                        ORDER BY is_shared ASC, name ASC
+                    ");
+                    $stmt->execute([$currentUser['id'], $currentUser['id']]);
+                } catch (PDOException $shareEx) {
+                    // terrain_shares ainda não existe — fallback
+                    $stmt = $pdo->prepare("SELECT *, 0 AS is_shared, '' AS shared_by, 'edit' AS share_perm
+                        FROM terrains WHERE user_id = ? ORDER BY created_at DESC");
+                    $stmt->execute([$currentUser['id']]);
+                }
                 $terrains = $stmt->fetchAll();
                 
                 $response['success'] = true;

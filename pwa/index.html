@@ -27,13 +27,43 @@
     </div>
 </header>
 
-<!-- ── Login Screen ────────────────────────────────────── -->
+<!-- ── API Key Screen ───────────────────────────────────── -->
 <div id="login-screen" class="login-screen" style="display:none">
-    <div class="login-card">
+    <div class="login-card" style="max-width:360px;width:100%;padding:28px 24px;">
         <div class="login-logo">🌱</div>
-        <h2>SoilQI Field</h2>
-        <p>Precisa de fazer login no sistema<br>para utilizar a aplicação de campo.</p>
-        <a href="../login.php" class="btn-login">Entrar / Registar</a>
+        <h2 style="margin-bottom:6px;">SoilQI Field</h2>
+        <p style="margin-bottom:20px;font-size:13px;color:#6b7280;line-height:1.5;">
+            Introduza a sua <strong>API Key</strong> para aceder à app.<br>
+            Obtenha-a em <a href="../" target="_blank"
+               style="color:#2d6a4f;font-weight:600;">soilqi.com</a>
+            clicando em 🔑 junto ao seu nome.
+        </p>
+
+        <div style="margin-bottom:14px;">
+            <input id="apikey-input" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="Cole a sua API Key aqui…"
+                   style="width:100%; padding:11px 12px; border:1.5px solid #d1d5db;
+                          border-radius:9px; font-size:13px; font-family:monospace;
+                          box-sizing:border-box; outline:none; color:#111827;
+                          transition:border-color .15s;"
+                   onfocus="this.style.borderColor='#2d6a4f'"
+                   onblur="this.style.borderColor='#d1d5db'"
+                   onkeydown="if(event.key==='Enter')submitApiKey()">
+        </div>
+        <button onclick="submitApiKey()" id="apikey-submit-btn"
+                style="width:100%; padding:12px; background:#2d6a4f; color:#fff;
+                       border:none; border-radius:9px; font-size:15px; font-weight:700;
+                       cursor:pointer; transition:background .15s;">
+            🔑 Conectar
+        </button>
+        <div id="apikey-error" style="display:none; margin-top:10px; padding:8px 10px;
+             background:#fee2e2; color:#991b1b; border-radius:7px; font-size:12px;
+             font-weight:600; text-align:center;"></div>
+
+        <p style="margin-top:18px; font-size:11px; color:#9ca3af; line-height:1.5;">
+            A chave é gerada uma vez e fica guardada no dispositivo.<br>
+            Não precisa de a introduzir novamente.
+        </p>
     </div>
 </div>
 

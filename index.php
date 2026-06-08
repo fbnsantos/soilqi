@@ -20,6 +20,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['claim_admin']) && $ca
     }
 }
 
+// Contagem de convites de partilha pendentes (badge no nav)
+$pendingShares = 0;
+if ($isLoggedIn) {
+    try {
+        $pdoIdx = getDBConnection();
+        $stIdx  = $pdoIdx->prepare("SELECT COUNT(*) FROM terrain_shares WHERE shared_with=? AND status='pending'");
+        $stIdx->execute([$currentUser['id']]);
+        $pendingShares = (int)$stIdx->fetchColumn();
+    } catch (Exception $ignored) { /* tabela ainda não existe */ }
+}
+
 // Obter tab ativo (default: map)
 $activeTab = $_GET['tab'] ?? 'map';
 
@@ -43,6 +54,13 @@ $availableTabs = [
         'title' => 'Operações',
         'icon'  => '🚜',
         'file'  => 'tabs/operations.php',
+        'requiresAuth'  => true,
+        'requiresAdmin' => false
+    ],
+    'sharing' => [
+        'title' => 'Partilha',
+        'icon'  => '🤝',
+        'file'  => 'tabs/sharing.php',
         'requiresAuth'  => true,
         'requiresAdmin' => false
     ],
@@ -106,12 +124,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     <link rel="stylesheet" href="assets/css/style.css">
 </head>
 <body>
+    <!-- API Key Modal (overlay) -->
+    <div id="apikey-overlay" onclick="if(event.target===this)closeApiKeyModal()"
+         style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);
+                z-index:9999;align-items:center;justify-content:center;">
+        <div style="background:#fff;border-radius:14px;padding:24px 28px;max-width:480px;
+                    width:calc(100% - 32px);box-shadow:0 20px 60px rgba(0,0,0,.2);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+                <h3 style="font-size:16px;font-weight:700;color:#1f2937;margin:0;">
+                    🔑 API Key — App Móvel
+                </h3>
+                <button onclick="closeApiKeyModal()"
+                        style="border:none;background:none;font-size:20px;cursor:pointer;color:#9ca3af;line-height:1;">×</button>
+            </div>
+            <p style="font-size:12px;color:#6b7280;margin:0 0 14px;line-height:1.6;">
+                Use esta chave para autenticar a <strong>App Móvel SoilQI Field</strong>
+                (PWA) sem precisar de fazer login no browser do telemóvel.<br>
+                Cole-a no ecrã de configuração da app.
+            </p>
+            <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;
+                        padding:10px 12px;display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+                <input id="apikey-value" type="text" readonly
+                       style="flex:1;border:none;background:none;font-family:monospace;font-size:11px;
+                              color:#374151;outline:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                       value="A carregar…">
+                <button onclick="copyApiKey()" id="apikey-copy-btn"
+                        style="padding:4px 10px;background:#667eea;color:#fff;border:none;
+                               border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;">
+                    📋 Copiar
+                </button>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <button onclick="regenerateApiKey()"
+                        style="padding:5px 12px;background:#f3f4f6;color:#6b7280;border:none;
+                               border-radius:6px;font-size:11px;cursor:pointer;">
+                    🔄 Gerar nova chave
+                </button>
+                <a href="pwa/" target="_blank" rel="noopener"
+                   style="padding:5px 12px;background:#f0fdf4;color:#15803d;border:none;
+                          border-radius:6px;font-size:11px;font-weight:600;text-decoration:none;">
+                    📱 Abrir App
+                </a>
+                <span id="apikey-status" style="font-size:10px;color:#9ca3af;"></span>
+            </div>
+        </div>
+    </div>
+
     <!-- Header -->
     <div class="header">
         <div class="header-content">
             <div class="header-left">
-                <h1><?php echo SITE_NAME; ?></h1>
-                <p>Sistema de Gestão de Terrenos</p>
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                    <div>
+                        <h1 style="margin:0;"><?php echo SITE_NAME; ?></h1>
+                        <p style="margin:0;">Sistema de Gestão de Terrenos</p>
+                    </div>
+                    <!-- Botão de instalação da PWA (app móvel) -->
+                    <a href="pwa/" target="_blank" rel="noopener" id="pwa-header-btn"
+                       title="Instalar App Móvel SoilQI Field"
+                       style="display:inline-flex;align-items:center;gap:5px;padding:5px 12px;
+                              background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.35);
+                              border-radius:20px;color:#fff;font-size:11px;font-weight:600;
+                              text-decoration:none;transition:background .15s;white-space:nowrap;">
+                        📱 App Móvel
+                    </a>
+                </div>
             </div>
             <div class="header-right">
                 <?php if ($isLoggedIn): ?>
@@ -126,6 +203,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             </span>
                         </div>
                     </div>
+                    <button onclick="openApiKeyModal()" title="API Key para App Móvel"
+                            style="padding:6px 10px;background:rgba(255,255,255,.15);
+                                   border:1px solid rgba(255,255,255,.3);border-radius:8px;
+                                   color:#fff;font-size:13px;cursor:pointer;">🔑</button>
                     <a href="logout.php" class="logout-btn">Sair</a>
                 <?php else: ?>
                     <a href="login.php" class="login-btn">Entrar / Registar</a>
@@ -148,17 +229,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     <a href="?tab=<?php echo $tabKey; ?>"
                        class="nav-item <?php echo $activeTab === $tabKey ? 'active' : ''; ?>">
                         <span class="nav-icon"><?php echo $tabInfo['icon']; ?></span>
-                        <span class="nav-text"><?php echo $tabInfo['title']; ?></span>
+                        <span class="nav-text"><?php echo $tabInfo['title']; ?>
+                            <?php if ($tabKey === 'sharing' && $pendingShares > 0): ?>
+                                <span id="sharing-nav-badge"
+                                      style="background:#ef4444;color:#fff;font-size:9px;font-weight:800;
+                                             padding:1px 5px;border-radius:8px;vertical-align:middle;
+                                             margin-left:3px;"><?php echo $pendingShares; ?></span>
+                            <?php else: ?>
+                                <span id="sharing-nav-badge" style="display:none;background:#ef4444;
+                                      color:#fff;font-size:9px;font-weight:800;padding:1px 5px;
+                                      border-radius:8px;vertical-align:middle;margin-left:3px;"></span>
+                            <?php endif; ?>
+                        </span>
                     </a>
                 <?php endif; ?>
             <?php endforeach; ?>
-            <?php if ($isLoggedIn): ?>
-                <a href="pwa/" target="_blank" rel="noopener" class="nav-item"
-                   title="Abrir aplicação móvel de recolha de dados">
-                    <span class="nav-icon">📱</span>
-                    <span class="nav-text">PWA</span>
-                </a>
-            <?php endif; ?>
         </div>
     </div>
 
@@ -243,5 +328,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     
     <!-- Main JS -->
     <script src="assets/js/app.js"></script>
+
+    <!-- API Key Modal logic -->
+    <script>
+    function openApiKeyModal() {
+        const overlay = document.getElementById('apikey-overlay');
+        if (!overlay) return;
+        overlay.style.display = 'flex';
+        const inp = document.getElementById('apikey-value');
+        if (inp && inp.value === 'A carregar…') loadApiKey();
+    }
+    function closeApiKeyModal() {
+        const overlay = document.getElementById('apikey-overlay');
+        if (overlay) overlay.style.display = 'none';
+    }
+    function loadApiKey() {
+        const inp = document.getElementById('apikey-value');
+        const sts = document.getElementById('apikey-status');
+        if (inp) inp.value = 'A carregar…';
+        fetch('api/api_key.php')
+            .then(r => r.json())
+            .then(d => {
+                if (d.success && inp) inp.value = d.key;
+                if (sts) sts.textContent = d.created_at ? 'Criada em ' + d.created_at.slice(0,10) : '';
+            })
+            .catch(() => { if (inp) inp.value = 'Erro ao carregar.'; });
+    }
+    function copyApiKey() {
+        const val = document.getElementById('apikey-value')?.value;
+        if (!val || val === 'A carregar…') return;
+        navigator.clipboard?.writeText(val).then(() => {
+            const btn = document.getElementById('apikey-copy-btn');
+            if (btn) { btn.textContent = '✅ Copiado!'; setTimeout(() => btn.textContent = '📋 Copiar', 2000); }
+        }).catch(() => { document.getElementById('apikey-value')?.select(); document.execCommand('copy'); });
+    }
+    function regenerateApiKey() {
+        if (!confirm('Gerar nova API Key? A chave anterior deixará de funcionar na app.')) return;
+        const inp = document.getElementById('apikey-value');
+        const sts = document.getElementById('apikey-status');
+        if (inp) inp.value = 'A gerar…';
+        fetch('api/api_key.php', { method: 'POST' })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success && inp) inp.value = d.key;
+                if (sts) sts.textContent = '✅ Nova chave gerada';
+            })
+            .catch(() => { if (inp) inp.value = 'Erro.'; });
+    }
+    </script>
 </body>
 </html>
