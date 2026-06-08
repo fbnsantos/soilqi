@@ -81,6 +81,97 @@ function sharingShowSection(name) {
     if (name === 'incoming') sharingLoadIncoming();
 }
 
+// ── Autocomplete de utilizadores ─────────────────────────────────────────────
+
+let _shAcTimer   = null;
+let _shAcIndex   = -1;   // item seleccionado pelo teclado
+let _shAcResults = [];   // cache dos resultados actuais
+
+function shUserAutocomplete(val) {
+    clearTimeout(_shAcTimer);
+    if (val.length < 2) { shUserHideAc(); return; }
+    _shAcTimer = setTimeout(() => _shFetchUsers(val), 260); // debounce 260 ms
+}
+
+function _shFetchUsers(q) {
+    const fd = new FormData();
+    fd.append('action', 'search_users');
+    fd.append('q', q);
+    _shFetch(fd, data => {
+        _shAcResults = data.users || [];
+        _shAcIndex   = -1;
+        _shRenderAc();
+    });
+}
+
+function _shRenderAc() {
+    const dd = document.getElementById('sh-ac-dropdown');
+    if (!dd) return;
+    if (!_shAcResults.length) { shUserHideAc(); return; }
+
+    dd.innerHTML = _shAcResults.map((u, i) => {
+        const initial = (u.username[0] || '?').toUpperCase();
+        return `<div class="sh-ac-item" data-idx="${i}"
+                     onmousedown="shUserSelect(${i})"
+                     onmouseover="_shAcHover(${i})">
+            <div class="sh-ac-avatar">${initial}</div>
+            <div>
+                <div class="sh-ac-name">${_shEsc(u.username)}</div>
+                <div class="sh-ac-email">${_shEsc(u.email_masked)}</div>
+            </div>
+        </div>`;
+    }).join('');
+    dd.style.display = 'block';
+}
+
+function _shAcHover(idx) {
+    _shAcIndex = idx;
+    _shHighlightAc();
+}
+
+function _shHighlightAc() {
+    const dd = document.getElementById('sh-ac-dropdown');
+    if (!dd) return;
+    dd.querySelectorAll('.sh-ac-item').forEach((el, i) => {
+        el.classList.toggle('sh-ac-active', i === _shAcIndex);
+    });
+}
+
+function shUserSelect(idx) {
+    const u = _shAcResults[idx];
+    if (!u) return;
+    const inp = document.getElementById('sh-user-input');
+    if (inp) inp.value = u.username;
+    shUserHideAc();
+}
+
+function shUserHideAc() {
+    const dd = document.getElementById('sh-ac-dropdown');
+    if (dd) dd.style.display = 'none';
+    _shAcIndex = -1;
+}
+
+function shUserKeydown(e) {
+    const dd = document.getElementById('sh-ac-dropdown');
+    if (!dd || dd.style.display === 'none') return;
+
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        _shAcIndex = Math.min(_shAcIndex + 1, _shAcResults.length - 1);
+        _shHighlightAc();
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        _shAcIndex = Math.max(_shAcIndex - 1, 0);
+        _shHighlightAc();
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (_shAcIndex >= 0) shUserSelect(_shAcIndex);
+        else sharingShare();
+    } else if (e.key === 'Escape') {
+        shUserHideAc();
+    }
+}
+
 // ── Enviar convite ────────────────────────────────────────────────────────────
 
 function sharingShare() {

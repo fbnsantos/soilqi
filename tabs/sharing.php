@@ -93,6 +93,39 @@ if (isset($_POST['action'])) {
                 break;
             }
 
+            // ── Pesquisa de utilizadores (autocomplete) ───────────────────────
+            case 'search_users': {
+                $q = trim($_POST['q'] ?? '');
+                if (strlen($q) < 2) {
+                    $resp['success'] = true; $resp['users'] = []; break;
+                }
+                $like = '%' . str_replace(['%','_'], ['\\%','\\_'], $q) . '%';
+                $st   = $pdo->prepare("
+                    SELECT id, username, email
+                    FROM users
+                    WHERE (username LIKE ? OR email LIKE ?)
+                      AND id <> ?
+                    ORDER BY username ASC
+                    LIMIT 8
+                ");
+                $st->execute([$like, $like, $userId]);
+                $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+                // Mascarar email por privacidade: j***@exemplo.com
+                foreach ($rows as &$r) {
+                    $parts = explode('@', $r['email']);
+                    $local = $parts[0];
+                    $domain = $parts[1] ?? '';
+                    $r['email_masked'] = (strlen($local) > 2
+                        ? substr($local, 0, 2) . str_repeat('*', min(4, strlen($local) - 2))
+                        : $local[0] . '**')
+                        . ($domain ? '@' . $domain : '');
+                }
+                unset($r);
+                $resp['success'] = true;
+                $resp['users']   = $rows;
+                break;
+            }
+
             // ── Minhas partilhas ──────────────────────────────────────────────
             case 'get_my_shares': {
                 $st = $pdo->prepare("
@@ -261,6 +294,21 @@ if (!$isLoggedIn): ?>
 .sh-tab-btn { transition:color .15s, border-color .15s; }
 .sh-tab-active { color:#667eea !important; border-bottom-color:#667eea !important; }
 
+/* Autocomplete */
+.sh-ac-item {
+    display:flex; align-items:center; gap:9px; padding:8px 12px;
+    cursor:pointer; border-bottom:1px solid #f1f5f9; transition:background .1s;
+}
+.sh-ac-item:last-child { border-bottom:none; }
+.sh-ac-item:hover, .sh-ac-item.sh-ac-active { background:#eff6ff; }
+.sh-ac-avatar {
+    width:28px; height:28px; border-radius:50%; background:#667eea;
+    color:#fff; font-size:12px; font-weight:700;
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+}
+.sh-ac-name  { font-size:12px; font-weight:600; color:#1f2937; }
+.sh-ac-email { font-size:10px; color:#9ca3af; }
+
 /* Formulário */
 .sh-form-panel {
     background:#f0f9ff; border:1px solid #bae6fd;
@@ -342,10 +390,22 @@ if (!$isLoggedIn): ?>
                 </div>
             </div>
             <div style="display:grid; grid-template-columns:1fr auto; gap:8px; align-items:end; margin-bottom:8px;">
-                <div>
+                <div style="position:relative;">
                     <label class="sh-lbl">Utilizador (nome ou email) *</label>
                     <input type="text" id="sh-user-input" class="sh-inp"
-                           placeholder="nome de utilizador ou email@exemplo.com">
+                           placeholder="nome de utilizador ou email@exemplo.com"
+                           autocomplete="off"
+                           oninput="shUserAutocomplete(this.value)"
+                           onkeydown="shUserKeydown(event)"
+                           onblur="setTimeout(shUserHideAc, 180)">
+                    <!-- Dropdown de sugestões -->
+                    <div id="sh-ac-dropdown"
+                         style="display:none; position:absolute; top:100%; left:0; right:0;
+                                background:#fff; border:1px solid #e5e7eb; border-top:none;
+                                border-radius:0 0 8px 8px; z-index:200;
+                                box-shadow:0 6px 16px rgba(0,0,0,.1);
+                                max-height:240px; overflow-y:auto;">
+                    </div>
                 </div>
                 <button onclick="sharingShare()"
                         style="padding:7px 18px; background:linear-gradient(135deg,#667eea,#764ba2);
