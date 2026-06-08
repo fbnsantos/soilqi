@@ -391,5 +391,5 @@ if (!$isLoggedIn): ?>
 </div>
 
 <script>
-document.addEventListener('DOMContentLoaded', sharingInit);
+document.addEventListener('DOMContentLoaded', function() { sharingInit(); });
 </script>
