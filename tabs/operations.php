@@ -392,6 +392,14 @@ if (!$isLoggedIn): ?>
 /* Painel colapsável genérico */
 .hidden-panel { display: none !important; }
 
+/* Geocodificação — itens do dropdown */
+.ops-addr-item {
+    display:flex; align-items:flex-start; gap:8px; padding:8px 12px;
+    cursor:pointer; border-bottom:1px solid #f1f5f9; transition:background .1s;
+}
+.ops-addr-item:last-child { border-bottom:none; }
+.ops-addr-item:hover, .ops-addr-hover { background:#eff6ff; }
+
 /* Resumo custo no topo do mapa */
 #ops-season-summary {
     font-size:11px; color:#6b7280; padding:6px 10px;
@@ -422,7 +430,36 @@ if (!$isLoggedIn): ?>
 
         <!-- Barra de controlo de desenho -->
         <div class="ops-map-bar">
-            <span style="font-size:11px;font-weight:700;color:#6b7280;">Trajectória:</span>
+
+            <!-- 🔍 Pesquisa de morada / geocodificação -->
+            <div style="position:relative; flex:1; min-width:140px; max-width:270px;">
+                <div style="display:flex; gap:3px;">
+                    <input type="text" id="ops-addr-input"
+                           placeholder="🔍 Morada ou localidade…"
+                           autocomplete="off"
+                           style="flex:1; padding:4px 8px; border:1px solid #e5e7eb;
+                                  border-radius:6px 0 0 6px; font-size:11px; outline:none;
+                                  min-width:0;"
+                           oninput="opsAddrType(this.value)"
+                           onkeydown="opsAddrKey(event)"
+                           onblur="setTimeout(opsAddrHide, 200)">
+                    <button id="ops-addr-btn" onclick="opsAddrSearch()"
+                            style="padding:4px 9px; background:#667eea; color:#fff; border:none;
+                                   border-radius:0 6px 6px 0; font-size:11px; cursor:pointer;
+                                   flex-shrink:0; font-weight:700;">🔍</button>
+                </div>
+                <!-- Dropdown de resultados (abre para cima) -->
+                <div id="ops-addr-dd"
+                     style="display:none; position:absolute; bottom:calc(100% + 3px); left:0; right:0;
+                            background:#fff; border:1px solid #e5e7eb; border-radius:8px;
+                            box-shadow:0 -4px 16px rgba(0,0,0,.12); z-index:600;
+                            max-height:220px; overflow-y:auto;"></div>
+            </div>
+
+            <!-- Separador -->
+            <div style="width:1px;height:20px;background:#e5e7eb;flex-shrink:0;"></div>
+
+            <span style="font-size:11px;font-weight:700;color:#6b7280;white-space:nowrap;">Trajectória:</span>
             <button class="ops-draw-btn" id="ops-btn-line"  style="background:#667eea;color:#fff;"
                     onclick="opsDrawMode('line')">✏️ Percurso</button>
             <button class="ops-draw-btn" id="ops-btn-area"  style="background:#10b981;color:#fff;"
@@ -431,7 +468,7 @@ if (!$isLoggedIn): ?>
                     onclick="opsDrawMode('point')">📍 Pontos</button>
             <button class="ops-draw-btn" onclick="opsClearDraw()"
                     style="background:#f3f4f6;color:#6b7280;">🗑 Limpar</button>
-            <span id="ops-draw-hint" style="font-size:10px;color:#9ca3af;flex:1;"></span>
+            <span id="ops-draw-hint" style="font-size:10px;color:#9ca3af;"></span>
         </div>
     </div>
 

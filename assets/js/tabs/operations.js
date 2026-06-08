@@ -373,6 +373,140 @@ function _opsShowRefLayer(id) {
     });
 }
 
+// ── Pesquisa de morada / geocodificação (Nominatim OSM) ───────────────────────
+
+let _opsAddrTimer   = null;
+let _opsAddrResults = [];
+let _opsAddrIdx     = -1;
+
+/** Debounce: pesquisa automática ao parar de escrever (450 ms) */
+function opsAddrType(val) {
+    clearTimeout(_opsAddrTimer);
+    if (val.trim().length < 3) { opsAddrHide(); return; }
+    _opsAddrTimer = setTimeout(opsAddrSearch, 450);
+}
+
+/** Pesquisa no Nominatim e mostra o dropdown */
+async function opsAddrSearch() {
+    const inp = document.getElementById('ops-addr-input');
+    const btn = document.getElementById('ops-addr-btn');
+    const q   = inp?.value?.trim();
+    if (!q || q.length < 3) return;
+
+    if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
+
+    try {
+        const url  = 'https://nominatim.openstreetmap.org/search'
+                   + '?format=json&limit=6&addressdetails=0'
+                   + '&q=' + encodeURIComponent(q);
+        const res  = await fetch(url, { headers: { 'Accept-Language': 'pt,en;q=0.8' } });
+        const data = await res.json();
+        _opsAddrResults = data || [];
+        _opsAddrIdx     = -1;
+        _opsAddrRender();
+    } catch {
+        _opsFormStatus('Erro na pesquisa de localização.', 'error');
+    } finally {
+        if (btn) { btn.textContent = '🔍'; btn.disabled = false; }
+    }
+}
+
+function _opsAddrRender() {
+    const dd = document.getElementById('ops-addr-dd');
+    if (!dd) return;
+
+    if (!_opsAddrResults.length) {
+        dd.innerHTML = `<div style="padding:10px 12px;font-size:11px;color:#9ca3af;text-align:center;">
+            Sem resultados. Tente uma pesquisa mais específica.</div>`;
+        dd.style.display = 'block';
+        return;
+    }
+
+    dd.innerHTML = _opsAddrResults.map((r, i) => {
+        // Encurtar o nome para caber no dropdown
+        const full  = r.display_name || '';
+        const short = full.length > 60 ? full.slice(0, 60) + '…' : full;
+        // Categoria (ex: "city", "village", "building"…)
+        const type  = r.type ? `<span style="font-size:9px;color:#9ca3af;margin-left:4px;">${_opsEsc(r.type)}</span>` : '';
+        return `<div class="ops-addr-item" data-idx="${i}"
+                     onmousedown="opsAddrSelect(${i})"
+                     onmouseover="_opsAddrHover(${i})">
+            <span style="font-size:12px;flex-shrink:0;">📍</span>
+            <div style="min-width:0;">
+                <div style="font-size:11px;font-weight:600;color:#1f2937;
+                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                    ${_opsEsc(full.split(',')[0].trim())}${type}
+                </div>
+                <div style="font-size:10px;color:#9ca3af;
+                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                    ${_opsEsc(full.split(',').slice(1).join(',').trim())}
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+    dd.style.display = 'block';
+}
+
+function _opsAddrHover(idx) {
+    _opsAddrIdx = idx;
+    document.querySelectorAll('.ops-addr-item').forEach((el, i) =>
+        el.classList.toggle('ops-addr-hover', i === idx));
+}
+
+function opsAddrSelect(idx) {
+    const r = _opsAddrResults[idx];
+    if (!r) return;
+
+    // Fly para o bounding box do resultado (ou para o ponto se sem bbox)
+    if (r.boundingbox && r.boundingbox.length === 4) {
+        const bb = r.boundingbox;
+        // Nominatim bbox: [south, north, west, east]
+        opsMap.fitBounds(
+            [[parseFloat(bb[0]), parseFloat(bb[2])],
+             [parseFloat(bb[1]), parseFloat(bb[3])]],
+            { maxZoom: 17, animate: true }
+        );
+    } else {
+        opsMap.setView([parseFloat(r.lat), parseFloat(r.lon)], 15, { animate: true });
+    }
+
+    // Preencher o input com o nome curto
+    const inp = document.getElementById('ops-addr-input');
+    if (inp) inp.value = r.display_name?.split(',')[0]?.trim() || r.display_name;
+
+    opsAddrHide();
+}
+
+/** Navegação por teclado no dropdown */
+function opsAddrKey(e) {
+    const dd = document.getElementById('ops-addr-dd');
+    if (!dd || dd.style.display === 'none') {
+        if (e.key === 'Enter') { e.preventDefault(); opsAddrSearch(); }
+        return;
+    }
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        _opsAddrIdx = Math.min(_opsAddrIdx + 1, _opsAddrResults.length - 1);
+        _opsAddrHover(_opsAddrIdx);
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        _opsAddrIdx = Math.max(_opsAddrIdx - 1, 0);
+        _opsAddrHover(_opsAddrIdx);
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (_opsAddrIdx >= 0) opsAddrSelect(_opsAddrIdx);
+        else opsAddrSearch();
+    } else if (e.key === 'Escape') {
+        opsAddrHide();
+    }
+}
+
+function opsAddrHide() {
+    const dd = document.getElementById('ops-addr-dd');
+    if (dd) dd.style.display = 'none';
+    _opsAddrIdx = -1;
+}
+
 // ── Importar / Exportar / Gerar trajectórias ──────────────────────────────────
 
 /** Importa um ficheiro GeoJSON ou GPX como trajectória actual */
