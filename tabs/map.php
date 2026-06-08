@@ -753,6 +753,37 @@ if ($isLoggedIn) {
         <div class="controls" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
             <button class="btn btn-primary btn-sm" onclick="startDrawing()">✏️ Desenhar</button>
             <button class="btn btn-secondary btn-sm" onclick="clearMap()">🗑️ Limpar</button>
+
+            <!-- Separador -->
+            <div style="width:1px;height:22px;background:#e5e7eb;flex-shrink:0;"></div>
+
+            <!-- 🔍 Pesquisa de morada / geocodificação -->
+            <div style="position:relative; flex:1; min-width:160px; max-width:300px;">
+                <div style="display:flex; gap:0;">
+                    <input type="text" id="map-addr-input"
+                           placeholder="🔍 Morada ou localidade…"
+                           autocomplete="off"
+                           style="flex:1; padding:5px 9px; border:1.5px solid #e5e7eb;
+                                  border-radius:6px 0 0 6px; font-size:12px; outline:none;
+                                  min-width:0; transition:border-color .15s;"
+                           onfocus="this.style.borderColor='#667eea'"
+                           onblur="this.style.borderColor='#e5e7eb'; setTimeout(mapAddrHide, 200)"
+                           oninput="mapAddrType(this.value)"
+                           onkeydown="mapAddrKey(event)">
+                    <button id="map-addr-btn" onclick="mapAddrSearch()"
+                            style="padding:5px 10px; background:#667eea; color:#fff; border:none;
+                                   border-radius:0 6px 6px 0; font-size:12px; cursor:pointer;
+                                   flex-shrink:0; font-weight:700; transition:background .15s;"
+                            onmouseover="this.style.background='#5a67d8'"
+                            onmouseout="this.style.background='#667eea'">🔍</button>
+                </div>
+                <!-- Dropdown de resultados (abre para baixo) -->
+                <div id="map-addr-dd"
+                     style="display:none; position:absolute; top:calc(100% + 3px); left:0; right:0;
+                            background:#fff; border:1px solid #e5e7eb; border-radius:8px;
+                            box-shadow:0 6px 20px rgba(0,0,0,.12); z-index:600;
+                            max-height:220px; overflow-y:auto;"></div>
+            </div>
         </div>
         <!-- Formulário de guardar terreno (aparece ao desenhar) -->
         <div id="save-form" class="section" style="display:none; margin:8px 0; padding:12px;">

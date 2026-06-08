@@ -715,3 +715,134 @@ document.addEventListener('DOMContentLoaded', function() {
     if (typeof activeTab === 'undefined' || activeTab !== 'map') return;
     initMap(); // loadMapGeoJSONLayers() é chamado dentro de initMap()
 });
+
+// ── Geocodificação Nominatim (pesquisa de morada no mapa principal) ───────────
+
+let _mapAddrTimer   = null;
+let _mapAddrResults = [];
+let _mapAddrIdx     = -1;
+
+/** Dispara pesquisa com debounce de 450 ms ao escrever */
+function mapAddrType(val) {
+    clearTimeout(_mapAddrTimer);
+    if (val.trim().length < 3) { mapAddrHide(); return; }
+    _mapAddrTimer = setTimeout(mapAddrSearch, 450);
+}
+
+/** Pesquisa no Nominatim e mostra dropdown */
+async function mapAddrSearch() {
+    const inp = document.getElementById('map-addr-input');
+    const btn = document.getElementById('map-addr-btn');
+    const q   = inp?.value?.trim();
+    if (!q || q.length < 3) return;
+
+    if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
+
+    try {
+        const url  = 'https://nominatim.openstreetmap.org/search'
+                   + '?format=json&limit=6&addressdetails=0'
+                   + '&q=' + encodeURIComponent(q);
+        const res  = await fetch(url, { headers: { 'Accept-Language': 'pt,en;q=0.8' } });
+        _mapAddrResults = await res.json() || [];
+        _mapAddrIdx     = -1;
+        _mapAddrRender();
+    } catch {
+        /* silencioso — sem ligação */
+    } finally {
+        if (btn) { btn.textContent = '🔍'; btn.disabled = false; }
+    }
+}
+
+function _mapAddrRender() {
+    const dd = document.getElementById('map-addr-dd');
+    if (!dd) return;
+
+    if (!_mapAddrResults.length) {
+        dd.innerHTML = '<div style="padding:10px 12px;font-size:11px;color:#9ca3af;text-align:center;">Sem resultados.</div>';
+        dd.style.display = 'block';
+        return;
+    }
+
+    dd.innerHTML = _mapAddrResults.map((r, i) => {
+        const full  = r.display_name || '';
+        const title = full.split(',')[0].trim();
+        const sub   = full.split(',').slice(1).join(',').trim();
+        const type  = r.type ? `<span style="font-size:9px;color:#9ca3af;margin-left:4px;">${escMapHtml(r.type)}</span>` : '';
+        return `<div style="display:flex;align-items:flex-start;gap:8px;padding:8px 12px;
+                            cursor:pointer;border-bottom:1px solid #f1f5f9;transition:background .1s;"
+                     data-idx="${i}"
+                     onmousedown="_mapAddrSelect(${i})"
+                     onmouseover="_mapAddrHover(${i})"
+                     onmouseout="this.style.background=''">
+            <span style="font-size:13px;flex-shrink:0;">📍</span>
+            <div style="min-width:0;">
+                <div style="font-size:12px;font-weight:600;color:#1f2937;
+                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                    ${escMapHtml(title)}${type}
+                </div>
+                <div style="font-size:10px;color:#9ca3af;
+                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                    ${escMapHtml(sub)}
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+    dd.style.display = 'block';
+}
+
+function _mapAddrHover(idx) {
+    _mapAddrIdx = idx;
+    document.querySelectorAll('#map-addr-dd > div[data-idx]').forEach((el, i) => {
+        el.style.background = i === idx ? '#eff6ff' : '';
+    });
+}
+
+function _mapAddrSelect(idx) {
+    const r = _mapAddrResults[idx];
+    if (!r || !map) return;
+
+    if (r.boundingbox && r.boundingbox.length === 4) {
+        const bb = r.boundingbox; // [south, north, west, east]
+        map.fitBounds(
+            [[parseFloat(bb[0]), parseFloat(bb[2])],
+             [parseFloat(bb[1]), parseFloat(bb[3])]],
+            { maxZoom: 17, animate: true }
+        );
+    } else {
+        map.setView([parseFloat(r.lat), parseFloat(r.lon)], 15, { animate: true });
+    }
+
+    const inp = document.getElementById('map-addr-input');
+    if (inp) inp.value = r.display_name?.split(',')[0]?.trim() || '';
+    mapAddrHide();
+}
+
+/** Navegação por teclado */
+function mapAddrKey(e) {
+    const dd = document.getElementById('map-addr-dd');
+    if (!dd || dd.style.display === 'none') {
+        if (e.key === 'Enter') { e.preventDefault(); mapAddrSearch(); }
+        return;
+    }
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        _mapAddrIdx = Math.min(_mapAddrIdx + 1, _mapAddrResults.length - 1);
+        _mapAddrHover(_mapAddrIdx);
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        _mapAddrIdx = Math.max(_mapAddrIdx - 1, 0);
+        _mapAddrHover(_mapAddrIdx);
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (_mapAddrIdx >= 0) _mapAddrSelect(_mapAddrIdx);
+        else mapAddrSearch();
+    } else if (e.key === 'Escape') {
+        mapAddrHide();
+    }
+}
+
+function mapAddrHide() {
+    const dd = document.getElementById('map-addr-dd');
+    if (dd) dd.style.display = 'none';
+    _mapAddrIdx = -1;
+}
