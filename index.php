@@ -216,34 +216,73 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     </div>
 
     <!-- Navigation Menu -->
+    <?php
+    // Tabs que ficam no dropdown "Menu"
+    $menuGroupTabs = ['sharing', 'admin'];
+    $menuActive    = in_array($activeTab, $menuGroupTabs);
+    ?>
     <div class="nav-menu">
         <div class="nav-content">
+
             <?php foreach ($availableTabs as $tabKey => $tabInfo): ?>
                 <?php
-                // Mostrar tab se:
-                // 1. Não requer auth, OU
-                // 2. User está logado (tabs com requiresAdmin também aparecem — o conteúdo trata das permissões)
+                if (in_array($tabKey, $menuGroupTabs)) continue; // vai para o dropdown
                 $showTab = !$tabInfo['requiresAuth'] || $isLoggedIn;
                 ?>
                 <?php if ($showTab): ?>
                     <a href="?tab=<?php echo $tabKey; ?>"
                        class="nav-item <?php echo $activeTab === $tabKey ? 'active' : ''; ?>">
                         <span class="nav-icon"><?php echo $tabInfo['icon']; ?></span>
-                        <span class="nav-text"><?php echo $tabInfo['title']; ?>
-                            <?php if ($tabKey === 'sharing' && $pendingShares > 0): ?>
-                                <span id="sharing-nav-badge"
-                                      style="background:#ef4444;color:#fff;font-size:9px;font-weight:800;
-                                             padding:1px 5px;border-radius:8px;vertical-align:middle;
-                                             margin-left:3px;"><?php echo $pendingShares; ?></span>
-                            <?php else: ?>
-                                <span id="sharing-nav-badge" style="display:none;background:#ef4444;
-                                      color:#fff;font-size:9px;font-weight:800;padding:1px 5px;
-                                      border-radius:8px;vertical-align:middle;margin-left:3px;"></span>
-                            <?php endif; ?>
-                        </span>
+                        <span class="nav-text"><?php echo $tabInfo['title']; ?></span>
                     </a>
                 <?php endif; ?>
             <?php endforeach; ?>
+
+            <?php if ($isLoggedIn): ?>
+            <!-- ── Dropdown: Partilha + Administração ── -->
+            <div class="nav-dropdown <?php echo $menuActive ? 'open' : ''; ?>"
+                 id="nav-group-menu">
+                <button class="nav-menu-trigger <?php echo $menuActive ? 'active' : ''; ?>"
+                        onclick="navGroupToggle()" type="button"
+                        aria-haspopup="true" aria-expanded="<?php echo $menuActive ? 'true' : 'false'; ?>">
+                    <span class="nav-icon">☰</span>
+                    <span class="nav-text">
+                        Menu
+                        <!-- Badge de convites pendentes -->
+                        <span id="sharing-nav-badge"
+                              style="background:#ef4444;color:#fff;font-size:9px;font-weight:800;
+                                     padding:1px 5px;border-radius:8px;vertical-align:middle;
+                                     margin-left:3px;
+                                     display:<?php echo $pendingShares > 0 ? 'inline' : 'none'; ?>;"
+                        ><?php echo $pendingShares > 0 ? $pendingShares : ''; ?></span>
+                    </span>
+                    <span class="nav-menu-chevron">▾</span>
+                </button>
+
+                <div class="nav-menu-panel">
+
+                    <!-- Partilha -->
+                    <a href="?tab=sharing"
+                       class="nav-menu-item <?php echo $activeTab === 'sharing' ? 'active' : ''; ?>">
+                        <span class="nav-menu-item-icon">🤝</span>
+                        <span style="flex:1;">Partilha</span>
+                        <?php if ($pendingShares > 0): ?>
+                            <span style="background:#ef4444;color:#fff;font-size:9px;font-weight:800;
+                                         padding:1px 6px;border-radius:8px;"><?php echo $pendingShares; ?></span>
+                        <?php endif; ?>
+                    </a>
+
+                    <!-- Administração (visível para todos os logados; acesso controlado pelo tab) -->
+                    <a href="?tab=admin"
+                       class="nav-menu-item <?php echo $activeTab === 'admin' ? 'active' : ''; ?>">
+                        <span class="nav-menu-item-icon">⚙️</span>
+                        <span>Administração</span>
+                    </a>
+
+                </div>
+            </div>
+            <?php endif; ?>
+
         </div>
     </div>
 
@@ -328,6 +367,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     
     <!-- Main JS -->
     <script src="assets/js/app.js"></script>
+
+    <!-- Nav dropdown toggle -->
+    <script>
+    function navGroupToggle() {
+        const el = document.getElementById('nav-group-menu');
+        if (!el) return;
+        el.classList.toggle('open');
+        const btn = el.querySelector('.nav-menu-trigger');
+        if (btn) btn.setAttribute('aria-expanded', el.classList.contains('open'));
+    }
+    // Fechar ao clicar fora
+    document.addEventListener('click', function(e) {
+        const el = document.getElementById('nav-group-menu');
+        if (el && !el.contains(e.target)) el.classList.remove('open');
+    });
+    </script>
 
     <!-- API Key Modal logic -->
     <script>
