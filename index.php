@@ -233,9 +233,13 @@ if (!$isLoggedIn) {
       "isPartOf": {
         "@type": "Course",
         "name": "<?= $browserLang === 'en' ? 'Precision Agriculture' : 'Agricultura de Precisão' ?>",
+        "description": "<?= $browserLang === 'en' ? 'Academic course on precision agriculture covering IoT sensors, robotic monitoring, satellite imagery, variable rate technology (VRT) and prescription maps for agricultural machines and robots.' : 'Cadeira académica de agricultura de precisão que abrange sensores IoT, monitorização robótica, imagens de satélite, tecnologia de taxa variável (VRT) e mapas de prescrição para máquinas e robôs agrícolas.' ?>",
+        "url": "https://soilqi.com",
+        "inLanguage": ["pt", "en"],
         "provider": {
           "@type": "EducationalOrganization",
-          "name": "Universidade do Porto"
+          "name": "Universidade do Porto",
+          "url": "https://www.up.pt"
         }
       }
     }
