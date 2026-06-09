@@ -527,8 +527,9 @@ document.addEventListener('DOMContentLoaded', function() {
         // Atalhos de teclado para o SQL editor
         const sqlQuery = document.getElementById('sql-query');
         if (sqlQuery) {
-            // Carregar parâmetros ao iniciar
+            // Carregar secções ao iniciar
             loadAdminParams();
+            loadLandingEditor();
 
             sqlQuery.addEventListener('keydown', function(e) {
                 // Ctrl + Enter ou Cmd + Enter para executar
@@ -676,6 +677,156 @@ function deleteAdminParam(id, name) {
             else alert('Erro: ' + (data.message || 'desconhecido'));
         })
         .catch(() => alert('Erro de rede.'));
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Landing Page Editor
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _landingLang    = 'pt';
+let _landingContent = { pt: {}, en: {} };
+let _landingVideos  = [];
+
+function loadLandingEditor() {
+    const fd = new FormData();
+    fd.append('action', 'get_landing_content');
+    fetch('?tab=admin', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) return;
+            _landingContent = data.content || { pt: {}, en: {} };
+            _landingVideos  = data.videos  || [];
+            renderLandingFields();
+            renderLandingVideos();
+        })
+        .catch(() => {});
+}
+
+function setLandingLang(lang) {
+    _landingLang = lang;
+    document.getElementById('lp-btn-pt').style.fontWeight = lang === 'pt' ? '700' : '400';
+    document.getElementById('lp-btn-en').style.fontWeight = lang === 'en' ? '700' : '400';
+    renderLandingFields();
+}
+
+function renderLandingFields() {
+    const c = _landingContent[_landingLang] || {};
+    const title    = document.getElementById('lp-title');
+    const subtitle = document.getElementById('lp-subtitle');
+    const body     = document.getElementById('lp-body');
+    if (title)    title.value    = c.title    || '';
+    if (subtitle) subtitle.value = c.subtitle || '';
+    if (body)     body.value     = c.body     || '';
+}
+
+function saveLandingContent() {
+    const title    = (document.getElementById('lp-title')?.value    || '').trim();
+    const subtitle = (document.getElementById('lp-subtitle')?.value || '').trim();
+    const body     = (document.getElementById('lp-body')?.value     || '');
+    const statusEl = document.getElementById('lp-save-status');
+    const btn      = document.getElementById('lp-save-btn');
+
+    btn.disabled = true;
+    statusEl.textContent = 'A guardar…';
+
+    const fields = { title, subtitle, body };
+    const saves  = Object.entries(fields).map(([key, val]) => {
+        const fd = new FormData();
+        fd.append('action',        'save_landing_content');
+        fd.append('lang',          _landingLang);
+        fd.append('content_key',   key);
+        fd.append('content_value', val);
+        return fetch('?tab=admin', { method: 'POST', body: fd }).then(r => r.json());
+    });
+
+    Promise.all(saves)
+        .then(results => {
+            const ok = results.every(r => r.success);
+            statusEl.style.color = ok ? '#16a34a' : '#ef4444';
+            statusEl.textContent = ok ? '✅ Guardado!' : '❌ Erro ao guardar';
+            if (ok) {
+                _landingContent[_landingLang] = { title, subtitle, body };
+                setTimeout(() => { statusEl.textContent = ''; }, 3000);
+            }
+        })
+        .catch(() => { statusEl.style.color = '#ef4444'; statusEl.textContent = '❌ Erro de rede'; })
+        .finally(() => { btn.disabled = false; });
+}
+
+function renderLandingVideos() {
+    const el = document.getElementById('lp-videos-list');
+    if (!el) return;
+    if (_landingVideos.length === 0) {
+        el.innerHTML = '<div style="color:#9ca3af;font-size:13px;">Nenhum vídeo adicionado.</div>';
+        return;
+    }
+    el.innerHTML = _landingVideos.map((v, idx) => `
+        <div style="display:flex;align-items:center;gap:10px;background:#f9fafb;border-radius:8px;padding:8px 12px;border:1px solid #e5e7eb;">
+            <img src="https://img.youtube.com/vi/${escHtmlAdmin(v.youtube_id)}/default.jpg"
+                 style="width:60px;height:45px;object-fit:cover;border-radius:5px;flex-shrink:0;">
+            <div style="flex:1;min-width:0;">
+                <div style="font-size:13px;font-weight:600;color:#1f2937;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                    ${escHtmlAdmin(v.title || v.youtube_id)}
+                </div>
+                <div style="font-size:11px;color:#9ca3af;font-family:monospace;">${escHtmlAdmin(v.youtube_id)}</div>
+            </div>
+            <div style="display:flex;gap:4px;flex-shrink:0;">
+                ${idx > 0 ? `<button class="btn btn-secondary btn-sm" onclick="moveLandingVideo(${v.id},-1)" title="Mover para cima">↑</button>` : '<span style="width:28px;"></span>'}
+                ${idx < _landingVideos.length - 1 ? `<button class="btn btn-secondary btn-sm" onclick="moveLandingVideo(${v.id},1)" title="Mover para baixo">↓</button>` : '<span style="width:28px;"></span>'}
+                <button class="btn btn-secondary btn-sm" style="color:#ef4444;" onclick="deleteLandingVideo(${v.id})" title="Remover">🗑️</button>
+            </div>
+        </div>`
+    ).join('');
+}
+
+function addLandingVideo() {
+    const ytId  = (document.getElementById('lp-yt-id')?.value    || '').trim();
+    const title = (document.getElementById('lp-yt-title')?.value || '').trim();
+    if (!ytId) { alert('Introduza o URL ou ID do vídeo.'); return; }
+
+    const fd = new FormData();
+    fd.append('action',     'add_landing_video');
+    fd.append('youtube_id', ytId);
+    fd.append('video_title', title);
+    fetch('?tab=admin', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('lp-yt-id').value    = '';
+                document.getElementById('lp-yt-title').value = '';
+                loadLandingEditor();
+            } else {
+                alert('Erro: ' + (data.message || 'desconhecido'));
+            }
+        })
+        .catch(() => alert('Erro de rede.'));
+}
+
+function deleteLandingVideo(id) {
+    if (!confirm('Remover este vídeo da página de entrada?')) return;
+    const fd = new FormData();
+    fd.append('action',   'delete_landing_video');
+    fd.append('video_id', id);
+    fetch('?tab=admin', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(() => loadLandingEditor())
+        .catch(() => {});
+}
+
+function moveLandingVideo(id, dir) {
+    const idx = _landingVideos.findIndex(v => v.id == id);
+    if (idx < 0) return;
+    const swapIdx = idx + dir;
+    if (swapIdx < 0 || swapIdx >= _landingVideos.length) return;
+
+    // swap sort_order values
+    const a = _landingVideos[idx];
+    const b = _landingVideos[swapIdx];
+
+    Promise.all([
+        fetch('?tab=admin', { method:'POST', body: (() => { const f=new FormData(); f.append('action','reorder_landing_video'); f.append('video_id', a.id); f.append('sort_order', b.sort_order); return f; })() }).then(r=>r.json()),
+        fetch('?tab=admin', { method:'POST', body: (() => { const f=new FormData(); f.append('action','reorder_landing_video'); f.append('video_id', b.id); f.append('sort_order', a.sort_order); return f; })() }).then(r=>r.json()),
+    ]).then(() => loadLandingEditor()).catch(() => {});
 }
 
 function escHtmlAdmin(s) {

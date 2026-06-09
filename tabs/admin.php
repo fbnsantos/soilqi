@@ -225,6 +225,78 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn && $isAdmin) {
                 ];
                 break;
 
+            // ── Página de Entrada ────────────────────────────────────────────────
+            case 'get_landing_content':
+                try {
+                    $pdo->exec("CREATE TABLE IF NOT EXISTS landing_content (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        lang ENUM('pt','en') NOT NULL,
+                        content_key VARCHAR(100) NOT NULL,
+                        content_value MEDIUMTEXT NULL,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        UNIQUE KEY uq_lang_key (lang, content_key)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                    $pdo->exec("CREATE TABLE IF NOT EXISTS landing_videos (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        youtube_id VARCHAR(20) NOT NULL,
+                        title VARCHAR(255) NOT NULL DEFAULT '',
+                        sort_order INT NOT NULL DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                    $rows = $pdo->query("SELECT lang, content_key, content_value FROM landing_content")->fetchAll(PDO::FETCH_ASSOC);
+                    $content = ['pt' => [], 'en' => []];
+                    foreach ($rows as $r) { $content[$r['lang']][$r['content_key']] = $r['content_value']; }
+
+                    $videos = $pdo->query("SELECT id, youtube_id, title, sort_order FROM landing_videos ORDER BY sort_order ASC, id ASC")->fetchAll(PDO::FETCH_ASSOC);
+
+                    $response['success'] = true;
+                    $response['content'] = $content;
+                    $response['videos']  = $videos;
+                } catch (PDOException $e2) {
+                    $response['message'] = 'Erro: ' . $e2->getMessage();
+                }
+                break;
+
+            case 'save_landing_content':
+                $lang  = $_POST['lang'] ?? '';
+                $key   = $_POST['content_key'] ?? '';
+                $value = $_POST['content_value'] ?? '';
+                if (!in_array($lang, ['pt','en']) || !$key) { $response['message'] = 'Dados inválidos.'; break; }
+                $stmt = $pdo->prepare("INSERT INTO landing_content (lang, content_key, content_value)
+                    VALUES (?,?,?) ON DUPLICATE KEY UPDATE content_value=VALUES(content_value)");
+                $stmt->execute([$lang, $key, $value]);
+                $response['success'] = true;
+                $response['message'] = 'Guardado.';
+                break;
+
+            case 'add_landing_video':
+                $ytId  = trim($_POST['youtube_id'] ?? '');
+                $title = trim($_POST['video_title'] ?? '');
+                if (!$ytId) { $response['message'] = 'ID do vídeo obrigatório.'; break; }
+                // Accept full URL or just the ID
+                if (preg_match('/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/', $ytId, $m)) { $ytId = $m[1]; }
+                $order = (int)($pdo->query("SELECT COALESCE(MAX(sort_order),0) FROM landing_videos")->fetchColumn()) + 1;
+                $stmt = $pdo->prepare("INSERT INTO landing_videos (youtube_id, title, sort_order) VALUES (?,?,?)");
+                $stmt->execute([$ytId, $title, $order]);
+                $response['success'] = true;
+                $response['id']      = $pdo->lastInsertId();
+                $response['message'] = 'Vídeo adicionado.';
+                break;
+
+            case 'delete_landing_video':
+                $vid = intval($_POST['video_id'] ?? 0);
+                $pdo->prepare("DELETE FROM landing_videos WHERE id=?")->execute([$vid]);
+                $response['success'] = true;
+                break;
+
+            case 'reorder_landing_video':
+                $vid   = intval($_POST['video_id'] ?? 0);
+                $order = intval($_POST['sort_order'] ?? 0);
+                $pdo->prepare("UPDATE landing_videos SET sort_order=? WHERE id=?")->execute([$order, $vid]);
+                $response['success'] = true;
+                break;
+
             // ── Parâmetros de Campo ───────────────────────────────────────────
             case 'get_all_parameters':
                 try {
@@ -604,6 +676,71 @@ try {
         <div class="warning-box">
             <strong>⚠️ Atenção:</strong> Estas ações podem afetar o funcionamento do sistema. 
             Use com cuidado.
+        </div>
+    </div>
+
+    <!-- Página de Entrada -->
+    <div class="section">
+        <div class="section-title">
+            <h3>🌐 Página de Entrada</h3>
+            <div style="display:flex;gap:8px;">
+                <button class="btn btn-secondary btn-sm" onclick="setLandingLang('pt')" id="lp-btn-pt" style="font-weight:700;">🇵🇹 PT</button>
+                <button class="btn btn-secondary btn-sm" onclick="setLandingLang('en')" id="lp-btn-en">🇬🇧 EN</button>
+                <a href="login.php" target="_blank" class="btn btn-secondary btn-sm">👁️ Ver página</a>
+            </div>
+        </div>
+        <p style="color:#6b7280;font-size:14px;margin-bottom:20px;">
+            Edite o texto e vídeos que aparecem na página de entrada (login) para visitantes não autenticados.
+            Edite separadamente para Português e Inglês — o visitante vê a versão correspondente ao idioma do browser.
+        </p>
+
+        <!-- Campos de texto -->
+        <div style="display:flex;flex-direction:column;gap:14px;margin-bottom:24px;">
+            <div>
+                <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:5px;">Título</label>
+                <input type="text" id="lp-title" class="lp-input"
+                       style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;font-weight:600;box-sizing:border-box;"
+                       placeholder="Título da página de entrada">
+            </div>
+            <div>
+                <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:5px;">Subtítulo</label>
+                <input type="text" id="lp-subtitle" class="lp-input"
+                       style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;box-sizing:border-box;"
+                       placeholder="Subtítulo / tagline">
+            </div>
+            <div>
+                <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:5px;">
+                    Texto introdutório
+                    <span style="font-weight:400;color:#9ca3af;margin-left:6px;">suporta quebras de linha</span>
+                </label>
+                <textarea id="lp-body" rows="7"
+                          style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;line-height:1.6;resize:vertical;box-sizing:border-box;"
+                          placeholder="Texto descritivo da plataforma…"></textarea>
+            </div>
+            <div>
+                <button class="btn btn-primary" onclick="saveLandingContent()" id="lp-save-btn">💾 Guardar texto</button>
+                <span id="lp-save-status" style="margin-left:10px;font-size:13px;color:#6b7280;"></span>
+            </div>
+        </div>
+
+        <!-- Vídeos YouTube -->
+        <div style="border-top:1px solid #f3f4f6;padding-top:20px;">
+            <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:12px;">▶️ Vídeos YouTube</div>
+            <div id="lp-videos-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">
+                <div style="color:#9ca3af;font-size:13px;">A carregar…</div>
+            </div>
+            <!-- Adicionar vídeo -->
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+                <div class="filter-group">
+                    <label>URL ou ID do YouTube</label>
+                    <input type="text" id="lp-yt-id" placeholder="ex: dQw4w9WgXcQ ou https://youtu.be/…" style="min-width:260px;">
+                </div>
+                <div class="filter-group">
+                    <label>Título do vídeo</label>
+                    <input type="text" id="lp-yt-title" placeholder="ex: Demonstração SoilQI" style="min-width:180px;">
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="addLandingVideo()" style="margin-bottom:1px;">+ Adicionar vídeo</button>
+            </div>
         </div>
     </div>
 

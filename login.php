@@ -1,50 +1,41 @@
 <?php
 require_once 'config.php';
 
-// Se já está logado, redireciona para index
-if (isLoggedIn()) {
-    redirect('index.php');
-}
+if (isLoggedIn()) { redirect('index.php'); }
 
-$error = '';
+$error   = '';
 $success = '';
 
-// Processar login
+// ── Login ────────────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
     $username = sanitizeInput($_POST['username']);
     $password = $_POST['password'];
-    
     if (empty($username) || empty($password)) {
         $error = 'Por favor, preencha todos os campos.';
     } else {
         try {
-            $pdo = getDBConnection();
+            $pdo  = getDBConnection();
             $stmt = $pdo->prepare("SELECT id, username, password FROM users WHERE username = ?");
             $stmt->execute([$username]);
             $user = $stmt->fetch();
-            
             if ($user && verifyPassword($password, $user['password'])) {
-                $_SESSION['user_id'] = $user['id'];
+                $_SESSION['user_id']  = $user['id'];
                 $_SESSION['username'] = $user['username'];
                 setFlashMessage('Login realizado com sucesso!', 'success');
                 redirect('index.php');
             } else {
                 $error = 'Credenciais inválidas.';
             }
-        } catch (PDOException $e) {
-            $error = 'Erro no sistema. Tente novamente.';
-        }
+        } catch (PDOException $e) { $error = 'Erro no sistema. Tente novamente.'; }
     }
 }
 
-// Processar registo
+// ── Registo ───────────────────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
-    $username = sanitizeInput($_POST['reg_username']);
-    $email = sanitizeInput($_POST['reg_email']);
-    $password = $_POST['reg_password'];
+    $username         = sanitizeInput($_POST['reg_username']);
+    $email            = sanitizeInput($_POST['reg_email']);
+    $password         = $_POST['reg_password'];
     $confirm_password = $_POST['reg_confirm_password'];
-    
-    // Validações
     if (empty($username) || empty($email) || empty($password) || empty($confirm_password)) {
         $error = 'Por favor, preencha todos os campos.';
     } elseif (!isValidEmail($email)) {
@@ -55,134 +46,311 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
         $error = 'As palavras-passe não coincidem.';
     } else {
         try {
-            $pdo = getDBConnection();
-            
-            // Verificar se username já existe
+            $pdo  = getDBConnection();
             $stmt = $pdo->prepare("SELECT id FROM users WHERE username = ?");
             $stmt->execute([$username]);
             if ($stmt->fetch()) {
                 $error = 'Nome de utilizador já existe.';
             } else {
-                // Verificar se email já existe
                 $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ?");
                 $stmt->execute([$email]);
                 if ($stmt->fetch()) {
                     $error = 'Email já registado.';
                 } else {
-                    // Verificar se é o primeiro utilizador
                     $isFirstUser = isFirstUser();
-                    $role = $isFirstUser ? ROLE_ADMIN : ROLE_USER;
-                    
-                    // Criar utilizador
-                    $hashedPassword = hashPassword($password);
-                    $stmt = $pdo->prepare("INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)");
-                    $stmt->execute([$username, $email, $hashedPassword, $role]);
-                    
-                    if ($isFirstUser) {
-                        $success = 'Conta criada com sucesso! És o primeiro utilizador e foste definido como administrador. Pode agora fazer login.';
-                    } else {
-                        $success = 'Conta criada com sucesso! Pode agora fazer login.';
-                    }
+                    $role        = $isFirstUser ? ROLE_ADMIN : ROLE_USER;
+                    $pdo->prepare("INSERT INTO users (username, email, password, role) VALUES (?,?,?,?)")
+                        ->execute([$username, $email, hashPassword($password), $role]);
+                    $success = $isFirstUser
+                        ? 'Conta criada! És o primeiro utilizador e foste definido como administrador.'
+                        : 'Conta criada com sucesso! Pode agora fazer login.';
                 }
             }
-        } catch (PDOException $e) {
-            $error = 'Erro no sistema. Tente novamente.';
-        }
+        } catch (PDOException $e) { $error = 'Erro no sistema. Tente novamente.'; }
     }
 }
 
-// Obter mensagem flash se existir
 $flashMessage = showFlashMessage();
+
+// ── Conteúdo da Landing Page ──────────────────────────────────────────────────
+// Detectar língua do browser: pt ou en
+$browserLang = 'pt';
+$acceptLang  = $_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? '';
+if (stripos($acceptLang, 'en') === 0 || (stripos($acceptLang, 'en') !== false && stripos($acceptLang, 'pt') === false)) {
+    $browserLang = 'en';
+}
+// Permitir override via ?lang=
+if (isset($_GET['lang']) && in_array($_GET['lang'], ['pt','en'])) {
+    $browserLang = $_GET['lang'];
+}
+
+$lc      = ['title' => SITE_NAME, 'subtitle' => '', 'body' => ''];
+$videos  = [];
+try {
+    $pdo2 = getDBConnection();
+    $rows = $pdo2->prepare("SELECT content_key, content_value FROM landing_content WHERE lang = ?");
+    $rows->execute([$browserLang]);
+    foreach ($rows->fetchAll(PDO::FETCH_ASSOC) as $r) { $lc[$r['content_key']] = $r['content_value']; }
+    $videos = $pdo2->query("SELECT youtube_id, title FROM landing_videos ORDER BY sort_order ASC, id ASC")->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $ignored) { /* tabela ainda não existe — usa defaults */ }
+
+$otherLang     = $browserLang === 'pt' ? 'en' : 'pt';
+$otherLangLabel = $browserLang === 'pt' ? '🇬🇧 English' : '🇵🇹 Português';
 ?>
 <!DOCTYPE html>
-<html lang="pt">
+<html lang="<?= $browserLang ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - <?php echo SITE_NAME; ?></title>
+    <title><?= htmlspecialchars($lc['title']) ?> — <?= SITE_NAME ?></title>
     <link rel="stylesheet" href="assets/css/login.css">
+    <style>
+        /* ── Landing layout ── */
+        body { background: #f8fafc; margin: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
+
+        .landing-wrap {
+            min-height: 100vh;
+            display: grid;
+            grid-template-columns: 1fr 420px;
+            grid-template-rows: auto 1fr auto;
+        }
+
+        /* Top bar */
+        .landing-topbar {
+            grid-column: 1 / -1;
+            background: linear-gradient(135deg, #1a3a2a 0%, #2d6a4f 100%);
+            padding: 14px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            color: #fff;
+        }
+        .landing-topbar-logo { font-size: 20px; font-weight: 700; letter-spacing: 1px; }
+        .landing-topbar-logo span { font-weight: 300; opacity: .7; font-size: 14px; margin-left: 10px; }
+        .lang-switcher {
+            font-size: 12px; color: rgba(255,255,255,.75);
+            text-decoration: none; border: 1px solid rgba(255,255,255,.3);
+            padding: 4px 12px; border-radius: 20px; transition: background .15s;
+        }
+        .lang-switcher:hover { background: rgba(255,255,255,.15); color: #fff; }
+
+        /* Content column */
+        .landing-content {
+            padding: 48px 48px 32px 48px;
+            overflow-y: auto;
+            background: #fff;
+            border-right: 1px solid #e5e7eb;
+        }
+
+        .landing-title {
+            font-size: clamp(22px, 3vw, 34px);
+            font-weight: 800;
+            color: #1a3a2a;
+            margin: 0 0 6px;
+            line-height: 1.2;
+        }
+        .landing-subtitle {
+            font-size: 15px;
+            color: #6b7280;
+            margin: 0 0 24px;
+            font-weight: 500;
+        }
+        .landing-body {
+            font-size: 15px;
+            color: #374151;
+            line-height: 1.75;
+            white-space: pre-line;
+            margin-bottom: 32px;
+        }
+
+        /* Videos */
+        .videos-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 16px;
+            margin-bottom: 32px;
+        }
+        .video-card {
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0,0,0,.08);
+            background: #000;
+        }
+        .video-card iframe {
+            width: 100%;
+            aspect-ratio: 16/9;
+            display: block;
+            border: none;
+        }
+        .video-title {
+            background: #fff;
+            padding: 8px 12px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        /* Login column */
+        .landing-login {
+            background: #f8fafc;
+            padding: 40px 32px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-height: 0;
+            overflow-y: auto;
+        }
+
+        /* Footer */
+        .landing-footer {
+            grid-column: 1 / -1;
+            background: #1a3a2a;
+            color: rgba(255,255,255,.5);
+            text-align: center;
+            padding: 14px;
+            font-size: 12px;
+        }
+
+        /* Login card (reutiliza estilos de login.css mas dentro do novo layout) */
+        .login-card {
+            background: #fff;
+            border-radius: 16px;
+            padding: 32px 28px;
+            box-shadow: 0 4px 24px rgba(0,0,0,.08);
+        }
+        .login-card h2 {
+            font-size: 20px;
+            color: #1f2937;
+            margin: 0 0 20px;
+            font-weight: 700;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .landing-wrap {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto auto auto auto;
+            }
+            .landing-content { padding: 28px 20px; border-right: none; border-bottom: 1px solid #e5e7eb; }
+            .landing-login   { padding: 28px 20px; }
+            .landing-topbar  { padding: 12px 20px; }
+        }
+    </style>
 </head>
 <body>
-    <div class="login-container">
-        <div class="login-header">
-            <h1><?php echo SITE_NAME; ?></h1>
-            <p>Gerencie os seus terrenos com facilidade</p>
+
+<div class="landing-wrap">
+
+    <!-- Top bar -->
+    <div class="landing-topbar">
+        <div class="landing-topbar-logo">
+            🌱 <?= htmlspecialchars(SITE_NAME) ?>
+            <span>Agricultura de Precisão · Universidade do Porto</span>
         </div>
+        <a href="?lang=<?= $otherLang ?>" class="lang-switcher"><?= $otherLangLabel ?></a>
+    </div>
 
-        <div class="login-content">
+    <!-- Conteúdo introdutório -->
+    <div class="landing-content">
+        <h1 class="landing-title"><?= htmlspecialchars($lc['title'] ?: SITE_NAME) ?></h1>
+        <?php if (!empty($lc['subtitle'])): ?>
+            <p class="landing-subtitle"><?= htmlspecialchars($lc['subtitle']) ?></p>
+        <?php endif; ?>
+        <?php if (!empty($lc['body'])): ?>
+            <div class="landing-body"><?= htmlspecialchars($lc['body']) ?></div>
+        <?php endif; ?>
+
+        <?php if (!empty($videos)): ?>
+        <div class="videos-grid">
+            <?php foreach ($videos as $v): ?>
+            <div class="video-card">
+                <iframe src="https://www.youtube-nocookie.com/embed/<?= htmlspecialchars($v['youtube_id']) ?>?rel=0"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowfullscreen loading="lazy"></iframe>
+                <?php if (!empty($v['title'])): ?>
+                <div class="video-title"><?= htmlspecialchars($v['title']) ?></div>
+                <?php endif; ?>
+            </div>
+            <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
+    </div>
+
+    <!-- Formulário de login/registo -->
+    <div class="landing-login">
+        <div class="login-card">
+            <h2><?= $browserLang === 'pt' ? '🔐 Entrar na plataforma' : '🔐 Sign in' ?></h2>
+
             <?php if ($flashMessage): ?>
-                <div class="alert alert-<?php echo $flashMessage['type']; ?>">
-                    <?php echo $flashMessage['message']; ?>
-                </div>
+                <div class="alert alert-<?= $flashMessage['type'] ?>"><?= $flashMessage['message'] ?></div>
             <?php endif; ?>
-
             <?php if ($error): ?>
-                <div class="alert alert-error">
-                    <?php echo $error; ?>
-                </div>
+                <div class="alert alert-error"><?= htmlspecialchars($error) ?></div>
             <?php endif; ?>
-
             <?php if ($success): ?>
-                <div class="alert alert-success">
-                    <?php echo $success; ?>
-                </div>
+                <div class="alert alert-success"><?= htmlspecialchars($success) ?></div>
             <?php endif; ?>
 
             <div class="tabs">
-                <div class="tab active" onclick="switchTab('login')">Entrar</div>
-                <div class="tab" onclick="switchTab('register')">Registar</div>
+                <div class="tab active" onclick="switchTab('login')">
+                    <?= $browserLang === 'pt' ? 'Entrar' : 'Login' ?>
+                </div>
+                <div class="tab" onclick="switchTab('register')">
+                    <?= $browserLang === 'pt' ? 'Registar' : 'Register' ?>
+                </div>
             </div>
 
-            <!-- Formulário de Login -->
+            <!-- Login -->
             <div id="login-tab" class="tab-content active">
                 <form method="POST">
                     <div class="form-group">
-                        <label for="username">Nome de Utilizador</label>
-                        <input type="text" id="username" name="username" required>
+                        <label><?= $browserLang === 'pt' ? 'Utilizador' : 'Username' ?></label>
+                        <input type="text" name="username" required autocomplete="username">
                     </div>
-                    
                     <div class="form-group">
-                        <label for="password">Palavra-passe</label>
-                        <input type="password" id="password" name="password" required>
+                        <label><?= $browserLang === 'pt' ? 'Palavra-passe' : 'Password' ?></label>
+                        <input type="password" name="password" required autocomplete="current-password">
                     </div>
-                    
-                    <button type="submit" name="login" class="btn">Entrar</button>
+                    <button type="submit" name="login" class="btn">
+                        <?= $browserLang === 'pt' ? 'Entrar' : 'Sign in' ?>
+                    </button>
                 </form>
             </div>
 
-            <!-- Formulário de Registo -->
+            <!-- Registo -->
             <div id="register-tab" class="tab-content">
                 <form method="POST">
                     <div class="form-group">
-                        <label for="reg_username">Nome de Utilizador</label>
-                        <input type="text" id="reg_username" name="reg_username" required>
+                        <label><?= $browserLang === 'pt' ? 'Utilizador' : 'Username' ?></label>
+                        <input type="text" name="reg_username" required autocomplete="username">
                     </div>
-                    
                     <div class="form-group">
-                        <label for="reg_email">Email</label>
-                        <input type="email" id="reg_email" name="reg_email" required>
+                        <label>Email</label>
+                        <input type="email" name="reg_email" required autocomplete="email">
                     </div>
-                    
                     <div class="form-group">
-                        <label for="reg_password">Palavra-passe</label>
-                        <input type="password" id="reg_password" name="reg_password" required>
+                        <label><?= $browserLang === 'pt' ? 'Palavra-passe' : 'Password' ?></label>
+                        <input type="password" name="reg_password" required autocomplete="new-password">
                     </div>
-                    
                     <div class="form-group">
-                        <label for="reg_confirm_password">Confirmar Palavra-passe</label>
-                        <input type="password" id="reg_confirm_password" name="reg_confirm_password" required>
+                        <label><?= $browserLang === 'pt' ? 'Confirmar' : 'Confirm password' ?></label>
+                        <input type="password" name="reg_confirm_password" required autocomplete="new-password">
                     </div>
-                    
-                    <button type="submit" name="register" class="btn">Criar Conta</button>
+                    <button type="submit" name="register" class="btn">
+                        <?= $browserLang === 'pt' ? 'Criar conta' : 'Create account' ?>
+                    </button>
                 </form>
             </div>
         </div>
-
-        <div class="login-footer">
-            <?php echo SITE_NAME; ?> v<?php echo SITE_VERSION; ?>
-        </div>
     </div>
 
-    <script src="assets/js/login.js"></script>
+    <!-- Footer -->
+    <div class="landing-footer">
+        <?= htmlspecialchars(SITE_NAME) ?> v<?= SITE_VERSION ?> &mdash; Universidade do Porto
+    </div>
+
+</div>
+
+<script src="assets/js/login.js"></script>
 </body>
 </html>
