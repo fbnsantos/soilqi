@@ -1,0 +1,24 @@
+User-agent: *
+Allow: /
+Allow: /login.php
+Allow: /index.php
+
+# Não indexar ficheiros de sistema, scripts e áreas privadas
+Disallow: /config.php
+Disallow: /config_template.php
+Disallow: /database.sql
+Disallow: /debug.php
+Disallow: /git.php
+Disallow: /install_database.php
+Disallow: /migrate.php
+Disallow: /set_admins.php
+Disallow: /tabs/
+Disallow: /api/
+Disallow: /lib/
+Disallow: /python/
+Disallow: /pwa/manifest.json
+Disallow: /assets/js/
+Disallow: /migrations/
+
+# Sitemap
+Sitemap: https://soilqi.com/sitemap.xml

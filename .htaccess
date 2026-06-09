@@ -1,0 +1,61 @@
+Options -Indexes
+
+# ── Rewrite engine ────────────────────────────────────────────────────────────
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Imagem Open Graph gerada dinamicamente
+    RewriteRule ^assets/img/og-image\.png$ assets/img/og-image.php [L,QSA]
+</IfModule>
+
+# ── Bloquear acesso a ficheiros sensíveis ─────────────────────────────────────
+<FilesMatch "^(config\.php|config_template\.php|database\.sql|debug\.php|git\.php|install_database\.php|migrate\.php|set_admins\.php|\.env)$">
+    Order deny,allow
+    Deny from all
+</FilesMatch>
+
+# Bloquear acesso directo às migrations SQL
+<FilesMatch "\.sql$">
+    Order deny,allow
+    Deny from all
+</FilesMatch>
+
+# ── Caching de assets estáticos ───────────────────────────────────────────────
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType text/css             "access plus 1 month"
+    ExpiresByType application/javascript "access plus 1 month"
+    ExpiresByType image/png            "access plus 1 week"
+    ExpiresByType image/jpeg           "access plus 1 week"
+    ExpiresByType image/svg+xml        "access plus 1 month"
+    ExpiresByType image/webp           "access plus 1 week"
+    ExpiresByType application/json     "access plus 1 day"
+    ExpiresByType text/html            "access plus 0 seconds"
+</IfModule>
+
+# ── Headers de segurança e SEO ────────────────────────────────────────────────
+<IfModule mod_headers.c>
+    # Segurança
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+
+    # Cache para assets estáticos
+    <FilesMatch "\.(css|js|png|jpg|jpeg|svg|webp|woff2?)$">
+        Header set Cache-Control "public, max-age=2592000, immutable"
+    </FilesMatch>
+
+    # Sem cache para HTML/PHP
+    <FilesMatch "\.(php|html)$">
+        Header set Cache-Control "no-cache, no-store, must-revalidate"
+        Header set Pragma "no-cache"
+    </FilesMatch>
+</IfModule>
+
+# ── Compressão GZIP ───────────────────────────────────────────────────────────
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/css application/javascript application/json text/xml
+</IfModule>
+
+# ── Charset por defeito ───────────────────────────────────────────────────────
+AddDefaultCharset UTF-8

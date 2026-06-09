@@ -166,13 +166,81 @@ if (!$isLoggedIn) {
         $flushBuf(); $flushUl(); $flushOl();
         return $html;
     }
+    // Derivar descrição SEO a partir do body (primeiros 160 chars, sem markdown)
+    $seoDesc = $browserLang === 'en'
+        ? 'SoilQI is an academic precision agriculture platform developed at the University of Porto. It integrates robotic monitoring, IoT sensors, field data and satellite imagery for crop management research.'
+        : 'SoilQI é uma plataforma académica de agricultura de precisão desenvolvida na Universidade do Porto. Integra monitorização robótica, IoT, dados de campo e imagens de satélite para investigação e ensino.';
+    $seoTitle = htmlspecialchars($lc['title'] ?: 'SoilQI — Agricultura de Precisão');
+    $canonicalLang = $browserLang === 'en' ? '?lang=en' : '';
     ?>
 <!DOCTYPE html>
 <html lang="<?= $browserLang ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= htmlspecialchars($lc['title']) ?> — <?= SITE_NAME ?></title>
+    <title><?= $seoTitle ?></title>
+
+    <!-- SEO básico -->
+    <meta name="description" content="<?= htmlspecialchars($seoDesc) ?>">
+    <meta name="keywords" content="precision agriculture, agricultura de precisão, soil quality, IoT, robótica agrícola, Universidade do Porto, ORIOOS, ViField, VineShieldDT, QGIS, VRT, variable rate technology">
+    <meta name="author" content="Universidade do Porto — Agricultura de Precisão">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://soilqi.com/index.php<?= $canonicalLang ?>">
+    <link rel="alternate" hreflang="pt" href="https://soilqi.com/index.php?lang=pt">
+    <link rel="alternate" hreflang="en" href="https://soilqi.com/index.php?lang=en">
+    <link rel="alternate" hreflang="x-default" href="https://soilqi.com/index.php">
+
+    <!-- Open Graph (Facebook, LinkedIn, WhatsApp…) -->
+    <meta property="og:type"        content="website">
+    <meta property="og:url"         content="https://soilqi.com/index.php<?= $canonicalLang ?>">
+    <meta property="og:title"       content="<?= $seoTitle ?>">
+    <meta property="og:description" content="<?= htmlspecialchars($seoDesc) ?>">
+    <meta property="og:image"       content="https://soilqi.com/assets/img/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:locale"      content="<?= $browserLang === 'pt' ? 'pt_PT' : 'en_GB' ?>">
+    <meta property="og:site_name"   content="SoilQI">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card"        content="summary_large_image">
+    <meta name="twitter:title"       content="<?= $seoTitle ?>">
+    <meta name="twitter:description" content="<?= htmlspecialchars($seoDesc) ?>">
+    <meta name="twitter:image"       content="https://soilqi.com/assets/img/og-image.png">
+
+    <!-- JSON-LD — SoftwareApplication + EducationalOrganization -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "SoilQI",
+      "url": "https://soilqi.com",
+      "applicationCategory": "EducationalApplication",
+      "operatingSystem": "Web",
+      "description": "<?= addslashes($seoDesc) ?>",
+      "inLanguage": ["pt", "en"],
+      "author": {
+        "@type": "EducationalOrganization",
+        "name": "Universidade do Porto",
+        "url": "https://www.up.pt"
+      },
+      "about": [
+        {"@type": "Thing", "name": "Precision Agriculture"},
+        {"@type": "Thing", "name": "Soil Quality Monitoring"},
+        {"@type": "Thing", "name": "Agricultural Robotics"},
+        {"@type": "Thing", "name": "IoT Sensors"},
+        {"@type": "Thing", "name": "Variable Rate Technology"}
+      ],
+      "isPartOf": {
+        "@type": "Course",
+        "name": "<?= $browserLang === 'en' ? 'Precision Agriculture' : 'Agricultura de Precisão' ?>",
+        "provider": {
+          "@type": "EducationalOrganization",
+          "name": "Universidade do Porto"
+        }
+      }
+    }
+    </script>
+
     <link rel="stylesheet" href="assets/css/login.css">
     <style>
         body { background: #f8fafc; margin: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
