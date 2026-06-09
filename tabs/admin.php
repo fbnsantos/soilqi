@@ -709,13 +709,28 @@ try {
                        placeholder="Subtítulo / tagline">
             </div>
             <div>
-                <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:5px;">
-                    Texto introdutório
-                    <span style="font-weight:400;color:#9ca3af;margin-left:6px;">suporta quebras de linha</span>
-                </label>
-                <textarea id="lp-body" rows="7"
-                          style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;line-height:1.6;resize:vertical;box-sizing:border-box;"
-                          placeholder="Texto descritivo da plataforma…"></textarea>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">
+                    <label style="font-size:12px;font-weight:700;color:#374151;">
+                        Texto introdutório
+                        <span style="font-weight:400;color:#9ca3af;margin-left:6px;">Markdown suportado</span>
+                    </label>
+                    <div style="display:flex;gap:4px;">
+                        <button class="btn btn-secondary btn-sm" id="lp-tab-edit"   onclick="switchLpTab('edit')"    style="font-weight:700;">✏️ Editar</button>
+                        <button class="btn btn-secondary btn-sm" id="lp-tab-preview" onclick="switchLpTab('preview')">👁️ Preview</button>
+                    </div>
+                </div>
+                <!-- Editor -->
+                <textarea id="lp-body" rows="10"
+                          oninput="updateLpPreview()"
+                          style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;font-family:'Courier New',monospace;line-height:1.6;resize:vertical;box-sizing:border-box;"
+                          placeholder="# Título&#10;&#10;Texto em **negrito**, *itálico*, [links](https://...)&#10;&#10;- Item 1&#10;- Item 2"></textarea>
+                <!-- Preview -->
+                <div id="lp-preview"
+                     style="display:none;min-height:120px;padding:12px 16px;border:1.5px solid #e5e7eb;border-radius:8px;background:#fafafa;font-size:14px;line-height:1.75;color:#374151;">
+                </div>
+                <div style="margin-top:6px;font-size:11px;color:#9ca3af;">
+                    Suporta: **negrito** *itálico* `código` # títulos - listas [link](url) &gt; citação --- separador
+                </div>
             </div>
             <div>
                 <button class="btn btn-primary" onclick="saveLandingContent()" id="lp-save-btn">💾 Guardar texto</button>
@@ -849,6 +864,8 @@ try {
         </div>
     </div>
 </div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 
 <style>
 /* Estilos específicos da página de admin */

@@ -707,6 +707,39 @@ function setLandingLang(lang) {
     document.getElementById('lp-btn-pt').style.fontWeight = lang === 'pt' ? '700' : '400';
     document.getElementById('lp-btn-en').style.fontWeight = lang === 'en' ? '700' : '400';
     renderLandingFields();
+    updateLpPreview();
+}
+
+function switchLpTab(tab) {
+    const editor  = document.getElementById('lp-body');
+    const preview = document.getElementById('lp-preview');
+    const btnEdit = document.getElementById('lp-tab-edit');
+    const btnPrev = document.getElementById('lp-tab-preview');
+    if (!editor || !preview) return;
+    if (tab === 'preview') {
+        updateLpPreview();
+        editor.style.display  = 'none';
+        preview.style.display = 'block';
+        btnEdit.style.fontWeight = '400';
+        btnPrev.style.fontWeight = '700';
+    } else {
+        editor.style.display  = 'block';
+        preview.style.display = 'none';
+        btnEdit.style.fontWeight = '700';
+        btnPrev.style.fontWeight = '400';
+        editor.focus();
+    }
+}
+
+function updateLpPreview() {
+    const body    = document.getElementById('lp-body')?.value || '';
+    const preview = document.getElementById('lp-preview');
+    if (!preview) return;
+    if (typeof marked !== 'undefined') {
+        preview.innerHTML = marked.parse(body);
+    } else {
+        preview.textContent = body;
+    }
 }
 
 function renderLandingFields() {
