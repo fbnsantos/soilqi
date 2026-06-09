@@ -928,6 +928,173 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 }
                 break;
 
+            // ── Parâmetros de Campo ──────────────────────────────────────────────
+            case 'get_field_parameters':
+                try {
+                    $stmt = $pdo->prepare("
+                        SELECT id, name, unit, description, scope, user_id
+                        FROM field_parameters
+                        WHERE scope = 'global' OR user_id = ?
+                        ORDER BY scope DESC, name ASC
+                    ");
+                    $stmt->execute([$currentUser['id']]);
+                    $response['success']    = true;
+                    $response['parameters'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                } catch (PDOException $e2) {
+                    // tabela ainda não existe — devolve lista vazia
+                    $response['success']    = true;
+                    $response['parameters'] = [];
+                    $response['hint']       = 'Execute a migração 007 em Admin → Migrações.';
+                }
+                break;
+
+            case 'add_field_parameter':
+                $pname = trim($_POST['param_name'] ?? '');
+                $punit = trim($_POST['param_unit'] ?? '');
+                $pdesc = trim($_POST['param_desc'] ?? '');
+                if (!$pname) { $response['message'] = 'Nome obrigatório.'; break; }
+                try {
+                    $stmt = $pdo->prepare("
+                        INSERT INTO field_parameters (name, unit, description, scope, user_id)
+                        VALUES (?, ?, ?, 'user', ?)
+                    ");
+                    $stmt->execute([$pname, $punit, $pdesc, $currentUser['id']]);
+                    $response['success'] = true;
+                    $response['message'] = 'Parâmetro adicionado.';
+                    $response['id']      = $pdo->lastInsertId();
+                } catch (PDOException $e2) {
+                    $response['message'] = str_contains($e2->getMessage(), 'Duplicate') || $e2->getCode() === '23000'
+                        ? 'Já existe um parâmetro com esse nome.'
+                        : 'Erro: ' . $e2->getMessage();
+                }
+                break;
+
+            case 'delete_field_parameter':
+                $pid = intval($_POST['param_id'] ?? 0);
+                if (!$pid) { $response['message'] = 'ID inválido.'; break; }
+                $stmt = $pdo->prepare("SELECT scope, user_id FROM field_parameters WHERE id = ?");
+                $stmt->execute([$pid]);
+                $param = $stmt->fetch(PDO::FETCH_ASSOC);
+                if (!$param) { $response['message'] = 'Não encontrado.'; break; }
+                if ($param['scope'] === 'global' && !$isAdmin) {
+                    $response['message'] = 'Sem permissão para eliminar parâmetros globais.'; break;
+                }
+                if ($param['scope'] === 'user' && (int)$param['user_id'] !== (int)$currentUser['id'] && !$isAdmin) {
+                    $response['message'] = 'Sem permissão.'; break;
+                }
+                $pdo->prepare("DELETE FROM field_parameters WHERE id = ?")->execute([$pid]);
+                $response['success'] = true;
+                $response['message'] = 'Parâmetro eliminado.';
+                break;
+
+            // ── Importação CSV ───────────────────────────────────────────────────
+            case 'import_csv':
+                $rows = json_decode($_POST['rows'] ?? '[]', true);
+                if (!is_array($rows) || count($rows) === 0) {
+                    $response['message'] = 'Sem dados para importar.'; break;
+                }
+                // Garantir tabela
+                $pdo->exec("CREATE TABLE IF NOT EXISTS field_csv_imports (
+                    id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL,
+                    import_id VARCHAR(36) NOT NULL, place VARCHAR(255) NOT NULL DEFAULT '',
+                    latitude DECIMAL(10,7) NOT NULL, longitude DECIMAL(10,7) NOT NULL,
+                    class_value TINYINT NULL, param_values TEXT NULL,
+                    imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    INDEX idx_csv_import (import_id), INDEX idx_csv_user (user_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $importId = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+                    mt_rand(0,0xffff), mt_rand(0,0xffff), mt_rand(0,0xffff),
+                    mt_rand(0,0x0fff)|0x4000, mt_rand(0,0x3fff)|0x8000,
+                    mt_rand(0,0xffff), mt_rand(0,0xffff), mt_rand(0,0xffff));
+
+                $stmt = $pdo->prepare("
+                    INSERT INTO field_csv_imports (user_id, import_id, place, latitude, longitude, class_value, param_values)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ");
+                $pdo->beginTransaction();
+                $count = 0;
+                try {
+                    foreach ($rows as $row) {
+                        $lat = isset($row['latitude'])  ? (float)$row['latitude']  : null;
+                        $lon = isset($row['longitude']) ? (float)$row['longitude'] : null;
+                        if ($lat === null || $lon === null) continue;
+                        $place = $row['place'] ?? '';
+                        $cls   = isset($row['class']) ? (int)$row['class'] : null;
+                        $extra = [];
+                        foreach ($row as $k => $v) {
+                            $k = strtolower(trim((string)$k));
+                            if (in_array($k, ['place','latitude','longitude','lat','lon','class'])) continue;
+                            $extra[$k] = $v;
+                        }
+                        $stmt->execute([
+                            $currentUser['id'], $importId, $place, $lat, $lon, $cls,
+                            count($extra) > 0 ? json_encode($extra, JSON_UNESCAPED_UNICODE) : null
+                        ]);
+                        $count++;
+                    }
+                    $pdo->commit();
+                    $response['success']   = true;
+                    $response['import_id'] = $importId;
+                    $response['imported']  = $count;
+                    $response['message']   = "{$count} linhas importadas com sucesso.";
+                } catch (Exception $ex) {
+                    $pdo->rollBack();
+                    $response['message'] = 'Erro na importação: ' . $ex->getMessage();
+                }
+                break;
+
+            case 'get_csv_imports':
+                try {
+                    $stmt = $pdo->prepare("
+                        SELECT import_id, MIN(imported_at) AS imported_at, COUNT(*) AS row_count
+                        FROM field_csv_imports WHERE user_id = ?
+                        GROUP BY import_id ORDER BY MIN(imported_at) DESC LIMIT 50
+                    ");
+                    $stmt->execute([$currentUser['id']]);
+                    $response['success'] = true;
+                    $response['imports'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                } catch (PDOException $e2) {
+                    $response['success'] = true;
+                    $response['imports'] = [];
+                }
+                break;
+
+            case 'get_csv_import_data':
+                $importId = $_POST['import_id'] ?? '';
+                if (!$importId) { $response['message'] = 'import_id em falta.'; break; }
+                try {
+                    $stmt = $pdo->prepare("
+                        SELECT place, latitude, longitude, class_value, param_values
+                        FROM field_csv_imports WHERE user_id = ? AND import_id = ? ORDER BY id ASC
+                    ");
+                    $stmt->execute([$currentUser['id'], $importId]);
+                    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                    foreach ($rows as &$r) {
+                        $r['params'] = $r['param_values'] ? json_decode($r['param_values'], true) : [];
+                        unset($r['param_values']);
+                    }
+                    $response['success'] = true;
+                    $response['rows']    = $rows;
+                } catch (PDOException $e2) {
+                    $response['message'] = 'Erro: ' . $e2->getMessage();
+                }
+                break;
+
+            case 'delete_csv_import':
+                $importId = $_POST['import_id'] ?? '';
+                if (!$importId) { $response['message'] = 'import_id em falta.'; break; }
+                try {
+                    $stmt = $pdo->prepare("DELETE FROM field_csv_imports WHERE user_id = ? AND import_id = ?");
+                    $stmt->execute([$currentUser['id'], $importId]);
+                    $response['success'] = true;
+                    $response['message'] = 'Importação eliminada.';
+                } catch (PDOException $e2) {
+                    $response['message'] = 'Erro: ' . $e2->getMessage();
+                }
+                break;
+
             case 'delete_raster':
                 $id = intval($_POST['id'] ?? 0);
                 try {
@@ -1826,6 +1993,76 @@ try {
         <div id="rasters-list">
             <div style="text-align:center; padding:20px; color:#9ca3af; font-size:13px;">
                 Expanda para ver os rasters disponíveis.
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Importação CSV -->
+<div class="section csv-import-section">
+    <div class="section-title" style="cursor:pointer; user-select:none;" onclick="toggleCsvPanel()">
+        <h3>📥 Importar CSV</h3>
+        <span id="csv-toggle-btn" class="btn btn-secondary btn-sm">▼ Expandir</span>
+    </div>
+    <div id="csv-panel" style="display:none; margin-top:16px;">
+
+        <!-- Parâmetros configurados -->
+        <div style="margin-bottom:20px;">
+            <div style="font-size:13px; font-weight:700; color:#374151; margin-bottom:10px;">
+                ⚙️ Parâmetros configurados
+                <span style="font-size:11px; font-weight:400; color:#9ca3af; margin-left:6px;">
+                    (os nomes das colunas do CSV devem coincidir)
+                </span>
+            </div>
+            <div id="field-params-list" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+                <span style="color:#9ca3af; font-size:13px;">A carregar…</span>
+            </div>
+            <!-- Adicionar parâmetro personalizado -->
+            <div style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
+                <div class="filter-group">
+                    <label>Novo parâmetro</label>
+                    <input type="text" id="new-param-name" placeholder="ex: nitrogénio" style="min-width:140px;">
+                </div>
+                <div class="filter-group">
+                    <label>Unidade</label>
+                    <input type="text" id="new-param-unit" placeholder="ex: mg/kg" style="min-width:90px;">
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="addFieldParameter()" style="margin-bottom:1px;">
+                    + Adicionar
+                </button>
+            </div>
+        </div>
+
+        <!-- Zona de drop do CSV -->
+        <div id="csv-drop-zone"
+             style="border:2px dashed #d1d5db; border-radius:12px; padding:28px 20px; text-align:center;
+                    cursor:pointer; transition:border-color .2s, background .2s; margin-bottom:12px;"
+             onclick="document.getElementById('csv-file-input').click()">
+            <div style="font-size:36px; margin-bottom:8px;">📄</div>
+            <div style="font-size:14px; font-weight:600; color:#374151; margin-bottom:4px;">
+                Arrastar ficheiro CSV aqui
+            </div>
+            <div style="font-size:12px; color:#9ca3af; margin-bottom:10px;">ou</div>
+            <label class="btn btn-primary btn-sm" style="cursor:pointer;">
+                Escolher ficheiro
+                <input type="file" id="csv-file-input" accept=".csv" style="display:none;"
+                       onchange="handleCsvFileSelect(this.files[0])">
+            </label>
+            <div style="font-size:11px; color:#9ca3af; margin-top:8px;">
+                Colunas esperadas: <code>place, latitude, longitude, class</code> + colunas dos parâmetros configurados
+            </div>
+        </div>
+
+        <div id="csv-import-status" style="margin-bottom:12px;"></div>
+
+        <!-- Importações anteriores -->
+        <div style="font-size:13px; font-weight:700; color:#374151; margin-bottom:8px;">
+            📋 Importações anteriores
+            <button class="btn btn-secondary btn-sm" onclick="loadCsvImportsList()" style="margin-left:8px;">🔄</button>
+        </div>
+        <div id="csv-imports-list">
+            <div style="color:#9ca3af; font-size:13px; padding:10px 0;">
+                Expanda para ver as importações disponíveis.
             </div>
         </div>
     </div>

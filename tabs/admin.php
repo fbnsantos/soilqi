@@ -225,6 +225,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn && $isAdmin) {
                 ];
                 break;
 
+            // ── Parâmetros de Campo ───────────────────────────────────────────
+            case 'get_all_parameters':
+                try {
+                    $stmt = $pdo->query("
+                        SELECT fp.id, fp.name, fp.unit, fp.description, fp.scope, fp.user_id,
+                               u.username, fp.created_at
+                        FROM field_parameters fp
+                        LEFT JOIN users u ON u.id = fp.user_id
+                        ORDER BY fp.scope DESC, fp.name ASC
+                    ");
+                    $response['success']    = true;
+                    $response['parameters'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                } catch (PDOException $e2) {
+                    $response['success']    = true;
+                    $response['parameters'] = [];
+                    $response['hint'] = 'Execute a migração 007 em Migrações de BD.';
+                }
+                break;
+
+            case 'add_global_parameter':
+                $pname = trim($_POST['param_name'] ?? '');
+                $punit = trim($_POST['param_unit'] ?? '');
+                $pdesc = trim($_POST['param_desc'] ?? '');
+                if (!$pname) { $response['message'] = 'Nome obrigatório.'; break; }
+                try {
+                    $stmt = $pdo->prepare("
+                        INSERT INTO field_parameters (name, unit, description, scope, user_id)
+                        VALUES (?, ?, ?, 'global', NULL)
+                    ");
+                    $stmt->execute([$pname, $punit, $pdesc]);
+                    $response['success'] = true;
+                    $response['message'] = 'Parâmetro global criado.';
+                    $response['id']      = $pdo->lastInsertId();
+                } catch (PDOException $e2) {
+                    $response['message'] = ($e2->getCode() === '23000')
+                        ? 'Já existe um parâmetro global com esse nome.'
+                        : 'Erro: ' . $e2->getMessage();
+                }
+                break;
+
+            case 'delete_parameter':
+                $pid = intval($_POST['param_id'] ?? 0);
+                if (!$pid) { $response['message'] = 'ID inválido.'; break; }
+                $pdo->prepare("DELETE FROM field_parameters WHERE id = ?")->execute([$pid]);
+                $response['success'] = true;
+                $response['message'] = 'Parâmetro eliminado.';
+                break;
+
             // ── Migrações ─────────────────────────────────────────────────────
             case 'get_migrations':
                 // Auto-criar tabela de controlo se não existir
@@ -556,6 +604,20 @@ try {
         <div class="warning-box">
             <strong>⚠️ Atenção:</strong> Estas ações podem afetar o funcionamento do sistema. 
             Use com cuidado.
+        </div>
+    </div>
+
+    <!-- Parâmetros de Campo -->
+    <div class="section">
+        <div class="section-title">
+            <h3>🧪 Parâmetros de Campo</h3>
+            <button class="btn btn-primary btn-sm" onclick="showAddParamModal()">+ Novo Parâmetro Global</button>
+        </div>
+        <p style="color:#6b7280; font-size:14px; margin-bottom:16px;">
+            Parâmetros globais são visíveis para todos os utilizadores. Parâmetros de utilizador são criados pelo próprio utilizador.
+        </p>
+        <div id="admin-params-list">
+            <div class="text-center" style="padding:20px; color:#6b7280;">A carregar…</div>
         </div>
     </div>
 

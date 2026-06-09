@@ -527,6 +527,9 @@ document.addEventListener('DOMContentLoaded', function() {
         // Atalhos de teclado para o SQL editor
         const sqlQuery = document.getElementById('sql-query');
         if (sqlQuery) {
+            // Carregar parâmetros ao iniciar
+            loadAdminParams();
+
             sqlQuery.addEventListener('keydown', function(e) {
                 // Ctrl + Enter ou Cmd + Enter para executar
                 if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -546,3 +549,137 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Parâmetros de Campo (Admin)
+// ══════════════════════════════════════════════════════════════════════════════
+
+function loadAdminParams() {
+    const el = document.getElementById('admin-params-list');
+    if (!el) return;
+    el.innerHTML = '<div style="color:#9ca3af;font-size:13px;padding:10px 0;">A carregar…</div>';
+
+    const fd = new FormData();
+    fd.append('action', 'get_all_parameters');
+    fetch('?tab=admin', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            const params = data.parameters || [];
+            if (data.hint) {
+                el.innerHTML = `<div style="background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:12px;font-size:13px;color:#92400e;">⚠️ ${data.hint}</div>`;
+                return;
+            }
+            if (params.length === 0) {
+                el.innerHTML = '<div style="color:#9ca3af;font-size:13px;">Nenhum parâmetro ainda. Execute a migração 007.</div>';
+                return;
+            }
+            el.innerHTML = '<table style="width:100%;font-size:13px;border-collapse:collapse;">' +
+                '<thead><tr>' +
+                ['ID','Nome','Unidade','Descrição','Âmbito','Utilizador','Ações'].map(h =>
+                    `<th style="text-align:left;padding:8px 10px;background:#f9fafb;color:#374151;font-size:12px;border-bottom:2px solid #e5e7eb;">${h}</th>`
+                ).join('') +
+                '</tr></thead><tbody>' +
+                params.map(p => {
+                    const scopeBadge = p.scope === 'global'
+                        ? '<span style="background:#dbeafe;color:#1e40af;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;">global</span>'
+                        : '<span style="background:#d1fae5;color:#065f46;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;">pessoal</span>';
+                    return `<tr style="border-bottom:1px solid #f3f4f6;">
+                        <td style="padding:8px 10px;color:#9ca3af;">${p.id}</td>
+                        <td style="padding:8px 10px;font-weight:700;">${escHtmlAdmin(p.name)}</td>
+                        <td style="padding:8px 10px;color:#6b7280;">${escHtmlAdmin(p.unit || '—')}</td>
+                        <td style="padding:8px 10px;color:#6b7280;">${escHtmlAdmin(p.description || '—')}</td>
+                        <td style="padding:8px 10px;">${scopeBadge}</td>
+                        <td style="padding:8px 10px;color:#6b7280;">${escHtmlAdmin(p.username || '—')}</td>
+                        <td style="padding:8px 10px;">
+                            <button class="btn btn-secondary btn-sm" style="color:#ef4444;"
+                                    onclick="deleteAdminParam(${p.id}, '${escHtmlAdmin(p.name)}')">🗑️</button>
+                        </td>
+                    </tr>`;
+                }).join('') +
+                '</tbody></table>';
+        })
+        .catch(() => { el.innerHTML = '<div style="color:#ef4444;font-size:13px;">Erro ao carregar.</div>'; });
+}
+
+function showAddParamModal() {
+    const existing = document.getElementById('add-param-modal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'add-param-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;display:flex;align-items:center;justify-content:center;';
+    modal.innerHTML = `
+        <div style="background:#fff;border-radius:16px;padding:24px;width:min(440px,95vw);box-shadow:0 20px 60px rgba(0,0,0,.3);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+                <h3 style="font-size:17px;color:#1f2937;">🧪 Novo Parâmetro Global</h3>
+                <button onclick="this.closest('#add-param-modal').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">✕</button>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:20px;">
+                <div>
+                    <label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px;font-weight:600;">Nome *</label>
+                    <input id="ap-name" type="text" placeholder="ex: nitrogénio" style="width:100%;padding:9px 10px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;box-sizing:border-box;">
+                </div>
+                <div>
+                    <label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px;font-weight:600;">Unidade</label>
+                    <input id="ap-unit" type="text" placeholder="ex: mg/kg" style="width:100%;padding:9px 10px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;box-sizing:border-box;">
+                </div>
+                <div>
+                    <label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px;font-weight:600;">Descrição</label>
+                    <input id="ap-desc" type="text" placeholder="ex: Teor de azoto no solo" style="width:100%;padding:9px 10px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;box-sizing:border-box;">
+                </div>
+            </div>
+            <div style="display:flex;gap:10px;">
+                <button class="btn btn-primary" style="flex:1;" onclick="submitAddParam()">💾 Criar</button>
+                <button class="btn btn-secondary" onclick="this.closest('#add-param-modal').remove()">Cancelar</button>
+            </div>
+            <div id="ap-status" style="margin-top:10px;font-size:13px;"></div>
+        </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+    setTimeout(() => { const n = document.getElementById('ap-name'); if (n) n.focus(); }, 80);
+}
+
+function submitAddParam() {
+    const name = (document.getElementById('ap-name').value || '').trim();
+    const unit = (document.getElementById('ap-unit').value || '').trim();
+    const desc = (document.getElementById('ap-desc').value || '').trim();
+    const statusEl = document.getElementById('ap-status');
+    if (!name) { statusEl.innerHTML = '<span style="color:#ef4444;">Nome obrigatório.</span>'; return; }
+
+    const fd = new FormData();
+    fd.append('action',     'add_global_parameter');
+    fd.append('param_name', name);
+    fd.append('param_unit', unit);
+    fd.append('param_desc', desc);
+    fetch('?tab=admin', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('add-param-modal').remove();
+                loadAdminParams();
+            } else {
+                statusEl.innerHTML = `<span style="color:#ef4444;">${escHtmlAdmin(data.message || 'Erro')}</span>`;
+            }
+        })
+        .catch(() => { statusEl.innerHTML = '<span style="color:#ef4444;">Erro de rede.</span>'; });
+}
+
+function deleteAdminParam(id, name) {
+    if (!confirm(`Eliminar o parâmetro "${name}"?\nIsto afecta todos os utilizadores que o usem.`)) return;
+    const fd = new FormData();
+    fd.append('action',   'delete_parameter');
+    fd.append('param_id', id);
+    fetch('?tab=admin', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) loadAdminParams();
+            else alert('Erro: ' + (data.message || 'desconhecido'));
+        })
+        .catch(() => alert('Erro de rede.'));
+}
+
+function escHtmlAdmin(s) {
+    return String(s || '')
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}

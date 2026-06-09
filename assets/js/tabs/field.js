@@ -2723,3 +2723,259 @@ function escHtml(s) {
         .replace(/&/g,'&amp;').replace(/</g,'&lt;')
         .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CSV Import & Field Parameters
+// ══════════════════════════════════════════════════════════════════════════════
+
+let csvImportMarkers = [];
+
+function toggleCsvPanel() {
+    const panel = document.getElementById('csv-panel');
+    const btn   = document.getElementById('csv-toggle-btn');
+    if (!panel) return;
+    const open = panel.style.display === 'none';
+    panel.style.display = open ? 'block' : 'none';
+    btn.textContent = open ? '▲ Recolher' : '▼ Expandir';
+    if (open) {
+        loadFieldParameters();
+        loadCsvImportsList();
+    }
+}
+
+// ── Parâmetros ────────────────────────────────────────────────────────────────
+
+function loadFieldParameters() {
+    const fd = new FormData();
+    fd.append('action', 'get_field_parameters');
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => renderFieldParams(data.parameters || []))
+        .catch(() => {});
+}
+
+function renderFieldParams(params) {
+    const el = document.getElementById('field-params-list');
+    if (!el) return;
+    if (params.length === 0) {
+        el.innerHTML = '<span style="color:#9ca3af;font-size:13px;">Nenhum parâmetro. Execute a migração 007.</span>';
+        return;
+    }
+    el.innerHTML = params.map(p => {
+        const isUser   = p.scope === 'user';
+        const scopeBadge = isUser
+            ? '<span style="background:#d1fae5;color:#065f46;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;margin-left:4px;">pessoal</span>'
+            : '<span style="background:#dbeafe;color:#1e40af;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;margin-left:4px;">global</span>';
+        const delBtn = isUser
+            ? `<button onclick="deleteFieldParameter(${p.id})"
+                       title="Remover"
+                       style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:13px;padding:0 2px;margin-left:4px;">✕</button>`
+            : '';
+        return `<span style="display:inline-flex;align-items:center;background:#f3f4f6;border-radius:8px;padding:5px 10px;font-size:13px;">
+                    <strong>${escHtml(p.name)}</strong>
+                    ${p.unit ? `<span style="color:#9ca3af;margin-left:4px;font-size:11px;">${escHtml(p.unit)}</span>` : ''}
+                    ${scopeBadge}${delBtn}
+                </span>`;
+    }).join('');
+}
+
+function addFieldParameter() {
+    const name = (document.getElementById('new-param-name').value || '').trim();
+    const unit = (document.getElementById('new-param-unit').value || '').trim();
+    if (!name) { showAlert('⚠️ Introduza o nome do parâmetro.', 'warning'); return; }
+    const fd = new FormData();
+    fd.append('action',     'add_field_parameter');
+    fd.append('param_name', name);
+    fd.append('param_unit', unit);
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showAlert('✅ Parâmetro adicionado.', 'success');
+                document.getElementById('new-param-name').value = '';
+                document.getElementById('new-param-unit').value = '';
+                loadFieldParameters();
+            } else {
+                showAlert('❌ ' + (data.message || 'Erro'), 'error');
+            }
+        })
+        .catch(() => showAlert('❌ Erro de rede.', 'error'));
+}
+
+function deleteFieldParameter(id) {
+    if (!confirm('Remover este parâmetro?')) return;
+    const fd = new FormData();
+    fd.append('action',   'delete_field_parameter');
+    fd.append('param_id', id);
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) { showAlert('🗑️ Parâmetro removido.', 'info'); loadFieldParameters(); }
+            else showAlert('❌ ' + (data.message || 'Erro'), 'error');
+        })
+        .catch(() => showAlert('❌ Erro de rede.', 'error'));
+}
+
+// ── CSV File Handling ─────────────────────────────────────────────────────────
+
+const csvDropZone = document.getElementById('csv-drop-zone');
+if (csvDropZone) {
+    csvDropZone.addEventListener('dragover', e => { e.preventDefault(); csvDropZone.style.borderColor = '#667eea'; csvDropZone.style.background = '#f5f3ff'; });
+    csvDropZone.addEventListener('dragleave', () => { csvDropZone.style.borderColor = '#d1d5db'; csvDropZone.style.background = ''; });
+    csvDropZone.addEventListener('drop', e => {
+        e.preventDefault();
+        csvDropZone.style.borderColor = '#d1d5db';
+        csvDropZone.style.background = '';
+        const file = e.dataTransfer.files[0];
+        if (file && file.name.toLowerCase().endsWith('.csv')) handleCsvFileSelect(file);
+        else showAlert('⚠️ Selecione um ficheiro .csv', 'warning');
+    });
+}
+
+function handleCsvFileSelect(file) {
+    if (!file) return;
+    const statusEl = document.getElementById('csv-import-status');
+    statusEl.innerHTML = '<div style="color:#6b7280;font-size:13px;">A ler ficheiro…</div>';
+    const reader = new FileReader();
+    reader.onload = e => {
+        try {
+            const rows = parseCsv(e.target.result);
+            if (rows.length === 0) { statusEl.innerHTML = '<div style="color:#ef4444;font-size:13px;">❌ Sem linhas válidas no CSV.</div>'; return; }
+            statusEl.innerHTML = `<div style="color:#6b7280;font-size:13px;">📊 ${rows.length} linhas lidas. A importar…</div>`;
+            submitCsvRows(rows, statusEl);
+        } catch (err) {
+            statusEl.innerHTML = `<div style="color:#ef4444;font-size:13px;">❌ Erro: ${escHtml(err.message)}</div>`;
+        }
+    };
+    reader.readAsText(file, 'UTF-8');
+}
+
+function parseCsv(text) {
+    const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    if (lines.length < 2) return [];
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+    const rows = [];
+    for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        const vals = line.split(',');
+        const row  = {};
+        headers.forEach((h, idx) => { row[h] = (vals[idx] || '').trim(); });
+        rows.push(row);
+    }
+    return rows;
+}
+
+function submitCsvRows(rows, statusEl) {
+    const fd = new FormData();
+    fd.append('action', 'import_csv');
+    fd.append('rows',   JSON.stringify(rows));
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                statusEl.innerHTML = `<div style="color:#16a34a;font-size:13px;font-weight:600;">✅ ${data.message}</div>`;
+                showAlert(`✅ ${data.message}`, 'success');
+                showCsvRowsOnMap(rows);
+                loadCsvImportsList();
+            } else {
+                statusEl.innerHTML = `<div style="color:#ef4444;font-size:13px;">❌ ${escHtml(data.message || 'Erro')}</div>`;
+            }
+        })
+        .catch(() => { statusEl.innerHTML = '<div style="color:#ef4444;font-size:13px;">❌ Erro de rede.</div>'; });
+}
+
+// ── Visualização no mapa ──────────────────────────────────────────────────────
+
+const CLASS_COLORS = { '0':'#ef4444','1':'#22c55e','2':'#3b82f6','3':'#f97316','4':'#a855f7' };
+
+function showCsvRowsOnMap(rows) {
+    csvImportMarkers.forEach(m => { if (fieldMap) fieldMap.removeLayer(m); });
+    csvImportMarkers = [];
+    const bounds = [];
+    rows.forEach(row => {
+        const lat = parseFloat(row['latitude'] || row['lat'] || '');
+        const lon = parseFloat(row['longitude'] || row['lon'] || row['lng'] || '');
+        if (isNaN(lat) || isNaN(lon)) return;
+        const cls   = String(row['class'] || row['classe'] || '2');
+        const color = CLASS_COLORS[cls] || '#6b7280';
+        const m = L.circleMarker([lat, lon], { radius:6, color, fillColor:color, fillOpacity:0.85, weight:1.5 });
+        const lines = [`<b>${escHtml(row['place'] || 'Campo')}</b>`, `Classe: ${escHtml(cls)}`];
+        Object.keys(row).forEach(k => {
+            if (['place','latitude','longitude','lat','lon','lng','class','classe'].includes(k)) return;
+            lines.push(`${escHtml(k)}: ${escHtml(row[k])}`);
+        });
+        m.bindPopup(lines.join('<br>'));
+        m.addTo(fieldMap);
+        csvImportMarkers.push(m);
+        bounds.push([lat, lon]);
+    });
+    if (bounds.length > 0) fieldMap.fitBounds(bounds, { padding:[30,30] });
+}
+
+// ── Lista de importações anteriores ──────────────────────────────────────────
+
+function loadCsvImportsList() {
+    const el = document.getElementById('csv-imports-list');
+    if (!el) return;
+    el.innerHTML = '<div style="color:#9ca3af;font-size:13px;">A carregar…</div>';
+    const fd = new FormData();
+    fd.append('action', 'get_csv_imports');
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            const imports = data.imports || [];
+            if (imports.length === 0) {
+                el.innerHTML = '<div style="color:#9ca3af;font-size:13px;">Nenhuma importação ainda.</div>';
+                return;
+            }
+            el.innerHTML = '<table style="width:100%;font-size:13px;border-collapse:collapse;">' +
+                '<thead><tr>' +
+                '<th style="text-align:left;padding:6px 10px;background:#f9fafb;color:#374151;font-size:12px;border-bottom:1px solid #e5e7eb;">ID</th>' +
+                '<th style="text-align:left;padding:6px 10px;background:#f9fafb;color:#374151;font-size:12px;border-bottom:1px solid #e5e7eb;">Data</th>' +
+                '<th style="text-align:left;padding:6px 10px;background:#f9fafb;color:#374151;font-size:12px;border-bottom:1px solid #e5e7eb;">Linhas</th>' +
+                '<th style="padding:6px 10px;background:#f9fafb;border-bottom:1px solid #e5e7eb;"></th>' +
+                '</tr></thead><tbody>' +
+                imports.map(imp => `<tr>
+                    <td style="padding:6px 10px;font-family:monospace;font-size:11px;color:#9ca3af;border-bottom:1px solid #f3f4f6;">${escHtml(imp.import_id.substring(0,8))}…</td>
+                    <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;">${escHtml(imp.imported_at ? imp.imported_at.substring(0,16) : '—')}</td>
+                    <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;font-weight:700;">${escHtml(imp.row_count)}</td>
+                    <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;text-align:right;">
+                        <button class="btn btn-secondary btn-sm" onclick="loadCsvImportOnMap('${escHtml(imp.import_id)}')">🗺️ Ver</button>
+                        <button class="btn btn-secondary btn-sm" onclick="deleteCsvImport('${escHtml(imp.import_id)}')" style="color:#ef4444;">🗑️</button>
+                    </td>
+                </tr>`).join('') +
+                '</tbody></table>';
+        })
+        .catch(() => { el.innerHTML = '<div style="color:#ef4444;font-size:13px;">Erro ao carregar.</div>'; });
+}
+
+function loadCsvImportOnMap(importId) {
+    const fd = new FormData();
+    fd.append('action',    'get_csv_import_data');
+    fd.append('import_id', importId);
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) showCsvRowsOnMap(data.rows.map(r => ({
+                place: r.place, latitude: r.latitude, longitude: r.longitude,
+                class: r.class_value, ...(r.params || {})
+            })));
+            else showAlert('❌ ' + (data.message || 'Erro'), 'error');
+        })
+        .catch(() => showAlert('❌ Erro de rede.', 'error'));
+}
+
+function deleteCsvImport(importId) {
+    if (!confirm('Eliminar esta importação?')) return;
+    const fd = new FormData();
+    fd.append('action',    'delete_csv_import');
+    fd.append('import_id', importId);
+    fetch('?tab=field', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) { showAlert('🗑️ Importação eliminada.', 'info'); loadCsvImportsList(); }
+            else showAlert('❌ ' + (data.message || 'Erro'), 'error');
+        })
+        .catch(() => showAlert('❌ Erro de rede.', 'error'));
+}
