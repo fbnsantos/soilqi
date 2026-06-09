@@ -72,78 +72,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register'])) {
 
 $flashMessage = showFlashMessage();
 
-// ── Renderizador Markdown simples ─────────────────────────────────────────────
-function renderMarkdown(string $text): string {
-    // Escapar HTML antes de processar
-    $t = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
-
-    // Blocos: separar por linha dupla em parágrafos
-    $blocks = preg_split('/\n{2,}/', trim($t));
-    $html   = '';
-
-    foreach ($blocks as $block) {
-        $block = trim($block);
-        if ($block === '') continue;
-
-        // Títulos
-        if (preg_match('/^(#{1,6})\s+(.+)$/', $block, $m)) {
-            $level = strlen($m[1]);
-            $html .= "<h{$level}>" . inline($m[2]) . "</h{$level}>\n";
-            continue;
-        }
-        // Separador
-        if (preg_match('/^[-*_]{3,}$/', $block)) {
-            $html .= "<hr>\n";
-            continue;
-        }
-        // Lista não ordenada
-        if (preg_match('/^[-*+] /m', $block)) {
-            $items = preg_split('/\n/', $block);
-            $html .= "<ul>\n";
-            foreach ($items as $item) {
-                $item = preg_replace('/^[-*+]\s+/', '', $item);
-                $html .= '<li>' . inline($item) . "</li>\n";
-            }
-            $html .= "</ul>\n";
-            continue;
-        }
-        // Lista ordenada
-        if (preg_match('/^\d+\. /m', $block)) {
-            $items = preg_split('/\n/', $block);
-            $html .= "<ol>\n";
-            foreach ($items as $item) {
-                $item = preg_replace('/^\d+\.\s+/', '', $item);
-                $html .= '<li>' . inline($item) . "</li>\n";
-            }
-            $html .= "</ol>\n";
-            continue;
-        }
-        // Citação
-        if (preg_match('/^&gt;/m', $block)) {
-            $inner = preg_replace('/^&gt;\s?/m', '', $block);
-            $html .= '<blockquote>' . inline($inner) . "</blockquote>\n";
-            continue;
-        }
-        // Parágrafo com quebras de linha simples convertidas em <br>
-        $html .= '<p>' . inline(str_replace("\n", '<br>', $block)) . "</p>\n";
-    }
-
-    return $html;
+// ── Renderizador Markdown ─────────────────────────────────────────────────────
+function mdInline(string $s): string {
+    // Extrair links ANTES de htmlspecialchars para não quebrar os URLs
+    $links = [];
+    $s = preg_replace_callback('/\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/u', function($m) use (&$links) {
+        $ph = "\x02LINK" . count($links) . "\x03";
+        $links[$ph] = '<a href="' . htmlspecialchars($m[2], ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener">'
+                    . htmlspecialchars($m[1], ENT_QUOTES, 'UTF-8') . '</a>';
+        return $ph;
+    }, $s);
+    $s = htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
+    $s = preg_replace('/`([^`]+)`/u',       '<code>$1</code>',     $s);
+    $s = preg_replace('/\*\*(.+?)\*\*/us',  '<strong>$1</strong>', $s);
+    $s = preg_replace('/__(.+?)__/us',       '<strong>$1</strong>', $s);
+    $s = preg_replace('/\*([^*\n]+?)\*/u',  '<em>$1</em>',         $s);
+    $s = preg_replace('/(?<![a-zA-Z0-9])_([^_\n]+?)_(?![a-zA-Z0-9])/u', '<em>$1</em>', $s);
+    return $links ? strtr($s, $links) : $s;
 }
 
-function inline(string $t): string {
-    // Código inline
-    $t = preg_replace('/`([^`]+)`/', '<code>$1</code>', $t);
-    // Negrito
-    $t = preg_replace('/\*\*(.+?)\*\*/', '<strong>$1</strong>', $t);
-    $t = preg_replace('/__(.+?)__/',     '<strong>$1</strong>', $t);
-    // Itálico
-    $t = preg_replace('/\*(.+?)\*/', '<em>$1</em>', $t);
-    $t = preg_replace('/_(.+?)_/',   '<em>$1</em>', $t);
-    // Links
-    $t = preg_replace('/\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/',
-        '<a href="$2" target="_blank" rel="noopener">$1</a>', $t);
-    return $t;
+function renderMarkdown(string $text): string {
+    $text = str_replace(["\r\n", "\r"], "\n", $text);
+    $lines = explode("\n", $text);
+    $html = ''; $buf = []; $ulBuf = []; $olBuf = [];
+    $flushBuf = function() use (&$buf, &$html) {
+        if ($buf) { $html .= '<p>' . implode('<br>', array_map('mdInline', $buf)) . "</p>\n"; $buf = []; }
+    };
+    $flushUl = function() use (&$ulBuf, &$html) {
+        if ($ulBuf) { $html .= '<ul>' . implode('', array_map(fn($i) => '<li>' . mdInline($i) . '</li>', $ulBuf)) . "</ul>\n"; $ulBuf = []; }
+    };
+    $flushOl = function() use (&$olBuf, &$html) {
+        if ($olBuf) { $html .= '<ol>' . implode('', array_map(fn($i) => '<li>' . mdInline($i) . '</li>', $olBuf)) . "</ol>\n"; $olBuf = []; }
+    };
+    foreach ($lines as $raw) {
+        $line = rtrim($raw);
+        if (preg_match('/^(#{1,6})\s+(.+)$/u', $line, $m)) {
+            $flushBuf(); $flushUl(); $flushOl();
+            $lv = strlen($m[1]);
+            $html .= "<h{$lv}>" . mdInline($m[2]) . "</h{$lv}>\n";
+            continue;
+        }
+        if (preg_match('/^\s*[-*_]{3,}\s*$/', $line)) {
+            $flushBuf(); $flushUl(); $flushOl();
+            $html .= "<hr>\n"; continue;
+        }
+        if (preg_match('/^>\s?(.*)$/u', $line, $m)) {
+            $flushBuf(); $flushUl(); $flushOl();
+            $html .= '<blockquote>' . mdInline($m[1]) . "</blockquote>\n"; continue;
+        }
+        if (preg_match('/^[-*+]\s+(.+)$/u', $line, $m)) {
+            $flushBuf(); $flushOl(); $ulBuf[] = $m[1]; continue;
+        }
+        if (preg_match('/^\d+\.\s+(.+)$/u', $line, $m)) {
+            $flushBuf(); $flushUl(); $olBuf[] = $m[1]; continue;
+        }
+        if (trim($line) === '') { $flushBuf(); $flushUl(); $flushOl(); continue; }
+        $flushUl(); $flushOl();
+        $buf[] = $line;
+    }
+    $flushBuf(); $flushUl(); $flushOl();
+    return $html;
 }
 
 // ── Conteúdo da Landing Page ──────────────────────────────────────────────────
@@ -185,7 +173,7 @@ $otherLangLabel = $browserLang === 'pt' ? '🇬🇧 English' : '🇵🇹 Portugu
         .landing-wrap {
             min-height: 100vh;
             display: grid;
-            grid-template-columns: 1fr 420px;
+            grid-template-columns: 420px 1fr;
             grid-template-rows: auto 1fr auto;
         }
 
@@ -213,7 +201,7 @@ $otherLangLabel = $browserLang === 'pt' ? '🇬🇧 English' : '🇵🇹 Portugu
             padding: 48px 48px 32px 48px;
             overflow-y: auto;
             background: #fff;
-            border-right: 1px solid #e5e7eb;
+            border-left: 1px solid #e5e7eb;
         }
 
         .landing-title {
@@ -296,6 +284,7 @@ $otherLangLabel = $browserLang === 'pt' ? '🇬🇧 English' : '🇵🇹 Portugu
             justify-content: center;
             min-height: 0;
             overflow-y: auto;
+            border-right: 1px solid #e5e7eb;
         }
 
         /* Footer */
@@ -328,8 +317,8 @@ $otherLangLabel = $browserLang === 'pt' ? '🇬🇧 English' : '🇵🇹 Portugu
                 grid-template-columns: 1fr;
                 grid-template-rows: auto auto auto auto;
             }
-            .landing-content { padding: 28px 20px; border-right: none; border-bottom: 1px solid #e5e7eb; }
-            .landing-login   { padding: 28px 20px; }
+            .landing-login   { padding: 28px 20px; border-right: none; border-bottom: 1px solid #e5e7eb; }
+            .landing-content { padding: 28px 20px; }
             .landing-topbar  { padding: 12px 20px; }
         }
     </style>
@@ -345,32 +334,6 @@ $otherLangLabel = $browserLang === 'pt' ? '🇬🇧 English' : '🇵🇹 Portugu
             <span>Agricultura de Precisão · Universidade do Porto</span>
         </div>
         <a href="?lang=<?= $otherLang ?>" class="lang-switcher"><?= $otherLangLabel ?></a>
-    </div>
-
-    <!-- Conteúdo introdutório -->
-    <div class="landing-content">
-        <h1 class="landing-title"><?= htmlspecialchars($lc['title'] ?: SITE_NAME) ?></h1>
-        <?php if (!empty($lc['subtitle'])): ?>
-            <p class="landing-subtitle"><?= htmlspecialchars($lc['subtitle']) ?></p>
-        <?php endif; ?>
-        <?php if (!empty($lc['body'])): ?>
-            <div class="landing-body"><?= renderMarkdown($lc['body']) ?></div>
-        <?php endif; ?>
-
-        <?php if (!empty($videos)): ?>
-        <div class="videos-grid">
-            <?php foreach ($videos as $v): ?>
-            <div class="video-card">
-                <iframe src="https://www.youtube-nocookie.com/embed/<?= htmlspecialchars($v['youtube_id']) ?>?rel=0"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                        allowfullscreen loading="lazy"></iframe>
-                <?php if (!empty($v['title'])): ?>
-                <div class="video-title"><?= htmlspecialchars($v['title']) ?></div>
-                <?php endif; ?>
-            </div>
-            <?php endforeach; ?>
-        </div>
-        <?php endif; ?>
     </div>
 
     <!-- Formulário de login/registo -->
@@ -439,6 +402,32 @@ $otherLangLabel = $browserLang === 'pt' ? '🇬🇧 English' : '🇵🇹 Portugu
                 </form>
             </div>
         </div>
+    </div>
+
+    <!-- Conteúdo introdutório -->
+    <div class="landing-content">
+        <h1 class="landing-title"><?= htmlspecialchars($lc['title'] ?: SITE_NAME) ?></h1>
+        <?php if (!empty($lc['subtitle'])): ?>
+            <p class="landing-subtitle"><?= htmlspecialchars($lc['subtitle']) ?></p>
+        <?php endif; ?>
+        <?php if (!empty($lc['body'])): ?>
+            <div class="landing-body"><?= renderMarkdown($lc['body']) ?></div>
+        <?php endif; ?>
+
+        <?php if (!empty($videos)): ?>
+        <div class="videos-grid">
+            <?php foreach ($videos as $v): ?>
+            <div class="video-card">
+                <iframe src="https://www.youtube-nocookie.com/embed/<?= htmlspecialchars($v['youtube_id']) ?>?rel=0"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowfullscreen loading="lazy"></iframe>
+                <?php if (!empty($v['title'])): ?>
+                <div class="video-title"><?= htmlspecialchars($v['title']) ?></div>
+                <?php endif; ?>
+            </div>
+            <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
     </div>
 
     <!-- Footer -->
