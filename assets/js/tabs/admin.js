@@ -523,14 +523,12 @@ document.addEventListener('DOMContentLoaded', function() {
     if (activeTab === 'admin') {
         loadUsers();
         loadMigrations();
-        
+        loadAdminParams();
+        loadLandingEditor();
+
         // Atalhos de teclado para o SQL editor
         const sqlQuery = document.getElementById('sql-query');
         if (sqlQuery) {
-            // Carregar secções ao iniciar
-            loadAdminParams();
-            loadLandingEditor();
-
             sqlQuery.addEventListener('keydown', function(e) {
                 // Ctrl + Enter ou Cmd + Enter para executar
                 if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
