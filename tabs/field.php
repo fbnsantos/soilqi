@@ -8,6 +8,39 @@ if (!isset($isLoggedIn)) $isLoggedIn = false;
 if (!isset($isAdmin))    $isAdmin    = false;
 if (!isset($currentUser)) $currentUser = null;
 
+// ── RTKLIB .pos → GeoJSON ────────────────────────────────────────────────────
+function pos_to_geojson_fld(string $posText): array {
+    $qLabels = [1=>'fix',2=>'float',3=>'sbas',4=>'dgps',5=>'single',6=>'ppp'];
+    $features = [];
+    foreach (preg_split('/\r?\n/', $posText) as $line) {
+        $line = trim($line);
+        if ($line === '' || $line[0] === '%') continue;
+        // date time lat lon height Q ns sdn sde sdu sdne sdeu sdun age ratio
+        $parts = preg_split('/\s+/', $line);
+        if (count($parts) < 7) continue;
+        $lat = isset($parts[2]) ? (float)$parts[2] : null;
+        $lon = isset($parts[3]) ? (float)$parts[3] : null;
+        if ($lat === null || $lon === null || ($lat == 0 && $lon == 0)) continue;
+        $q  = isset($parts[5]) ? (int)$parts[5] : 0;
+        $features[] = [
+            'type'     => 'Feature',
+            'geometry' => ['type' => 'Point', 'coordinates' => [$lon, $lat, isset($parts[4]) ? (float)$parts[4] : 0]],
+            'properties' => [
+                'time'   => ($parts[0] ?? '') . ' ' . ($parts[1] ?? ''),
+                'Q'      => $q,
+                'status' => $qLabels[$q] ?? 'unknown',
+                'ns'     => isset($parts[6]) ? (int)$parts[6] : null,
+                'height' => isset($parts[4]) ? (float)$parts[4] : null,
+                'sdn'    => isset($parts[7])  ? (float)$parts[7]  : null,
+                'sde'    => isset($parts[8])  ? (float)$parts[8]  : null,
+                'sdu'    => isset($parts[9])  ? (float)$parts[9]  : null,
+                'ratio'  => isset($parts[14]) ? (float)$parts[14] : null,
+            ],
+        ];
+    }
+    return ['type' => 'FeatureCollection', 'features' => $features];
+}
+
 // ── KML → GeoJSON helpers ─────────────────────────────────────────────────────
 function kml_parse_coords_fld(?DOMNode $node): ?array {
     if (!$node) return null;
@@ -601,6 +634,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 $response['success'] = true;
                 $response['id']      = (int)$pdo->lastInsertId();
                 $response['message'] = "KMZ/KML \"{$name}\" convertido e guardado ({$fcount} feature(s)).";
+                break;
+
+            case 'save_pos':
+                $name       = trim(sanitizeInput($_POST['name'] ?? ''));
+                $descr      = trim(sanitizeInput($_POST['description'] ?? ''));
+                $terrain_id = !empty($_POST['terrain_id']) ? intval($_POST['terrain_id']) : null;
+
+                if (!$name) { $response['message'] = 'Nome obrigatório.'; break; }
+
+                $file = $_FILES['pos_file'] ?? null;
+                if (!$file || $file['error'] !== UPLOAD_ERR_OK) {
+                    $response['message'] = 'Erro no upload do ficheiro (código: ' . ($file['error'] ?? '?') . ').';
+                    break;
+                }
+
+                $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+                if ($ext !== 'pos') {
+                    $response['message'] = 'Formato não suportado. Use .pos (RTKLIB).'; break;
+                }
+
+                $posText  = file_get_contents($file['tmp_name']);
+                $parsed   = pos_to_geojson_fld($posText);
+                $features = $parsed['features'] ?? [];
+                $fcount   = count($features);
+
+                if ($fcount === 0) {
+                    $response['message'] = 'Nenhum ponto válido encontrado no ficheiro .pos.'; break;
+                }
+
+                $geojson = json_encode($parsed, JSON_UNESCAPED_UNICODE);
+
+                $minLat = $maxLat = $minLng = $maxLng = null;
+                foreach ($features as $f) {
+                    $coords = $f['geometry']['coordinates'] ?? null;
+                    if (!$coords) continue;
+                    $lng = (float)$coords[0]; $lat = (float)$coords[1];
+                    if ($minLat === null || $lat < $minLat) $minLat = $lat;
+                    if ($maxLat === null || $lat > $maxLat) $maxLat = $lat;
+                    if ($minLng === null || $lng < $minLng) $minLng = $lng;
+                    if ($maxLng === null || $lng > $maxLng) $maxLng = $lng;
+                }
+
+                $stmt = $pdo->prepare("
+                    INSERT INTO field_geojson
+                        (user_id, terrain_id, name, description, geojson_data,
+                         feature_count, bbox_min_lat, bbox_max_lat, bbox_min_lng, bbox_max_lng)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ");
+                $stmt->execute([
+                    $currentUser['id'], $terrain_id, $name, $descr ?: null, $geojson,
+                    $fcount, $minLat, $maxLat, $minLng, $maxLng
+                ]);
+                $response['success'] = true;
+                $response['id']      = (int)$pdo->lastInsertId();
+                $response['message'] = "GNSS .pos \"{$name}\" importado ({$fcount} pontos).";
                 break;
 
             case 'get_geojson_layers':
@@ -1756,9 +1844,9 @@ try {
     </div>
     <div id="geojson-panel" style="display:none; margin-top:16px;">
         <p style="color:#6b7280; font-size:13px; margin-bottom:14px;">
-            Importe ficheiros <strong>.geojson</strong>, <strong>.json</strong>, <strong>.kmz</strong>
-            ou <strong>.kml</strong> para guardar camadas vectoriais (polígonos, linhas, pontos)
-            na base de dados e visualizá-las sobrepostas ao mapa.
+            Importe ficheiros <strong>.geojson</strong>, <strong>.json</strong>, <strong>.kmz</strong>,
+            <strong>.kml</strong> ou <strong>.pos</strong> (RTKLIB/GNSS) para guardar camadas vectoriais
+            (polígonos, linhas, pontos, trajectórias GNSS) na base de dados e visualizá-las sobrepostas ao mapa.
         </p>
 
         <!-- Formulário de importação -->
@@ -1791,7 +1879,7 @@ try {
                     display:flex; align-items:center; gap:10px; cursor:pointer;
                     padding:12px 14px; border:2px dashed #cbd5e1; border-radius:10px;
                     background:#fff; transition:border-color .2s; font-size:13px; color:#64748b;">
-                    📁 Clique para selecionar .geojson / .json / .kmz / .kml
+                    📁 Clique para selecionar .geojson / .json / .kmz / .kml / .pos
                     <input id="gj-file" type="file"
                            accept="*/*"
                            style="display:none" onchange="onGeoJSONFileSelected(this)">

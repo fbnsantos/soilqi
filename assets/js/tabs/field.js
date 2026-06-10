@@ -40,6 +40,8 @@ let geojsonOverlayLayers = {};
 let pendingGeoJSON  = null;
 // Raw File object pending save (for .kmz/.kml — sent to server for conversion)
 let pendingKmzFile  = null;
+// Raw File object pending save (for .pos RTKLIB GNSS — sent to server for conversion)
+let pendingPosFile  = null;
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function () {
@@ -1307,6 +1309,7 @@ function onGeoJSONFileSelected(input) {
     const saveBtn = document.getElementById('gj-save-btn');
     pendingGeoJSON = null;
     pendingKmzFile = null;
+    pendingPosFile = null;
     saveBtn.disabled = true;
 
     if (file.size > 20 * 1024 * 1024) {
@@ -1318,8 +1321,8 @@ function onGeoJSONFileSelected(input) {
     const ext = file.name.split('.').pop().toLowerCase();
     const kb  = (file.size / 1024).toFixed(0);
 
-    if (!['kmz','kml','geojson','json'].includes(ext)) {
-        info.textContent = `⚠️ Formato não suportado (.${ext}). Use .geojson, .json, .kmz ou .kml.`;
+    if (!['kmz','kml','geojson','json','pos'].includes(ext)) {
+        info.textContent = `⚠️ Formato não suportado (.${ext}). Use .geojson, .json, .kmz, .kml ou .pos.`;
         info.style.color = '#dc2626';
         return;
     }
@@ -1331,6 +1334,17 @@ function onGeoJSONFileSelected(input) {
         info.style.color = '#16a34a';
         const nameEl = document.getElementById('gj-name');
         if (!nameEl.value) nameEl.value = file.name.replace(/\.(kmz|kml)$/i, '');
+        saveBtn.disabled = false;
+        return;
+    }
+
+    // ── RTKLIB .pos: guardar File object — parsing feito no servidor ──────────
+    if (ext === 'pos') {
+        pendingPosFile = file;
+        info.textContent = `✓ ${file.name}  •  ${kb} KB  •  trajectória GNSS (RTKLIB)`;
+        info.style.color = '#16a34a';
+        const nameEl = document.getElementById('gj-name');
+        if (!nameEl.value) nameEl.value = file.name.replace(/\.pos$/i, '');
         saveBtn.disabled = false;
         return;
     }
@@ -1364,11 +1378,12 @@ function onGeoJSONFileSelected(input) {
 
 // Guardar GeoJSON na BD
 const _GJ_FILE_ACCEPT = '*/*';
-const _GJ_FILE_LABEL  = '📁 Clique para selecionar .geojson / .json / .kmz / .kml';
+const _GJ_FILE_LABEL  = '📁 Clique para selecionar .geojson / .json / .kmz / .kml / .pos';
 
 function _gjReset(status, btn) {
     pendingGeoJSON = null;
     pendingKmzFile = null;
+    pendingPosFile = null;
     ['gj-name','gj-description'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     const terr = document.getElementById('gj-terrain'); if (terr) terr.value = '';
     try { document.getElementById('gj-file').value = ''; } catch {}
@@ -1381,7 +1396,7 @@ function _gjReset(status, btn) {
 }
 
 function saveGeoJSON() {
-    if (!pendingGeoJSON && !pendingKmzFile) return;
+    if (!pendingGeoJSON && !pendingKmzFile && !pendingPosFile) return;
 
     const name   = (document.getElementById('gj-name')?.value || '').trim();
     const descr  = (document.getElementById('gj-description')?.value || '').trim();
@@ -1403,6 +1418,11 @@ function saveGeoJSON() {
         fd.append('action',    'save_kmz');
         fd.append('kmz_file',  pendingKmzFile, pendingKmzFile.name);
         status.textContent = '⏳ A converter e guardar…';
+    } else if (pendingPosFile) {
+        // RTKLIB .pos: enviar ficheiro raw — servidor faz parsing e converte para GeoJSON
+        fd.append('action',   'save_pos');
+        fd.append('pos_file', pendingPosFile, pendingPosFile.name);
+        status.textContent = '⏳ A importar trajectória GNSS…';
     } else {
         // GeoJSON/JSON: enviar texto já validado
         fd.append('action',       'save_geojson');
@@ -1556,9 +1576,11 @@ function toggleGeoJSONOnFieldMap(id) {
             const layer = L.geoJSON(gjData, {
                 style: { color: color, weight: 2, opacity: 0.9, fillOpacity: 0.25, fillColor: color },
                 pointToLayer: function(feature, latlng) {
+                    const q = feature.properties && feature.properties.Q;
+                    const fc = q === 1 ? '#16a34a' : q === 2 ? '#ea580c' : q ? '#6b7280' : color;
                     return L.circleMarker(latlng, {
-                        radius: 6, fillColor: color, color: '#fff',
-                        weight: 1.5, opacity: 1, fillOpacity: 0.85
+                        radius: 5, fillColor: fc, color: '#fff',
+                        weight: 1.5, opacity: 1, fillOpacity: 0.9
                     });
                 },
                 onEachFeature: function(feature, lyr) {
