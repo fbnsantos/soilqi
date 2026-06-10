@@ -1288,6 +1288,233 @@ function submitQuickMeasurement() {
         });
 }
 
+// ── GNSS .pos Import & Layers ────────────────────────────────────────────────
+
+let _pendingPosFileDedicated = null;
+
+function togglePosPanel() {
+    const panel = document.getElementById('pos-panel');
+    const btn   = document.getElementById('pos-toggle-btn');
+    if (!panel) return;
+    const open = panel.style.display === 'none';
+    panel.style.display = open ? 'block' : 'none';
+    btn.textContent = open ? '▲ Recolher' : '▼ Expandir';
+    if (open) loadPosLayers();
+}
+
+function onPosFileSelected(input) {
+    const file = input.files[0];
+    if (!file) return;
+    const info    = document.getElementById('pos-file-info');
+    const saveBtn = document.getElementById('pos-save-btn');
+    _pendingPosFileDedicated = null;
+    saveBtn.disabled = true;
+
+    if (file.size > 20 * 1024 * 1024) {
+        info.textContent = '⚠️ Ficheiro demasiado grande (máx. 20 MB).';
+        info.style.color = '#dc2626';
+        return;
+    }
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (ext !== 'pos') {
+        info.textContent = '⚠️ Formato não suportado. Use ficheiros .pos (RTKLIB).';
+        info.style.color = '#dc2626';
+        return;
+    }
+    _pendingPosFileDedicated = file;
+    const kb = (file.size / 1024).toFixed(0);
+    info.textContent = `✓ ${file.name}  •  ${kb} KB`;
+    info.style.color = '#16a34a';
+    const nameEl = document.getElementById('pos-name');
+    if (!nameEl.value) nameEl.value = file.name.replace(/\.pos$/i, '');
+    saveBtn.disabled = false;
+}
+
+function savePosLayer() {
+    if (!_pendingPosFileDedicated) return;
+    const name   = (document.getElementById('pos-name')?.value || '').trim();
+    const terrId = document.getElementById('pos-terrain')?.value || '';
+    const status = document.getElementById('pos-save-status');
+    const btn    = document.getElementById('pos-save-btn');
+
+    if (!name) { status.textContent = '⚠️ Preencha o nome da camada.'; status.style.color = '#dc2626'; return; }
+
+    btn.disabled = true;
+    status.textContent = '⏳ A importar trajectória GNSS…';
+    status.style.color = '#6b7280';
+
+    const fd = new FormData();
+    fd.append('action',     'save_pos');
+    fd.append('name',       name);
+    fd.append('terrain_id', terrId);
+    fd.append('pos_file',   _pendingPosFileDedicated, _pendingPosFileDedicated.name);
+
+    fetch('', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                const fix   = data.q_fix   ?? '?';
+                const float = data.q_float ?? '?';
+                status.innerHTML = `✓ Importado — <span style="color:#16a34a">●${fix} fix</span> <span style="color:#ea580c">●${float} float</span>`;
+                status.style.color = '#374151';
+                _pendingPosFileDedicated = null;
+                document.getElementById('pos-name').value = '';
+                document.getElementById('pos-terrain').value = '';
+                try { document.getElementById('pos-file').value = ''; } catch {}
+                document.getElementById('pos-file-info').textContent = '';
+                btn.disabled = true;
+                loadPosLayers();
+            } else {
+                status.textContent = '⚠️ ' + (data.message || 'Erro ao guardar.');
+                status.style.color = '#dc2626';
+                btn.disabled = false;
+            }
+        })
+        .catch(() => {
+            status.textContent = '⚠️ Erro de rede.';
+            status.style.color = '#dc2626';
+            btn.disabled = false;
+        });
+}
+
+function loadPosLayers() {
+    const list = document.getElementById('pos-layers-list');
+    if (!list) return;
+    list.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af;">A carregar…</div>';
+    const fd = new FormData();
+    fd.append('action', 'get_pos_layers');
+    fetch('', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => renderPosLayersList(data.layers || []))
+        .catch(() => { list.innerHTML = '<div style="color:#dc2626;padding:12px;">Erro de rede.</div>'; });
+}
+
+function renderPosLayersList(layers) {
+    const list = document.getElementById('pos-layers-list');
+    if (!layers.length) {
+        list.innerHTML = '<div style="text-align:center;padding:30px;color:#9ca3af;font-size:13px;">Nenhuma trajectória importada.</div>';
+        return;
+    }
+    list.innerHTML = `<table class="data-table" style="width:100%;font-size:13px;">
+        <thead><tr>
+            <th>Nome</th><th>Terreno</th><th>Pontos</th><th>Data</th><th>Acções</th>
+        </tr></thead>
+        <tbody>${layers.map(l => {
+            const onMap = !!geojsonOverlayLayers['pos_' + l.id];
+            return `<tr>
+                <td><strong>${escHtml(l.name)}</strong></td>
+                <td style="color:#6b7280">${escHtml(l.terrain_name || '—')}</td>
+                <td style="font-family:monospace">${l.feature_count ?? '?'}</td>
+                <td style="color:#9ca3af;white-space:nowrap">${(l.created_at || '').slice(0,10)}</td>
+                <td style="white-space:nowrap">
+                    <button class="btn btn-secondary btn-sm"
+                            id="pos-map-btn-${l.id}"
+                            data-id="${l.id}"
+                            onclick="togglePosOnFieldMap(this.dataset.id)"
+                            style="margin-right:4px;">
+                        ${onMap ? '🗺️ Visível' : '👁️ Mostrar'}
+                    </button>
+                    <button class="btn btn-danger btn-sm"
+                            data-id="${l.id}"
+                            data-name="${escHtml(l.name)}"
+                            onclick="deletePosLayer(this.dataset.id, this.dataset.name)">🗑️</button>
+                </td>
+            </tr>`;
+        }).join('')}</tbody>
+    </table>`;
+}
+
+function togglePosOnFieldMap(id) {
+    const mapKey = 'pos_' + id;
+    if (geojsonOverlayLayers[mapKey]) {
+        fieldMap.removeLayer(geojsonOverlayLayers[mapKey]);
+        if (fieldLayersControl) fieldLayersControl.removeLayer(geojsonOverlayLayers[mapKey]);
+        delete geojsonOverlayLayers[mapKey];
+        const btn = document.getElementById('pos-map-btn-' + id);
+        if (btn) { btn.textContent = '👁️ Mostrar'; btn.className = 'btn btn-sm btn-secondary'; }
+        return;
+    }
+
+    const btn = document.getElementById('pos-map-btn-' + id);
+    if (btn) btn.textContent = '⏳…';
+
+    const fd = new FormData();
+    fd.append('action', 'get_geojson_data');
+    fd.append('id', id);
+
+    fetch('', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success || !data.geojson) {
+                showAlert('Erro ao carregar trajectória: ' + (data.message || '?'), 'error');
+                if (btn) { btn.textContent = '👁️ Mostrar'; btn.className = 'btn btn-sm btn-secondary'; }
+                return;
+            }
+            let gjData;
+            try { gjData = JSON.parse(data.geojson); } catch(e) {
+                showAlert('Dados corrompidos na base de dados.', 'error');
+                if (btn) { btn.textContent = '👁️ Mostrar'; btn.className = 'btn btn-sm btn-secondary'; }
+                return;
+            }
+
+            const layer = L.geoJSON(gjData, {
+                pointToLayer: function(feature, latlng) {
+                    const q  = feature.properties && feature.properties.Q;
+                    const fc = q === 1 ? '#16a34a' : q === 2 ? '#ea580c' : '#6b7280';
+                    return L.circleMarker(latlng, {
+                        radius: 5, fillColor: fc, color: '#fff',
+                        weight: 1.5, opacity: 1, fillOpacity: 0.9
+                    });
+                },
+                onEachFeature: function(feature, lyr) {
+                    const p = feature.properties || {};
+                    const qLabel = {1:'fix',2:'float',3:'sbas',4:'dgps',5:'single',6:'ppp'}[p.Q] || '?';
+                    lyr.bindPopup(`
+                        <div style="font-size:12px;min-width:160px;">
+                            <div style="font-weight:700;margin-bottom:6px;">📡 ${escHtml(p.time||'')}</div>
+                            <table style="border-collapse:collapse;width:100%;">
+                                <tr><td style="color:#6b7280;padding-right:8px;">Status</td><td><strong>${escHtml(qLabel)}</strong> (Q=${p.Q??'?'})</td></tr>
+                                <tr><td style="color:#6b7280;padding-right:8px;">Satélites</td><td><strong>${p.ns??'?'}</strong></td></tr>
+                                <tr><td style="color:#6b7280;padding-right:8px;">Altitude</td><td><strong>${p.height!=null?p.height.toFixed(3)+' m':'?'}</strong></td></tr>
+                                <tr><td style="color:#6b7280;padding-right:8px;">σN / σE</td><td><strong>${p.sdn!=null?p.sdn.toFixed(4):''} / ${p.sde!=null?p.sde.toFixed(4):''} m</strong></td></tr>
+                                ${p.ratio!=null?`<tr><td style="color:#6b7280;padding-right:8px;">Ratio</td><td><strong>${p.ratio.toFixed(1)}</strong></td></tr>`:''}
+                            </table>
+                        </div>
+                    `);
+                }
+            });
+
+            layer.addTo(fieldMap);
+            if (fieldLayersControl) fieldLayersControl.addOverlay(layer, '📡 ' + (data.name || 'GNSS'));
+            geojsonOverlayLayers[mapKey] = layer;
+
+            if (btn) { btn.textContent = '🗺️ Visível'; btn.className = 'btn btn-sm btn-primary'; }
+
+            if (data.bbox_min_lat != null) {
+                fieldMap.fitBounds([[data.bbox_min_lat, data.bbox_min_lng],[data.bbox_max_lat, data.bbox_max_lng]], { padding: [30,30] });
+            }
+        })
+        .catch(() => { showAlert('Erro de rede ao carregar trajectória.', 'error'); if (btn) { btn.textContent = '👁️ Mostrar'; btn.className = 'btn btn-sm btn-secondary'; } });
+}
+
+function deletePosLayer(id, name) {
+    if (!confirm(`Eliminar trajectória "${name}"?`)) return;
+    const fd = new FormData();
+    fd.append('action', 'delete_geojson');
+    fd.append('id', id);
+    fetch('', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                const mapKey = 'pos_' + id;
+                if (geojsonOverlayLayers[mapKey]) { fieldMap.removeLayer(geojsonOverlayLayers[mapKey]); delete geojsonOverlayLayers[mapKey]; }
+                loadPosLayers();
+            } else {
+                showAlert('Erro: ' + (data.message || '?'), 'error');
+            }
+        });
+}
+
 // ── GeoJSON Import & Layers ───────────────────────────────────────────────────
 
 function toggleGeoJSONPanel() {

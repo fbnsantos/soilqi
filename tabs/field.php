@@ -654,6 +654,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                     $response['message'] = 'Formato não suportado. Use .pos (RTKLIB).'; break;
                 }
 
+                // Auto-migração: coluna source_type para distinguir .pos das camadas genéricas
+                try { $pdo->exec("ALTER TABLE field_geojson ADD COLUMN source_type VARCHAR(20) NOT NULL DEFAULT 'geojson'"); }
+                catch (PDOException $ignored) { /* já existe */ }
+
                 $posText  = file_get_contents($file['tmp_name']);
                 $parsed   = pos_to_geojson_fld($posText);
                 $features = $parsed['features'] ?? [];
@@ -661,6 +665,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
 
                 if ($fcount === 0) {
                     $response['message'] = 'Nenhum ponto válido encontrado no ficheiro .pos.'; break;
+                }
+
+                // Estatísticas de qualidade para feedback
+                $qCounts = [1=>0, 2=>0, 'other'=>0];
+                foreach ($features as $f) {
+                    $q = $f['properties']['Q'] ?? 0;
+                    if ($q === 1) $qCounts[1]++;
+                    elseif ($q === 2) $qCounts[2]++;
+                    else $qCounts['other']++;
                 }
 
                 $geojson = json_encode($parsed, JSON_UNESCAPED_UNICODE);
@@ -679,16 +692,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 $stmt = $pdo->prepare("
                     INSERT INTO field_geojson
                         (user_id, terrain_id, name, description, geojson_data,
-                         feature_count, bbox_min_lat, bbox_max_lat, bbox_min_lng, bbox_max_lng)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         feature_count, bbox_min_lat, bbox_max_lat, bbox_min_lng, bbox_max_lng,
+                         source_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pos')
                 ");
                 $stmt->execute([
                     $currentUser['id'], $terrain_id, $name, $descr ?: null, $geojson,
                     $fcount, $minLat, $maxLat, $minLng, $maxLng
                 ]);
-                $response['success'] = true;
-                $response['id']      = (int)$pdo->lastInsertId();
-                $response['message'] = "GNSS .pos \"{$name}\" importado ({$fcount} pontos).";
+                $response['success']  = true;
+                $response['id']       = (int)$pdo->lastInsertId();
+                $response['q_fix']    = $qCounts[1];
+                $response['q_float']  = $qCounts[2];
+                $response['q_other']  = $qCounts['other'];
+                $response['message']  = "GNSS .pos \"{$name}\" importado — {$fcount} pontos (fix:{$qCounts[1]} float:{$qCounts[2]}).";
+                break;
+
+            case 'get_pos_layers':
+                $where  = [];
+                $params = [];
+                if (!$isAdmin) {
+                    $where[]  = 'g.user_id = ?';
+                    $params[] = $currentUser['id'];
+                }
+                $where[]  = "COALESCE(g.source_type,'geojson') = 'pos'";
+                $wc   = 'WHERE ' . implode(' AND ', $where);
+                try {
+                    $stmt = $pdo->prepare("
+                        SELECT g.id, g.name, g.description, g.feature_count,
+                               g.bbox_min_lat, g.bbox_max_lat, g.bbox_min_lng, g.bbox_max_lng,
+                               g.created_at, t.name AS terrain_name, u.username
+                        FROM field_geojson g
+                        LEFT JOIN terrains t ON t.id = g.terrain_id
+                        LEFT JOIN users    u ON u.id = g.user_id
+                        $wc
+                        ORDER BY g.created_at DESC
+                    ");
+                    $stmt->execute($params);
+                    $response['success'] = true;
+                    $response['layers']  = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                } catch (PDOException $e2) {
+                    $response['success'] = true;
+                    $response['layers']  = [];
+                }
                 break;
 
             case 'get_geojson_layers':
@@ -2082,6 +2128,68 @@ try {
             <div style="text-align:center; padding:20px; color:#9ca3af; font-size:13px;">
                 Expanda para ver os rasters disponíveis.
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Importação GNSS .pos (RTKLIB) -->
+<div class="section interp-section">
+    <div class="section-title" style="cursor:pointer; user-select:none;" onclick="togglePosPanel()">
+        <h3>📡 GNSS / Trajectória .pos</h3>
+        <span id="pos-toggle-btn" class="btn btn-secondary btn-sm">▼ Expandir</span>
+    </div>
+    <div id="pos-panel" style="display:none; margin-top:16px;">
+        <p style="color:#6b7280; font-size:13px; margin-bottom:14px;">
+            Importe ficheiros <strong>.pos</strong> gerados pelo <strong>RTKLIB</strong> (RTKPost / RTKConv).
+            Cada observação é guardada como um ponto vectorial associado ao terreno.
+            No mapa, a cor representa a qualidade: <span style="color:#16a34a;font-weight:700;">● fix</span>,
+            <span style="color:#ea580c;font-weight:700;">● float</span>,
+            <span style="color:#6b7280;font-weight:700;">● outros</span>.
+        </p>
+
+        <!-- Formulário de importação -->
+        <div style="background:#f8fafc; border:1.5px dashed #94a3b8; border-radius:12px; padding:16px; margin-bottom:16px;">
+            <div style="font-size:12px; font-weight:700; color:#374151; text-transform:uppercase;
+                        letter-spacing:.5px; margin-bottom:12px;">📂 Importar ficheiro .pos</div>
+            <div class="field-filters" style="flex-wrap:wrap; gap:10px;">
+                <div class="filter-group" style="flex:1; min-width:180px;">
+                    <label>Nome da camada *</label>
+                    <input id="pos-name" type="text" placeholder="Ex: Levantamento GNSS 2026-05-28"
+                           style="width:100%;">
+                </div>
+                <div class="filter-group" style="flex:1; min-width:140px;">
+                    <label>Terreno (opcional)</label>
+                    <select id="pos-terrain" style="width:100%;">
+                        <option value="">— Nenhum —</option>
+                        <?php foreach ($filterTerrains as $t): ?>
+                            <option value="<?php echo $t['id']; ?>"><?php echo htmlspecialchars($t['name']); if (!empty($t['shared_by'])) echo ' 🤝 ' . htmlspecialchars($t['shared_by']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+            <div style="margin-top:10px;">
+                <label id="pos-file-label" style="
+                    display:flex; align-items:center; gap:10px; cursor:pointer;
+                    padding:12px 14px; border:2px dashed #cbd5e1; border-radius:10px;
+                    background:#fff; transition:border-color .2s; font-size:13px; color:#64748b;">
+                    📡 Clique para selecionar ficheiro .pos (RTKLIB)
+                    <input id="pos-file" type="file" accept=".pos"
+                           style="display:none" onchange="onPosFileSelected(this)">
+                </label>
+                <div id="pos-file-info" style="font-size:12px; color:#6b7280; margin-top:6px; min-height:16px;"></div>
+            </div>
+            <div style="margin-top:12px; display:flex; gap:8px; align-items:center;">
+                <button class="btn btn-primary btn-sm" onclick="savePosLayer()" id="pos-save-btn" disabled
+                        style="padding:8px 18px;">
+                    💾 Guardar na BD
+                </button>
+                <span id="pos-save-status" style="font-size:12px; color:#6b7280;"></span>
+            </div>
+        </div>
+
+        <!-- Lista de importações .pos -->
+        <div id="pos-layers-list">
+            <div style="text-align:center; padding:20px; color:#9ca3af;">A carregar…</div>
         </div>
     </div>
 </div>
