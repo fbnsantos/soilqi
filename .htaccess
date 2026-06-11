@@ -9,7 +9,7 @@ Options -Indexes
 </IfModule>
 
 # ── Bloquear acesso a ficheiros sensíveis ─────────────────────────────────────
-<FilesMatch "^(config\.php|config_template\.php|database\.sql|debug\.php|git\.php|install_database\.php|migrate\.php|set_admins\.php|\.env)$">
+<FilesMatch "^(config\.php|config_template\.php|database\.sql|debug\.php|install_database\.php|migrate\.php|set_admins\.php|\.env)$">
     Order deny,allow
     Deny from all
 </FilesMatch>
