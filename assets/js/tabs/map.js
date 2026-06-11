@@ -63,6 +63,7 @@ function onReportTerrainChange(val) {
     if (!reportTerrainId) {
         if (layersDiv) layersDiv.style.display = 'none';
         if (opCtrl)    opCtrl.style.display    = 'none';
+        _loadPosLayers(null);
         return;
     }
 
@@ -71,6 +72,7 @@ function onReportTerrainChange(val) {
 
     _loadInterpLayers(reportTerrainId);
     _loadGeoJSONLayers(reportTerrainId);
+    _loadPosLayers(reportTerrainId);
     _loadRasterLayers(reportTerrainId);
     loadMapNotes(reportTerrainId);
     loadZonationHistory(reportTerrainId);
@@ -307,6 +309,127 @@ function _hideGeoJSONOnMap(id) {
     if (layer) { map.removeLayer(layer); delete rptGeoJSONLayers[id]; }
     delete rptGeoJSONData[id];
     const btn = document.getElementById('geojson-btn-' + id);
+    if (btn) { btn.textContent = '👁 Ver'; btn.className = 'layer-toggle-btn layer-toggle-off'; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GNSS / .pos LAYERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+const rptPosLayers = {};  // id → L.geoJSON layer
+const rptPosData   = {};  // id → {name}
+
+function _loadPosLayers(terrainId) {
+    const listEl = document.getElementById('report-pos-list');
+    if (listEl) listEl.innerHTML = '<div class="layer-empty">A carregar…</div>';
+
+    const fd = new FormData();
+    fd.append('action',     'get_pos_layers');
+    fd.append('terrain_id', terrainId || '');
+
+    fetch('index.php?tab=map', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            const items = data.layers || [];
+            _setBadge('pos', items.length);
+            _renderPosList(items);
+        })
+        .catch(() => {
+            if (listEl) listEl.innerHTML = '<div class="layer-empty" style="color:#ef4444;">Erro de rede.</div>';
+        });
+}
+
+function _renderPosList(items) {
+    const listEl = document.getElementById('report-pos-list');
+    if (!listEl) return;
+    if (!items.length) {
+        listEl.innerHTML = '<div class="layer-empty">Nenhuma trajectória GNSS.</div>';
+        return;
+    }
+    listEl.innerHTML = items.map(it => {
+        const on  = !!rptPosLayers[it.id];
+        const dt  = new Date(it.created_at).toLocaleDateString('pt-PT');
+        const pts = it.feature_count ? it.feature_count + ' pts' : '';
+        return `
+        <div class="layer-row" id="pos-row-${it.id}">
+            <div class="layer-row-info">
+                <div class="layer-row-name" title="${_esc(it.name)}">${_esc(it.name)}</div>
+                <div class="layer-row-meta">${pts}  ${dt}${it.terrain_name ? '  · ' + _esc(it.terrain_name) : ''}</div>
+            </div>
+            <button id="pos-btn-${it.id}"
+                    onclick="togglePosOnMap(${it.id})"
+                    class="layer-toggle-btn ${on ? 'layer-toggle-on' : 'layer-toggle-off'}">
+                ${on ? '✅ ON' : '👁 Ver'}
+            </button>
+        </div>`;
+    }).join('');
+}
+
+function togglePosOnMap(id) {
+    rptPosLayers[id] ? _hidePosOnMap(id) : _showPosOnMap(id);
+}
+
+function _showPosOnMap(id) {
+    const btn = document.getElementById('pos-btn-' + id);
+    if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
+
+    const fd = new FormData();
+    fd.append('action', 'get_geojson_data');
+    fd.append('id', id);
+
+    fetch('index.php?tab=map', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (btn) btn.disabled = false;
+            if (!data.success) {
+                _showAlert('❌ ' + (data.message || 'Erro ao carregar trajectória.'), 'error');
+                if (btn) { btn.textContent = '👁 Ver'; btn.className = 'layer-toggle-btn layer-toggle-off'; }
+                return;
+            }
+            let gj;
+            try { gj = typeof data.geojson === 'string' ? JSON.parse(data.geojson) : data.geojson; }
+            catch (e) {
+                _showAlert('❌ Dados corrompidos.', 'error');
+                if (btn) { btn.textContent = '👁 Ver'; btn.className = 'layer-toggle-btn layer-toggle-off'; }
+                return;
+            }
+            const qColors = { 1: '#16a34a', 2: '#ea580c' };
+            const layer = L.geoJSON(gj, {
+                pointToLayer: (f, ll) => {
+                    const q  = f.properties && f.properties.Q;
+                    const fc = qColors[q] || '#6b7280';
+                    return L.circleMarker(ll, { radius: 5, fillColor: fc, color: '#fff', weight: 1.5, fillOpacity: 0.9 });
+                },
+                onEachFeature: (f, lyr) => {
+                    const p = f.properties || {};
+                    const qLabel = {1:'fix',2:'float',3:'sbas',4:'dgps',5:'single',6:'ppp'}[p.Q] || '?';
+                    lyr.bindPopup(`
+                        <div style="font-size:12px;min-width:160px;">
+                            <div style="font-weight:700;margin-bottom:4px;">📡 ${_esc(p.time||'')}</div>
+                            <b>Status:</b> ${_esc(qLabel)} (Q=${p.Q??'?'})<br>
+                            <b>Satélites:</b> ${p.ns??'?'}<br>
+                            <b>Altitude:</b> ${p.height!=null?p.height.toFixed(3)+' m':'?'}<br>
+                            <b>σN/σE:</b> ${p.sdn!=null?p.sdn.toFixed(4):''} / ${p.sde!=null?p.sde.toFixed(4):''} m
+                            ${p.ratio!=null?`<br><b>Ratio:</b> ${p.ratio.toFixed(1)}`:''}
+                        </div>`);
+                }
+            }).addTo(map);
+            rptPosLayers[id] = layer;
+            rptPosData[id]   = { name: data.name };
+            try { map.fitBounds(layer.getBounds(), { padding: [30, 30] }); } catch(e) {}
+            if (btn) { btn.textContent = '✅ ON'; btn.className = 'layer-toggle-btn layer-toggle-on'; }
+        })
+        .catch(() => {
+            if (btn) { btn.textContent = '👁 Ver'; btn.disabled = false; btn.className = 'layer-toggle-btn layer-toggle-off'; }
+            _showAlert('Erro de rede ao carregar trajectória.', 'error');
+        });
+}
+
+function _hidePosOnMap(id) {
+    const layer = rptPosLayers[id];
+    if (layer) { map.removeLayer(layer); delete rptPosLayers[id]; }
+    delete rptPosData[id];
+    const btn = document.getElementById('pos-btn-' + id);
     if (btn) { btn.textContent = '👁 Ver'; btn.className = 'layer-toggle-btn layer-toggle-off'; }
 }
 
@@ -1606,4 +1729,6 @@ document.addEventListener('DOMContentLoaded', () => {
     loadMapNotes(null);
     // Pré-carregar lista de terrenos (visível após expandir grupo)
     _loadTerrainList();
+    // Carregar todas as trajectórias GNSS do utilizador
+    _loadPosLayers(null);
 });
