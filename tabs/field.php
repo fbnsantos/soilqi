@@ -1308,28 +1308,26 @@ try {
     $tableExists = $chk->rowCount() > 0;
 
     if ($tableExists) {
-        // Terrenos do utilizador (ou todos se admin)
+        // Terrenos próprios + partilhados — igual para admin e utilizador normal
         if ($isAdmin) {
-            $filterTerrains = $pdo->query("SELECT id, name FROM terrains ORDER BY name")->fetchAll();
-            $filterUsers    = $pdo->query("SELECT id, username FROM users ORDER BY username")->fetchAll();
-        } else {
-            try {
-                $stmt = $pdo->prepare("
-                    SELECT id, name, 0 AS is_shared, '' AS shared_by FROM terrains WHERE user_id = ?
-                    UNION ALL
-                    SELECT t.id, t.name, 1 AS is_shared, u.username AS shared_by
-                    FROM terrains t
-                    JOIN terrain_shares s ON s.terrain_id = t.id AND s.shared_with = ? AND s.status = 'accepted'
-                    JOIN users u ON u.id = t.user_id
-                    ORDER BY is_shared ASC, name ASC
-                ");
-                $stmt->execute([$currentUser['id'], $currentUser['id']]);
-            } catch (PDOException $e) {
-                $stmt = $pdo->prepare("SELECT id, name, 0 AS is_shared, '' AS shared_by FROM terrains WHERE user_id = ? ORDER BY name");
-                $stmt->execute([$currentUser['id']]);
-            }
-            $filterTerrains = $stmt->fetchAll();
+            $filterUsers = $pdo->query("SELECT id, username FROM users ORDER BY username")->fetchAll();
         }
+        try {
+            $stmt = $pdo->prepare("
+                SELECT id, name, 0 AS is_shared, '' AS shared_by FROM terrains WHERE user_id = ?
+                UNION ALL
+                SELECT t.id, t.name, 1 AS is_shared, u.username AS shared_by
+                FROM terrains t
+                JOIN terrain_shares s ON s.terrain_id = t.id AND s.shared_with = ? AND s.status = 'accepted'
+                JOIN users u ON u.id = t.user_id
+                ORDER BY is_shared ASC, name ASC
+            ");
+            $stmt->execute([$currentUser['id'], $currentUser['id']]);
+        } catch (PDOException $e) {
+            $stmt = $pdo->prepare("SELECT id, name, 0 AS is_shared, '' AS shared_by FROM terrains WHERE user_id = ? ORDER BY name");
+            $stmt->execute([$currentUser['id']]);
+        }
+        $filterTerrains = $stmt->fetchAll();
     }
 } catch (PDOException $e) {
     // silencioso — tratado no JS
