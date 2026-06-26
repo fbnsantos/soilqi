@@ -1,12 +1,15 @@
 'use strict';
 
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v3';
 const CACHE = `soilqi-can-${CACHE_VERSION}`;
 
 const STATIC = [
     './',
     './index.html',
-    './manifest.json'
+    './manifest.json',
+    './icon-192.png',
+    './icon-512.png',
+    './icon.svg'
 ];
 
 self.addEventListener('install', e => {
