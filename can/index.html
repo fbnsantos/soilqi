@@ -943,9 +943,16 @@ function onPrescChange() {
     fs.innerHTML=fields.length>1?'<option value="">— Parâmetro —</option>':'';
     fields.forEach(f=>{ const o=document.createElement('option'); o.value=f; o.textContent=f; fs.appendChild(o); });
     fr.style.display='block';
-    if (fields.length===1){ field=fields[0]; scheduleZone(); }
+    if (fields.length===1){ field=fields[0]; showPwmCards(); scheduleZone(); }
 }
-function onFieldChange() { field=document.getElementById('sel-field').value||null; if(field&&gpsPos)scheduleZone(); }
+function onFieldChange() {
+    field=document.getElementById('sel-field').value||null;
+    if (field) { showPwmCards(); if(gpsPos) scheduleZone(); }
+}
+function showPwmCards() {
+    document.getElementById('card-pwm').style.display = 'block';
+    document.getElementById('pub-wrap').style.display = 'block';
+}
 
 // ── Zona ──────────────────────────────────────────────────────────────────────
 function resetAll() {
