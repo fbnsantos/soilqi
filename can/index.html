@@ -792,20 +792,17 @@ function clamp() {
     let drag=null,pd=null,s0=null;
     function td(t){ const dx=t[0].clientX-t[1].clientX,dy=t[0].clientY-t[1].clientY; return Math.sqrt(dx*dx+dy*dy); }
     vp.addEventListener('touchstart',e=>{
-        if(pickMode) return; // handled by pick tap listener
-        if(e.touches.length===2){e.preventDefault();pd=td(e.touches);s0=mapScale;drag=null;}
-        else if(e.touches.length===1) drag={sx:e.touches[0].clientX,sy:e.touches[0].clientY,ox:mapOffX,oy:mapOffY};
-    },{passive:false});
+        if(pickMode) return;
+        if(e.touches.length===1) drag={sx:e.touches[0].clientX,sy:e.touches[0].clientY,ox:mapOffX,oy:mapOffY};
+    },{passive:true});
     vp.addEventListener('touchmove',e=>{
-        if(e.touches.length===2&&pd!=null){e.preventDefault();mapScale=Math.min(MAX_ZOOM,Math.max(1,s0*(td(e.touches)/pd)));clamp();applyTransform();}
-        else if(e.touches.length===1&&drag&&mapScale>1){e.preventDefault();mapOffX=drag.ox+(e.touches[0].clientX-drag.sx);mapOffY=drag.oy+(e.touches[0].clientY-drag.sy);clamp();applyTransform();}
+        if(e.touches.length===1&&drag&&mapScale>1){e.preventDefault();mapOffX=drag.ox+(e.touches[0].clientX-drag.sx);mapOffY=drag.oy+(e.touches[0].clientY-drag.sy);clamp();applyTransform();}
     },{passive:false});
-    vp.addEventListener('touchend',e=>{ if(e.touches.length<2)pd=null; if(e.touches.length===0)drag=null; });
+    vp.addEventListener('touchend',()=>{ drag=null; });
     let md=null;
     vp.addEventListener('mousedown',e=>{ if(pickMode||mapScale<=1)return; md={sx:e.clientX,sy:e.clientY,ox:mapOffX,oy:mapOffY}; vp.classList.add('grabbing'); });
     window.addEventListener('mousemove',e=>{ if(!md)return; mapOffX=md.ox+(e.clientX-md.sx); mapOffY=md.oy+(e.clientY-md.sy); clamp(); applyTransform(); });
     window.addEventListener('mouseup',()=>{ md=null; document.getElementById('map-vp').classList.remove('grabbing'); });
-    vp.addEventListener('wheel',e=>{ e.preventDefault(); zoomStep(e.deltaY<0?.5:-.5); },{passive:false});
 })();
 
 // ── Terrenos / Prescrições ────────────────────────────────────────────────────
