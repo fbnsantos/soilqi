@@ -255,6 +255,41 @@ try {
             $response['zone_data']     = $zone_data;
             break;
 
+        case 'get_map_image':
+            $prescription_id = intval($_GET['prescription_id'] ?? $body['prescription_id'] ?? 0);
+            if (!$prescription_id) { $response['message'] = 'prescription_id inválido'; break; }
+
+            // Tentar PNG da própria prescrição; fallback para PNG da zonação
+            $stmtM = $pdo->prepare("
+                SELECT pr.png_data AS pr_png,
+                       zr.png_data AS zr_png,
+                       zr.min_lat, zr.max_lat, zr.min_lng, zr.max_lng, zr.legend,
+                       pr.zone_prescriptions, pr.name
+                  FROM prescription_results pr
+                  JOIN zonation_results zr ON zr.id = pr.zonation_id
+                 WHERE pr.id = ? AND pr.user_id = ?
+            ");
+            $stmtM->execute([$prescription_id, $currentUser['id']]);
+            $rowM = $stmtM->fetch(PDO::FETCH_ASSOC);
+
+            if (!$rowM) { $response['message'] = 'Prescrição não encontrada.'; break; }
+
+            $pngData = $rowM['pr_png'] ?: $rowM['zr_png'];
+            if (!$pngData) { $response['message'] = 'Mapa de prescrição não disponível.'; break; }
+
+            $response['success']            = true;
+            $response['png_b64']            = base64_encode($pngData);
+            $response['bounds']             = [
+                'min_lat' => (float)$rowM['min_lat'],
+                'max_lat' => (float)$rowM['max_lat'],
+                'min_lng' => (float)$rowM['min_lng'],
+                'max_lng' => (float)$rowM['max_lng'],
+            ];
+            $response['legend']             = json_decode($rowM['legend'], true);
+            $response['zone_prescriptions'] = json_decode($rowM['zone_prescriptions'], true);
+            $response['name']               = $rowM['name'];
+            break;
+
         case 'publish_can':
             $pct = intval($body['pct'] ?? -1);
             if (!in_array($pct, [0, 25, 50, 75, 100])) {

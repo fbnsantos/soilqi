@@ -116,6 +116,43 @@
         }
         .select-field:focus { border-color: var(--blue2); }
 
+        /* ── Map ── */
+        .map-card { padding: 0; overflow: hidden; }
+        .map-gps-bar {
+            background: var(--blue); color: #fff;
+            padding: 8px 14px; font-size: 12px; font-family: monospace;
+            display: flex; align-items: center; gap: 10px;
+            min-height: 36px;
+        }
+        .map-gps-bar .acc-badge {
+            margin-left: auto; font-size: 10px; opacity: .75;
+        }
+        .map-wrap {
+            position: relative; width: 100%;
+            background: #e5e7eb;
+            min-height: 220px;
+        }
+        .map-wrap canvas {
+            display: block; width: 100%; height: auto;
+            image-rendering: pixelated;
+        }
+        .map-legend {
+            padding: 8px 12px;
+            display: flex; flex-wrap: wrap; gap: 6px;
+        }
+        .legend-item {
+            display: flex; align-items: center; gap: 5px;
+            font-size: 11px; color: #374151;
+        }
+        .legend-swatch {
+            width: 14px; height: 14px; border-radius: 3px;
+            flex-shrink: 0; border: 1px solid rgba(0,0,0,.1);
+        }
+        .map-placeholder {
+            display: flex; align-items: center; justify-content: center;
+            min-height: 180px; color: var(--gray); font-size: 13px;
+        }
+
         /* ── Zone info ── */
         .zone-box {
             background: var(--light); border-radius: 10px;
@@ -260,6 +297,20 @@
         </div>
     </div>
 
+    <!-- Mapa de prescrição -->
+    <div class="card map-card" id="map-card" style="display:none">
+        <div class="map-gps-bar" id="map-gps-bar">
+            <span>📍</span>
+            <span id="map-coords-label">A aguardar GPS…</span>
+            <span class="acc-badge" id="map-acc-label"></span>
+        </div>
+        <div class="map-wrap" id="map-wrap">
+            <div class="map-placeholder" id="map-placeholder">A carregar mapa…</div>
+            <canvas id="map-canvas" style="display:none"></canvas>
+        </div>
+        <div class="map-legend" id="map-legend"></div>
+    </div>
+
     <!-- Valor na zona actual -->
     <div class="card" id="zone-card" style="display:none">
         <div class="card-title">📊 Zona actual</div>
@@ -309,6 +360,11 @@ let selectedPct = null;
 let selectedPrescriptionId = null;
 let selectedField = null;
 let zoneUpdateTimer = null;
+
+// Map state
+let mapBounds  = null;   // {min_lat,max_lat,min_lng,max_lng}
+let mapImg     = null;   // HTMLImageElement with the prescription PNG
+let mapLegend  = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -416,6 +472,10 @@ function startGps() {
                 status.textContent = '🔍 A melhorar sinal…';
             }
 
+            // Actualizar barra de coordenadas e marcador no mapa
+            updateMapGpsBar();
+            drawMapMarker();
+
             // Actualizar zona se prescrição seleccionada
             if (selectedPrescriptionId && selectedField) {
                 scheduleZoneUpdate();
@@ -432,6 +492,116 @@ function startGps() {
 function scheduleZoneUpdate() {
     clearTimeout(zoneUpdateTimer);
     zoneUpdateTimer = setTimeout(fetchZoneValue, 500);
+    drawMapMarker();
+    updateMapGpsBar();
+}
+
+// ── Mapa ─────────────────────────────────────────────────────────────────────
+async function loadMapImage(prescriptionId) {
+    const card  = document.getElementById('map-card');
+    const ph    = document.getElementById('map-placeholder');
+    const cvs   = document.getElementById('map-canvas');
+    const lgnd  = document.getElementById('map-legend');
+
+    card.style.display = 'block';
+    ph.style.display   = 'flex';
+    ph.textContent     = 'A carregar mapa…';
+    cvs.style.display  = 'none';
+    lgnd.innerHTML     = '';
+    mapImg = null; mapBounds = null; mapLegend = null;
+
+    try {
+        const r = await apiFetch(`get_map_image&prescription_id=${prescriptionId}`, 'GET');
+        if (!r.success) {
+            ph.textContent = r.message || 'Mapa indisponível.';
+            return;
+        }
+        mapBounds = r.bounds;
+        mapLegend = r.legend;
+
+        const img = new Image();
+        img.onload = () => {
+            mapImg = img;
+            cvs.width  = img.naturalWidth;
+            cvs.height = img.naturalHeight;
+            ph.style.display  = 'none';
+            cvs.style.display = 'block';
+            drawMapMarker();
+        };
+        img.src = `data:image/png;base64,${r.png_b64}`;
+
+        // Legenda
+        if (r.legend && r.legend.length) {
+            lgnd.innerHTML = r.legend.map(e =>
+                `<div class="legend-item">
+                    <div class="legend-swatch" style="background:${e.color}"></div>
+                    <span>${e.label || ''}</span>
+                 </div>`
+            ).join('');
+        }
+    } catch {
+        ph.textContent = 'Erro ao carregar mapa.';
+    }
+}
+
+function drawMapMarker() {
+    const cvs = document.getElementById('map-canvas');
+    if (!mapImg || !cvs) return;
+
+    const ctx = cvs.getContext('2d');
+    ctx.clearRect(0, 0, cvs.width, cvs.height);
+    ctx.drawImage(mapImg, 0, 0);
+
+    if (!gpsPos || !mapBounds) return;
+
+    const { latitude: lat, longitude: lng } = gpsPos.coords;
+    const { min_lat, max_lat, min_lng, max_lng } = mapBounds;
+
+    // Fora dos limites → não desenhar
+    if (lat < min_lat || lat > max_lat || lng < min_lng || lng > max_lng) return;
+
+    const px = ((lng - min_lng) / (max_lng - min_lng)) * cvs.width;
+    const py = ((max_lat - lat) / (max_lat - min_lat)) * cvs.height;
+    const r  = Math.max(8, cvs.width * 0.025);
+
+    // Sombra / halo
+    ctx.beginPath();
+    ctx.arc(px, py, r + 4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fill();
+
+    // Círculo branco exterior
+    ctx.beginPath();
+    ctx.arc(px, py, r + 2, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+
+    // Círculo azul interior
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#2563eb';
+    ctx.fill();
+
+    // Cruz central
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = Math.max(2, r * 0.25);
+    ctx.lineCap = 'round';
+    const arm = r * 0.55;
+    ctx.beginPath(); ctx.moveTo(px - arm, py); ctx.lineTo(px + arm, py); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(px, py - arm); ctx.lineTo(px, py + arm); ctx.stroke();
+}
+
+function updateMapGpsBar() {
+    const coordsEl = document.getElementById('map-coords-label');
+    const accEl    = document.getElementById('map-acc-label');
+    if (!gpsPos) {
+        coordsEl.textContent = 'A aguardar GPS…';
+        accEl.textContent    = '';
+        return;
+    }
+    const { latitude: lat, longitude: lng, accuracy: acc } = gpsPos.coords;
+    coordsEl.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+    accEl.textContent    = `±${Math.round(acc)} m`;
 }
 
 // ── Terrenos ──────────────────────────────────────────────────────────────────
@@ -495,6 +665,8 @@ function onPrescriptionChange() {
     selectedField = null;
     resetZone();
 
+    if (selectedPrescriptionId) loadMapImage(selectedPrescriptionId);
+
     if (!selectedPrescriptionId) { fr.style.display = 'none'; return; }
 
     const fields = JSON.parse(opt.dataset.fields || '[]');
@@ -528,7 +700,9 @@ function resetZone() {
     document.getElementById('zone-card').style.display = 'none';
     document.getElementById('pct-card').style.display = 'none';
     document.getElementById('publish-area').style.display = 'none';
+    document.getElementById('map-card').style.display = 'none';
     selectedPct = null;
+    mapImg = null; mapBounds = null;
     clearPctSelection();
 }
 
