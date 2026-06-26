@@ -4,12 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#1e3a5f">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="CAN Ctrl">
     <title>SoilQI CAN Controller</title>
     <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon" href="./icon.svg">
+    <script src="https://cdn.jsdelivr.net/npm/mqtt@5/dist/mqtt.min.js"></script>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         :root {
@@ -51,9 +53,14 @@
             animation: blink 1s ease-in-out infinite;
         }
         @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.45} }
-        .sdot { width: 9px; height: 9px; border-radius: 50%; background: #9ca3af; border: 2px solid rgba(255,255,255,.3); }
-        .sdot.on  { background: #4ade80; }
-        .sdot.off { background: #f87171; }
+        .sdot { width: 9px; height: 9px; border-radius: 50%; background: #9ca3af; border: 2px solid rgba(255,255,255,.3); flex-shrink:0; }
+        .sdot.on        { background: #4ade80; }
+        .sdot.off       { background: #f87171; }
+        .sdot.mqtt-on   { background: #4ade80; }
+        .sdot.mqtt-off  { background: #9ca3af; }
+        .sdot.mqtt-err  { background: #f87171; animation: blink .8s ease-in-out infinite; }
+        .sdot-wrap { display:flex; flex-direction:column; align-items:center; gap:1px; }
+        .sdot-lbl  { font-size:8px; opacity:.65; line-height:1; }
 
         /* ── Login ── */
         .login-wrap {
@@ -221,16 +228,35 @@
 
         /* ── Publish ── */
         .pub-wrap { padding:8px 8px 0; }
+        .pub-card {
+            background:var(--card); border-radius:var(--r);
+            padding:12px; box-shadow:0 1px 4px rgba(0,0,0,.06);
+        }
+        .pub-status {
+            display:flex; align-items:center; gap:8px;
+            margin-bottom:10px; padding:8px 10px;
+            background:var(--light); border-radius:8px; font-size:12px;
+        }
+        .pub-status .lbl  { color:var(--gray); flex:1; }
+        .pub-status .val  { font-weight:700; font-family:monospace; }
+        .auto-toggle {
+            width:100%; padding:14px;
+            border:none; border-radius:10px;
+            font-size:15px; font-weight:800; cursor:pointer;
+            transition:all .15s; margin-bottom:8px;
+        }
+        .auto-toggle.off { background:#e5e7eb; color:#374151; }
+        .auto-toggle.on  { background:var(--green); color:#fff; box-shadow:0 3px 10px rgba(22,163,74,.35); animation:pub-pulse 1s ease-in-out infinite; }
+        @keyframes pub-pulse { 0%,100%{box-shadow:0 3px 10px rgba(22,163,74,.35)} 50%{box-shadow:0 3px 18px rgba(22,163,74,.6)} }
         .pub-btn {
-            width:100%; padding:17px;
-            background:var(--green); color:#fff;
-            border:none; border-radius:var(--r);
-            font-size:17px; font-weight:800;
+            width:100%; padding:11px;
+            background:var(--blue2); color:#fff;
+            border:none; border-radius:9px;
+            font-size:14px; font-weight:700;
             cursor:pointer; transition:opacity .14s;
-            box-shadow: 0 4px 14px rgba(22,163,74,.3);
         }
         .pub-btn:active   { opacity:.8; }
-        .pub-btn:disabled { background:#9ca3af; box-shadow:none; cursor:not-allowed; }
+        .pub-btn:disabled { background:#9ca3af; cursor:not-allowed; opacity:.6; }
         .last-pub { font-size:10px; color:var(--gray); text-align:center; margin-top:6px; font-family:monospace; }
 
         /* ── Modal ── */
@@ -310,7 +336,8 @@
         <span class="sim-pill" id="sim-pill">SIM</span>
         <button class="hbtn" onclick="openSim()"    title="Simulador de trajecto">🎬</button>
         <button class="hbtn" onclick="openSettings()" title="Configuração">⚙️</button>
-        <div class="sdot" id="sdot"></div>
+        <div class="sdot-wrap"><div class="sdot" id="sdot"></div><span class="sdot-lbl">API</span></div>
+        <div class="sdot-wrap"><div class="sdot mqtt-off" id="mqtt-dot"></div><span class="sdot-lbl">MQTT</span></div>
     </div>
 </header>
 
@@ -443,8 +470,18 @@
 
     <!-- Publicar -->
     <div class="pub-wrap" id="pub-wrap" style="display:none">
-        <button class="pub-btn" id="pub-btn" onclick="publishCan()" disabled>📡 Publicar</button>
-        <div class="last-pub" id="last-pub"></div>
+        <div class="pub-card">
+            <div class="pub-status">
+                <div class="sdot mqtt-off" id="pub-mqtt-dot" style="width:8px;height:8px;flex-shrink:0"></div>
+                <span class="lbl" id="pub-mqtt-lbl">MQTT desligado</span>
+                <span class="val" id="pub-topic-lbl"></span>
+            </div>
+            <button class="auto-toggle off" id="auto-toggle" onclick="toggleAutoPublish()">
+                ▶ Iniciar publicação automática
+            </button>
+            <button class="pub-btn" id="pub-btn" onclick="publishOnce()" disabled>📡 Publicar agora</button>
+            <div class="last-pub" id="last-pub"></div>
+        </div>
     </div>
 
 </div>
@@ -495,8 +532,20 @@ k = largura [m] / (6 × Q_max [l/min])</div>
         </div>
         <label class="flabel">Password</label>
         <input id="s-pass" class="inp mb8" type="password" placeholder="(opcional)">
-        <label class="flabel">Tópico MQTT</label>
-        <input id="s-topic" class="inp mono mb8" type="text" placeholder="/tlvt/can/in">
+        <div class="frow mb8">
+            <div>
+                <label class="flabel">Tópico MQTT</label>
+                <input id="s-topic" class="inp sm mono" type="text" placeholder="/tlvt/can/in">
+            </div>
+            <div>
+                <label class="flabel">Porta WebSocket</label>
+                <input id="s-wsport" class="inp sm mono" type="number" placeholder="9001">
+            </div>
+        </div>
+        <div class="info-box" style="font-size:11px">
+            A publicação usa WebSocket (porta WS) directamente do browser.<br>
+            Certifique-se que o broker tem WS activo (ex: Mosquitto: <code>listener 9001 / protocol websockets</code>).
+        </div>
 
         <div class="sep"></div>
         <button class="btn btn-blue" onclick="saveSettings()">💾 Guardar configuração</button>
@@ -582,6 +631,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadCfgUI();
     startGps();
     token ? checkAuth() : showLogin();
+    if (getCfg().host || getCfg().wsport) connectMqtt();
     // live k recompute in settings
     ['s-width','s-qmax'].forEach(id => document.getElementById(id).addEventListener('input', updateKDisplay));
 });
@@ -682,7 +732,8 @@ function onGpsUpdate() {
 }
 
 function getSpeed() {
-    if (speedSrcGps) return simIv ? (parseFloat(document.getElementById('sim-spd').value)||0) : gpsSpeedKmh;
+    if (simIv) return parseFloat(document.getElementById('sim-spd').value) || 0;
+    if (speedSrcGps) return gpsSpeedKmh;
     return parseFloat(document.getElementById('speed-inp').value) || 0;
 }
 
@@ -965,7 +1016,7 @@ function recalcPwm() {
 
     renderPwm(autoPwm);
     document.getElementById('pub-btn').disabled = false;
-    document.getElementById('pub-btn').textContent = `📡 Publicar ${autoPwm}%`;
+    document.getElementById('pub-btn').textContent = `📡 Publicar agora (${autoPwm}%)`;
 }
 
 // Mostra o valor bruto de prescrição quando k não está configurado
@@ -994,9 +1045,8 @@ function renderPwmRaw(val, zid) {
         badgeMod.textContent = 'l/ha';
         badgeMod.className   = 'pwm-badge-mode manual';
     }
-    // Habilitar botões manuais mesmo sem k
-    document.getElementById('pub-btn').disabled = true;
-    document.getElementById('pub-btn').textContent = '⚙️ Configure k para publicar AUTO';
+    document.getElementById('pub-btn').disabled = false;
+    document.getElementById('pub-btn').textContent = '📡 Publicar agora';
 }
 
 function renderPwm(pct) {
@@ -1042,26 +1092,101 @@ function selectManual(pct) {
     });
     recalcPwm();
     document.getElementById('pub-btn').disabled = false;
-    document.getElementById('pub-btn').textContent = `📡 Publicar ${pct}%`;
+    document.getElementById('pub-btn').textContent = `📡 Publicar agora (${pct}%)`;
 }
 
-// ── Publish ───────────────────────────────────────────────────────────────────
-async function publishCan() {
-    const pct = manualPwm !== null ? manualPwm : autoPwm;
-    if (pct === null) return;
-    const btn = document.getElementById('pub-btn');
-    btn.disabled=true; btn.innerHTML='<span class="spinner"></span> A publicar…';
+// ── MQTT WebSocket ────────────────────────────────────────────────────────────
+let mqttClient   = null;
+let autoPublishIv = null;
+let lastPwmSent  = null;
+
+function buildCanRaw(pct) {
+    return 'T18EF88F78A101' + pct.toString(16).toUpperCase().padStart(2,'0') + 'FFFFFFFFFF';
+}
+
+function getMqttTopic() { return getCfg().topic || '/tlvt/can/in'; }
+
+function setMqttDot(state, label) {
+    ['mqtt-dot','pub-mqtt-dot'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.className = el.className.replace(/mqtt-\w+/,'') + ' mqtt-' + state;
+    });
+    const lbl = document.getElementById('pub-mqtt-lbl');
+    if (lbl) lbl.textContent = label;
+    const tl = document.getElementById('pub-topic-lbl');
+    if (tl) tl.textContent = state === 'on' ? getMqttTopic() : '';
+}
+
+function connectMqtt() {
     const cfg = getCfg();
-    const mqtt = { mqtt_host:cfg.host||undefined, mqtt_port:cfg.port||undefined, mqtt_user:cfg.user||undefined, mqtt_pass:cfg.pass||undefined, mqtt_topic:cfg.topic||undefined };
-    Object.keys(mqtt).forEach(k=>mqtt[k]===undefined&&delete mqtt[k]);
+    const host   = cfg.host   || window.location.hostname;
+    const wsPort = cfg.wsport || 9001;
+    const user   = cfg.user   || undefined;
+    const pass   = cfg.pass   || undefined;
+    const proto  = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const url    = `${proto}://${host}:${wsPort}/mqtt`;
+
+    if (mqttClient) { try { mqttClient.end(true); } catch(e){} mqttClient = null; }
+
+    setMqttDot('off', 'A ligar…');
     try {
-        const r=await api('publish_can','POST',{pct,...mqtt});
-        if (r.success) {
-            toast(`✅ ${r.pct}% → ${r.topic}`,'ok');
-            document.getElementById('last-pub').textContent=`${r.pct}% às ${new Date().toLocaleTimeString('pt-PT')} · ${r.raw}`;
-        } else toast(r.message||'Erro','err');
-    } catch { toast('Sem ligação','err'); }
-    finally { btn.disabled=false; btn.textContent=`📡 Publicar ${pct}%`; }
+        mqttClient = mqtt.connect(url, {
+            clientId: 'soilqi-can-' + Math.random().toString(16).slice(2,8),
+            username: user, password: pass,
+            reconnectPeriod: 5000,
+            connectTimeout: 8000,
+            clean: true,
+        });
+        mqttClient.on('connect', () => setMqttDot('on', 'Ligado'));
+        mqttClient.on('offline', () => setMqttDot('off', 'Desligado'));
+        mqttClient.on('error',   e  => { setMqttDot('err', 'Erro: ' + (e.message||'?')); console.warn('[MQTT]', e); });
+        mqttClient.on('reconnect', () => setMqttDot('off', 'A reconectar…'));
+    } catch(e) {
+        setMqttDot('err', 'Erro ao ligar');
+        console.warn('[MQTT connect]', e);
+    }
+}
+
+function mqttPublish(pct) {
+    if (!mqttClient || !mqttClient.connected) return false;
+    const raw     = buildCanRaw(pct);
+    const payload = JSON.stringify({payload:{raw}});
+    const topic   = getMqttTopic();
+    mqttClient.publish(topic, payload, {qos:0, retain:false});
+    lastPwmSent = pct;
+    const ts = new Date().toLocaleTimeString('pt-PT');
+    document.getElementById('last-pub').textContent = `${pct}% · ${raw} · ${ts}`;
+    return true;
+}
+
+function getCurrentPwm() { return manualPwm !== null ? manualPwm : autoPwm; }
+
+function toggleAutoPublish() {
+    if (autoPublishIv) {
+        clearInterval(autoPublishIv);
+        autoPublishIv = null;
+        const btn = document.getElementById('auto-toggle');
+        btn.className = 'auto-toggle off';
+        btn.textContent = '▶ Iniciar publicação automática';
+    } else {
+        if (!mqttClient || !mqttClient.connected) {
+            toast('MQTT não ligado — verifique configuração ⚙️','err'); return;
+        }
+        const btn = document.getElementById('auto-toggle');
+        btn.className = 'auto-toggle on';
+        btn.textContent = '⏹ Parar publicação automática';
+        autoPublishIv = setInterval(() => {
+            const pct = getCurrentPwm();
+            if (pct !== null) mqttPublish(pct);
+        }, 500);
+    }
+}
+
+function publishOnce() {
+    const pct = getCurrentPwm();
+    if (pct === null) { toast('Sem valor PWM','err'); return; }
+    if (!mqttPublish(pct)) toast('MQTT não ligado','err');
+    else toast(`📡 ${pct}% → ${getMqttTopic()}`,'ok');
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
@@ -1070,14 +1195,15 @@ function getCfg() {
 }
 function loadCfgUI() {
     const c=getCfg();
-    document.getElementById('s-width').value = c.width||'';
-    document.getElementById('s-qmax').value  = c.qmax||'';
-    document.getElementById('s-k').value     = c.k||'';
-    document.getElementById('s-host').value  = c.host||'';
-    document.getElementById('s-port').value  = c.port||'';
-    document.getElementById('s-user').value  = c.user||'';
-    document.getElementById('s-pass').value  = c.pass||'';
-    document.getElementById('s-topic').value = c.topic||'';
+    document.getElementById('s-width').value  = c.width||'';
+    document.getElementById('s-qmax').value   = c.qmax||'';
+    document.getElementById('s-k').value      = c.k||'';
+    document.getElementById('s-host').value   = c.host||'';
+    document.getElementById('s-port').value   = c.port||'';
+    document.getElementById('s-user').value   = c.user||'';
+    document.getElementById('s-pass').value   = c.pass||'';
+    document.getElementById('s-topic').value  = c.topic||'';
+    document.getElementById('s-wsport').value = c.wsport||'';
     updateKDisplay();
 }
 function updateKDisplay() {
@@ -1098,14 +1224,16 @@ function saveSettings() {
         host: document.getElementById('s-host').value.trim()||undefined,
         port: parseInt(document.getElementById('s-port').value)||undefined,
         user: document.getElementById('s-user').value.trim()||undefined,
-        pass:  document.getElementById('s-pass').value||undefined,
-        topic: document.getElementById('s-topic').value.trim()||undefined,
+        pass:   document.getElementById('s-pass').value||undefined,
+        topic:  document.getElementById('s-topic').value.trim()||undefined,
+        wsport: parseInt(document.getElementById('s-wsport').value)||undefined,
     };
     Object.keys(cfg).forEach(k=>cfg[k]===undefined&&delete cfg[k]);
     localStorage.setItem(ST.cfg,JSON.stringify(cfg));
     toast('✅ Configuração guardada','ok');
     closeMo('mo-settings');
     recalcPwm();
+    connectMqtt();
 }
 function openSettings() { loadCfgUI(); openMo('mo-settings'); }
 

@@ -124,15 +124,14 @@ function getZoneAtLocation(array $zonation, float $lat, float $lng): ?int {
             $px = max(0, min($w - 1, $cx + $dx));
             $py = max(0, min($h - 1, $cy + $dy));
 
-            $raw   = imagecolorat($img, $px, $py);
-            $alpha = ($raw >> 24) & 0x7F;  // 0=opaco, 127=transparente (GD)
+            $raw  = imagecolorat($img, $px, $py);
+            $rgba = imagecolorsforindex($img, $raw);
+            // GD alpha: 0=opaque, 127=transparent
+            if ($rgba['alpha'] > 80) continue;
 
-            // Rejeitar pixels maioritariamente transparentes (fundo do PNG)
-            if ($alpha > 80) continue;
-
-            $r = ($raw >> 16) & 0xFF;
-            $g = ($raw >> 8)  & 0xFF;
-            $b =  $raw        & 0xFF;
+            $r = $rgba['red'];
+            $g = $rgba['green'];
+            $b = $rgba['blue'];
 
             $bestZone = null;
             $bestDist = PHP_INT_MAX;
