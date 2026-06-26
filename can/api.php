@@ -298,14 +298,14 @@ try {
             }
 
             // Permitir override das credenciais MQTT vindas da app
-            $mqttHost = !empty($body['mqtt_host']) ? trim($body['mqtt_host']) : MQTT_HOST;
-            $mqttPort = !empty($body['mqtt_port']) ? intval($body['mqtt_port'])  : MQTT_PORT;
-            $mqttUser = isset($body['mqtt_user']) && $body['mqtt_user'] !== '' ? $body['mqtt_user'] : (MQTT_USER ?: null);
-            $mqttPass = isset($body['mqtt_pass']) && $body['mqtt_pass'] !== '' ? $body['mqtt_pass'] : (MQTT_PASS ?: null);
+            $mqttHost  = !empty($body['mqtt_host'])  ? trim($body['mqtt_host'])       : MQTT_HOST;
+            $mqttPort  = !empty($body['mqtt_port'])  ? intval($body['mqtt_port'])      : MQTT_PORT;
+            $mqttUser  = !empty($body['mqtt_user'])  ? $body['mqtt_user']              : (MQTT_USER ?: null);
+            $mqttPass  = !empty($body['mqtt_pass'])  ? $body['mqtt_pass']              : (MQTT_PASS ?: null);
+            $topic     = !empty($body['mqtt_topic']) ? trim($body['mqtt_topic'])        : '/tlvt/can/in';
 
             $raw     = buildCanRaw($pct);
             $payload = json_encode(['payload' => ['raw' => $raw]]);
-            $topic   = '/tlvt/can/in';
 
             require_once '../lib/MqttPublisher.php';
             $mqtt = new MqttPublisher(

@@ -139,6 +139,21 @@
             flex-shrink:0;
         }
         .zbtn:active { background:rgba(255,255,255,.35); }
+        /* PWM map overlay */
+        .pwm-map-badge {
+            position: absolute; top: 8px; left: 8px; z-index: 15;
+            background: rgba(30,58,95,.92); color: #fff;
+            border-radius: 10px; padding: 6px 12px;
+            display: flex; align-items: baseline; gap: 4px;
+            box-shadow: 0 2px 10px rgba(0,0,0,.35);
+            pointer-events: none;
+        }
+        .pwm-badge-num  { font-size: 36px; font-weight: 900; line-height: 1; letter-spacing: -1px; }
+        .pwm-badge-pct  { font-size: 16px; font-weight: 700; }
+        .pwm-badge-mode { font-size: 9px; font-weight: 800; padding: 2px 5px; border-radius: 6px; margin-left: 4px; align-self: center; }
+        .pwm-badge-mode.auto   { background: #4ade80; color: #14532d; }
+        .pwm-badge-mode.manual { background: #f59e0b; color: #fff; }
+
         /* pick mode overlay */
         .pick-overlay {
             position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
@@ -337,6 +352,11 @@
                 <div class="map-ph" id="map-ph">A carregar mapa…</div>
                 <canvas id="map-cvs" style="display:none"></canvas>
             </div>
+            <div class="pwm-map-badge" id="pwm-map-badge" style="display:none">
+                <span class="pwm-badge-num"  id="pwm-badge-num">—</span>
+                <span class="pwm-badge-pct">%</span>
+                <span class="pwm-badge-mode" id="pwm-badge-mode"></span>
+            </div>
             <div class="pick-overlay" id="pick-overlay" style="display:none">
                 <div class="pick-banner" id="pick-banner"></div>
             </div>
@@ -468,6 +488,8 @@ k = largura [m] / (6 × Q_max [l/min])</div>
         </div>
         <label class="flabel">Password</label>
         <input id="s-pass" class="inp mb8" type="password" placeholder="(opcional)">
+        <label class="flabel">Tópico MQTT</label>
+        <input id="s-topic" class="inp mono mb8" type="text" placeholder="/tlvt/can/in">
 
         <div class="sep"></div>
         <button class="btn btn-blue" onclick="saveSettings()">💾 Guardar configuração</button>
@@ -926,10 +948,25 @@ function recalcPwm() {
 
 function renderPwm(pct) {
     document.getElementById('pwm-num').textContent = pct;
-    document.getElementById('pwm-bar').style.width = pct + '%';
-    // colour shift: green→amber→red
     const bar = document.getElementById('pwm-bar');
-    bar.style.background = pct>85 ? '#f87171' : pct>60 ? '#fbbf24' : '#4ade80';
+    bar.style.width = pct + '%';
+    const col = pct>85 ? '#f87171' : pct>60 ? '#fbbf24' : '#4ade80';
+    bar.style.background = col;
+
+    // Map badge
+    const badge    = document.getElementById('pwm-map-badge');
+    const badgeNum = document.getElementById('pwm-badge-num');
+    const badgeMod = document.getElementById('pwm-badge-mode');
+    if (document.getElementById('map-outer').style.display !== 'none') {
+        badge.style.display = 'flex';
+        badgeNum.textContent = pct;
+        badgeNum.style.color = col;
+        const isManual = manualPwm !== null;
+        badgeMod.textContent  = isManual ? 'MANUAL' : 'AUTO';
+        badgeMod.className    = 'pwm-badge-mode ' + (isManual ? 'manual' : 'auto');
+    } else {
+        badge.style.display = 'none';
+    }
 }
 
 function selectManual(pct) {
@@ -950,7 +987,7 @@ async function publishCan() {
     const btn = document.getElementById('pub-btn');
     btn.disabled=true; btn.innerHTML='<span class="spinner"></span> A publicar…';
     const cfg = getCfg();
-    const mqtt = { mqtt_host:cfg.host||undefined, mqtt_port:cfg.port||undefined, mqtt_user:cfg.user||undefined, mqtt_pass:cfg.pass||undefined };
+    const mqtt = { mqtt_host:cfg.host||undefined, mqtt_port:cfg.port||undefined, mqtt_user:cfg.user||undefined, mqtt_pass:cfg.pass||undefined, mqtt_topic:cfg.topic||undefined };
     Object.keys(mqtt).forEach(k=>mqtt[k]===undefined&&delete mqtt[k]);
     try {
         const r=await api('publish_can','POST',{pct,...mqtt});
@@ -975,6 +1012,7 @@ function loadCfgUI() {
     document.getElementById('s-port').value  = c.port||'';
     document.getElementById('s-user').value  = c.user||'';
     document.getElementById('s-pass').value  = c.pass||'';
+    document.getElementById('s-topic').value = c.topic||'';
     updateKDisplay();
 }
 function updateKDisplay() {
@@ -995,7 +1033,8 @@ function saveSettings() {
         host: document.getElementById('s-host').value.trim()||undefined,
         port: parseInt(document.getElementById('s-port').value)||undefined,
         user: document.getElementById('s-user').value.trim()||undefined,
-        pass: document.getElementById('s-pass').value||undefined,
+        pass:  document.getElementById('s-pass').value||undefined,
+        topic: document.getElementById('s-topic').value.trim()||undefined,
     };
     Object.keys(cfg).forEach(k=>cfg[k]===undefined&&delete cfg[k]);
     localStorage.setItem(ST.cfg,JSON.stringify(cfg));
