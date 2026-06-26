@@ -334,6 +334,7 @@
     </div>
     <div class="hdr-btns">
         <span class="sim-pill" id="sim-pill">SIM</span>
+        <button class="hbtn" id="install-btn" onclick="installPwa()" title="Instalar app" style="display:none">📲</button>
         <button class="hbtn" onclick="openSim()"    title="Simulador de trajecto">🎬</button>
         <button class="hbtn" onclick="openSettings()" title="Configuração">⚙️</button>
         <div class="sdot-wrap"><div class="sdot" id="sdot"></div><span class="sdot-lbl">API</span></div>
@@ -644,13 +645,30 @@ let simPtA = null, simPtB = null; // {lat,lng}
 let pickMode = null; // 'A' | 'B' | null
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
+let _installPrompt = null;
+window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    _installPrompt = e;
+    const btn = document.getElementById('install-btn');
+    if (btn) btn.style.display = '';
+});
+window.addEventListener('appinstalled', () => {
+    _installPrompt = null;
+    const btn = document.getElementById('install-btn');
+    if (btn) btn.style.display = 'none';
+});
+function installPwa() {
+    if (!_installPrompt) { toast('Use o menu do browser → "Adicionar ao ecrã inicial"', 'ok'); return; }
+    _installPrompt.prompt();
+    _installPrompt.userChoice.then(() => { _installPrompt = null; });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
     loadCfgUI();
     startGps();
     token ? checkAuth() : showLogin();
     if (getPubMode() === 'ws' && (getCfg().host || getCfg().wsport)) connectMqtt();
-    // live k recompute in settings
     ['s-width','s-qmax'].forEach(id => document.getElementById(id).addEventListener('input', updateKDisplay));
 });
 
