@@ -297,17 +297,21 @@ try {
                 break;
             }
 
+            // Permitir override das credenciais MQTT vindas da app
+            $mqttHost = !empty($body['mqtt_host']) ? trim($body['mqtt_host']) : MQTT_HOST;
+            $mqttPort = !empty($body['mqtt_port']) ? intval($body['mqtt_port'])  : MQTT_PORT;
+            $mqttUser = isset($body['mqtt_user']) && $body['mqtt_user'] !== '' ? $body['mqtt_user'] : (MQTT_USER ?: null);
+            $mqttPass = isset($body['mqtt_pass']) && $body['mqtt_pass'] !== '' ? $body['mqtt_pass'] : (MQTT_PASS ?: null);
+
             $raw     = buildCanRaw($pct);
             $payload = json_encode(['payload' => ['raw' => $raw]]);
             $topic   = '/tlvt/can/in';
 
             require_once '../lib/MqttPublisher.php';
             $mqtt = new MqttPublisher(
-                MQTT_HOST,
-                MQTT_PORT,
+                $mqttHost, $mqttPort,
                 'soilqi-can-' . $currentUser['id'] . '-' . time(),
-                MQTT_USER ?: null,
-                MQTT_PASS ?: null
+                $mqttUser, $mqttPass
             );
             $mqtt->publish($topic, $payload, 0);
             $mqtt->disconnect();
