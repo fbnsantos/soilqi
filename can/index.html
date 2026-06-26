@@ -400,12 +400,19 @@
 
         <!-- Velocidade -->
         <div class="speed-row">
-            <label>🏎 Velocidade</label>
+            <label>🏎</label>
             <input id="speed-inp" type="number" min="0" max="60" step="0.1"
-                   class="inp sm" style="width:90px"
+                   class="inp sm" style="width:76px"
                    oninput="onSpeedInput()" placeholder="0.0">
-            <span style="font-size:12px;color:var(--gray)">km/h</span>
-            <button class="speed-toggle" id="speed-src-btn" onclick="toggleSpeedSrc()">usar GPS</button>
+            <span style="font-size:12px;color:var(--gray);flex-shrink:0">km/h</span>
+            <button class="speed-toggle" id="speed-src-btn" onclick="toggleSpeedSrc()">GPS</button>
+            <div style="margin-left:auto;display:flex;align-items:baseline;gap:3px;
+                        background:var(--blue);color:#fff;border-radius:8px;padding:5px 10px;flex-shrink:0">
+                <span style="font-size:22px;font-weight:900;line-height:1" id="pwm-inline">—</span>
+                <span style="font-size:11px;font-weight:700">%</span>
+                <span style="font-size:9px;font-weight:800;padding:2px 5px;border-radius:5px;margin-left:3px;align-self:center"
+                      id="pwm-inline-mode"></span>
+            </div>
         </div>
 
         <!-- PWM display -->
@@ -550,6 +557,7 @@ let gpsReal    = null;
 let gpsWatch   = null;
 let prevGpsPos = null;   // for speed computation
 let gpsSpeedKmh = 0;
+let gpsHistory  = []; // últimas 4 posições para filtro de velocidade
 let speedSrcGps = false; // false=manual, true=GPS
 
 let prescId   = null;
@@ -615,14 +623,25 @@ function startGps() {
     if (!navigator.geolocation) { document.getElementById('gps-st').textContent='GPS não suportado'; return; }
     gpsWatch = navigator.geolocation.watchPosition(pos => {
         // Compute speed from successive positions
-        if (gpsReal) {
-            const dt = (pos.timestamp - gpsReal.timestamp) / 1000; // s
-            if (dt > 0.5 && dt < 10) {
-                const d = haversineM(
-                    gpsReal.coords.latitude, gpsReal.coords.longitude,
-                    pos.coords.latitude,     pos.coords.longitude
-                );
-                gpsSpeedKmh = (d / dt) * 3.6;
+        // Rolling buffer de 4 posições para filtro de velocidade
+        gpsHistory.push({ lat: pos.coords.latitude, lng: pos.coords.longitude, ts: pos.timestamp });
+        if (gpsHistory.length > 4) gpsHistory.shift();
+
+        if (gpsHistory.length >= 2) {
+            const speeds = [];
+            for (let i = 1; i < gpsHistory.length; i++) {
+                const dt = (gpsHistory[i].ts - gpsHistory[i-1].ts) / 1000;
+                if (dt > 0.2 && dt < 15) {
+                    const d = haversineM(gpsHistory[i-1].lat, gpsHistory[i-1].lng,
+                                         gpsHistory[i].lat,   gpsHistory[i].lng);
+                    speeds.push((d / dt) * 3.6);
+                }
+            }
+            if (speeds.length) {
+                // mediana para rejeitar outliers
+                speeds.sort((a,b) => a-b);
+                const mid = Math.floor(speeds.length / 2);
+                gpsSpeedKmh = speeds.length % 2 ? speeds[mid] : (speeds[mid-1]+speeds[mid])/2;
             }
         }
         gpsReal = pos;
@@ -775,7 +794,7 @@ function applyTransform(anim) {
     el.style.transform  = `translate(${mapOffX}px,${mapOffY}px) scale(${mapScale})`;
 }
 function zoomStep(d) {
-    mapScale = Math.min(MAX_ZOOM, Math.max(1, mapScale+d));
+    mapScale = Math.min(MAX_ZOOM, Math.max(0.5, mapScale+d));
     clamp(); applyTransform(true);
 }
 function zoomReset(anim=true) { mapScale=1; mapOffX=0; mapOffY=0; applyTransform(anim); }
@@ -950,19 +969,31 @@ function renderPwm(pct) {
     const col = pct>85 ? '#f87171' : pct>60 ? '#fbbf24' : '#4ade80';
     bar.style.background = col;
 
+    // Inline PWM (junto à velocidade)
+    const isManual = manualPwm !== null;
+    const modeLabel = isManual ? 'MAN' : 'AUTO';
+    const modeBg    = isManual ? '#f59e0b' : '#4ade80';
+    const modeFg    = isManual ? '#fff'    : '#14532d';
+    const inl  = document.getElementById('pwm-inline');
+    const inlM = document.getElementById('pwm-inline-mode');
+    if (inl) {
+        inl.textContent         = pct;
+        inl.style.color         = col;
+        inlM.textContent        = modeLabel;
+        inlM.style.background   = modeBg;
+        inlM.style.color        = modeFg;
+    }
+
     // Map badge
     const badge    = document.getElementById('pwm-map-badge');
     const badgeNum = document.getElementById('pwm-badge-num');
     const badgeMod = document.getElementById('pwm-badge-mode');
-    if (document.getElementById('map-outer').style.display !== 'none') {
-        badge.style.display = 'flex';
-        badgeNum.textContent = pct;
-        badgeNum.style.color = col;
-        const isManual = manualPwm !== null;
-        badgeMod.textContent  = isManual ? 'MANUAL' : 'AUTO';
+    if (badge) {
+        badge.style.display   = 'flex';
+        badgeNum.textContent  = pct;
+        badgeNum.style.color  = col;
+        badgeMod.textContent  = modeLabel;
         badgeMod.className    = 'pwm-badge-mode ' + (isManual ? 'manual' : 'auto');
-    } else {
-        badge.style.display = 'none';
     }
 }
 
