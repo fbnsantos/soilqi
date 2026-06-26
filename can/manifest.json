@@ -1,6 +1,6 @@
 {
-  "name": "SoilQI CAN Controller",
-  "short_name": "CAN Ctrl",
+  "name": "SOILQI VRT",
+  "short_name": "SOILQI VRT",
   "description": "Controlo de taxa variável por prescrição e GPS",
   "start_url": "./index.html",
   "scope": "./",
