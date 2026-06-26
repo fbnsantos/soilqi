@@ -962,7 +962,11 @@ function resetAll() {
     document.querySelectorAll('.pbtn').forEach(b=>b.className='pbtn');
     document.getElementById('pub-btn').disabled=true;
 }
-function scheduleZone() { clearTimeout(zoneTimer); zoneTimer=setTimeout(fetchZone,600); }
+function scheduleZone() {
+    // Em simulação o lookup é imediato (sem debounce) porque o tick é 500ms
+    if (simIv) { fetchZone(); return; }
+    clearTimeout(zoneTimer); zoneTimer=setTimeout(fetchZone,600);
+}
 function hexToRgbJS(hex) {
     hex = hex.replace('#','');
     if (hex.length===3) hex=hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
