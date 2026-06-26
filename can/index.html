@@ -1016,7 +1016,11 @@ function fetchZone() {
         return;
     }
 
-    const zoneData = mapZonePresc.find(z => parseInt(z.zone_id) === zoneId);
+    // Se todos os zone_id são 0 (bug antigo), usar posição no array (zona N = índice N-1)
+    const allZeroIds = mapZonePresc.every(z => parseInt(z.zone_id) === 0);
+    const zoneData = allZeroIds
+        ? mapZonePresc[zoneId - 1]
+        : mapZonePresc.find(z => parseInt(z.zone_id) === zoneId);
     const value    = zoneData && zoneData[field] != null ? parseFloat(zoneData[field]) : null;
     const maxVal   = mapZonePresc.reduce((m,z)=> z[field]!=null ? Math.max(m,parseFloat(z[field])) : m, 0);
 
