@@ -947,21 +947,26 @@ function scheduleZone() { clearTimeout(zoneTimer); zoneTimer=setTimeout(fetchZon
 async function fetchZone() {
     if (!prescId||!field||!gpsPos) return;
     const {latitude:lat,longitude:lng}=gpsPos.coords;
+    const mgbPwm = document.getElementById('mgb-pwm');
     try {
         const r=await api('get_zone_value','POST',{prescription_id:prescId,lat,lng,field});
         if (!r.success){
-            if (r.debug) console.warn('[CAN] zone debug', r.debug);
-            toast(r.message||'Erro','err');
+            console.warn('[CAN] zone debug', r.debug);
+            // Mostrar estado "fora de zona" na barra GPS
+            if (mgbPwm) { mgbPwm.style.display=''; mgbPwm.textContent='—'; mgbPwm.style.color='#9ca3af'; }
+            // Só mostra toast na primeira falha, não em cada tick de simulação
+            if (!fetchZone._wasOut) toast('Fora de zona','err');
+            fetchZone._wasOut = true;
             return;
         }
-        // Store prescription value for PWM calc
+        fetchZone._wasOut = false;
         window._zoneVal = r.value;
         window._zoneMax = r.max_value;
         window._zoneId  = r.zone_id;
         document.getElementById('card-pwm').style.display='block';
         document.getElementById('pub-wrap').style.display='block';
         recalcPwm();
-    } catch { toast('Erro de ligação','err'); }
+    } catch(e) { console.error('[CAN] fetchZone', e); }
 }
 
 // ── PWM calculation ───────────────────────────────────────────────────────────

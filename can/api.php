@@ -116,7 +116,8 @@ function getZoneAtLocation(array $zonation, float $lat, float $lng): ?int {
     $cy = (int)round(($maxLat - $lat) / ($maxLat - $minLat) * ($h - 1));
 
     // Amostrar vizinhança 5×5 e votar pela zona mais frequente com melhor cor
-    $votes = []; // zone_id => total_dist
+    $votes      = [];
+    $debugPixels = [];
     $radius = 2;
 
     for ($dy = -$radius; $dy <= $radius; $dy++) {
@@ -126,8 +127,10 @@ function getZoneAtLocation(array $zonation, float $lat, float $lng): ?int {
 
             $raw  = imagecolorat($img, $px, $py);
             $rgba = imagecolorsforindex($img, $raw);
+            $debugPixels[] = ['px'=>$px,'py'=>$py,'r'=>$rgba['red'],'g'=>$rgba['green'],'b'=>$rgba['blue'],'a'=>$rgba['alpha']];
+
             // GD alpha: 0=opaque, 127=transparent
-            if ($rgba['alpha'] > 80) continue;
+            if ($rgba['alpha'] > 100) continue;
 
             $r = $rgba['red'];
             $g = $rgba['green'];
@@ -141,14 +144,19 @@ function getZoneAtLocation(array $zonation, float $lat, float $lng): ?int {
                 if ($dist < $bestDist) { $bestDist = $dist; $bestZone = $i + 1; }
             }
 
-            // Só contar se a cor for próxima de alguma zona (≤ 80 por canal em média)
-            if ($bestZone !== null && $bestDist <= 240) {
-                $votes[$bestZone] = ($votes[$bestZone] ?? 0) + (240 - $bestDist);
+            // Limiar generoso: até 120 por canal em média (360 total)
+            if ($bestZone !== null && $bestDist <= 360) {
+                $votes[$bestZone] = ($votes[$bestZone] ?? 0) + (360 - $bestDist);
             }
         }
     }
 
     imagedestroy($img);
+
+    // Guardar debug para resposta
+    $GLOBALS['_zone_debug_pixels'] = array_slice($debugPixels, 0, 5);
+    $GLOBALS['_zone_debug_votes']  = $votes;
+    $GLOBALS['_zone_debug_center'] = ['cx'=>$cx,'cy'=>$cy,'w'=>$w,'h'=>$h];
 
     if (empty($votes)) return null;
 
@@ -256,7 +264,11 @@ try {
                         'min_lat' => $row['min_lat'], 'max_lat' => $row['max_lat'],
                         'min_lng' => $row['min_lng'], 'max_lng' => $row['max_lng'],
                     ],
-                    'gps' => ['lat' => $lat, 'lng' => $lng],
+                    'gps'          => ['lat' => $lat, 'lng' => $lng],
+                    'pixels'       => $GLOBALS['_zone_debug_pixels'] ?? [],
+                    'votes'        => $GLOBALS['_zone_debug_votes']  ?? [],
+                    'center'       => $GLOBALS['_zone_debug_center'] ?? [],
+                    'legend_colors'=> array_map(fn($e)=>$e['color'], $legend ?? []),
                 ];
                 break;
             }
