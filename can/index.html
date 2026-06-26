@@ -368,6 +368,7 @@
             <span class="mgb-spd"    id="mgb-spd"></span>
             <span class="mgb-acc"    id="mgb-acc"></span>
             <span class="mgb-sim"    id="mgb-sim">SIM</span>
+            <span id="mgb-pwm" style="font-size:11px;font-weight:800;color:#4ade80;display:none">—%</span>
             <button id="pub-on-btn" onclick="toggleAutoPublish()" title="Publicação automática MQTT"
                 style="background:#e5e7eb;color:#374151;border:none;border-radius:8px;padding:2px 8px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">
                 📡 OFF
@@ -1062,6 +1063,13 @@ function renderPwmRaw(val, zid) {
     }
     document.getElementById('pub-btn').disabled = false;
     document.getElementById('pub-btn').textContent = '📡 Publicar agora';
+
+    const mgbPwm = document.getElementById('mgb-pwm');
+    if (mgbPwm) {
+        mgbPwm.style.display = '';
+        mgbPwm.textContent   = val !== null ? val + ' l/ha' : '—';
+        mgbPwm.style.color   = '#93c5fd';
+    }
 }
 
 function renderPwm(pct) {
@@ -1096,6 +1104,14 @@ function renderPwm(pct) {
         badgeNum.style.color  = col;
         badgeMod.textContent  = modeLabel;
         badgeMod.className    = 'pwm-badge-mode ' + (isManual ? 'manual' : 'auto');
+    }
+
+    // GPS bar indicator
+    const mgbPwm = document.getElementById('mgb-pwm');
+    if (mgbPwm) {
+        mgbPwm.style.display = '';
+        mgbPwm.textContent   = pct + '%';
+        mgbPwm.style.color   = col;
     }
 }
 
