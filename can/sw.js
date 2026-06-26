@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_VERSION = 'v5';
+const CACHE_VERSION = 'v6';
 const CACHE = `soilqi-can-${CACHE_VERSION}`;
 
 const STATIC = [

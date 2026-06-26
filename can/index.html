@@ -582,6 +582,10 @@ k = largura [m] / (6 × Q_max [l/min])</div>
         </div>
 
         <div class="sep"></div>
+        <div style="font-size:13px;font-weight:700;margin-bottom:8px;">🔑 API Key</div>
+        <label class="flabel">Chave de acesso SoilQI</label>
+        <input id="s-apikey" class="inp mono mb8" type="password" placeholder="Cole a API Key aqui…" autocomplete="off">
+        <div class="sep"></div>
         <button class="btn btn-blue" onclick="saveSettings()">💾 Guardar configuração</button>
     </div>
 </div>
@@ -1602,6 +1606,7 @@ function loadCfgUI() {
     document.getElementById('s-topic').value      = c.topic||'';
     document.getElementById('s-wsport').value     = c.wsport||'';
     document.getElementById('s-gnss-topic').value = c.gnss_topic||'';
+    document.getElementById('s-apikey').value     = localStorage.getItem(ST.token)||'';
     setPubMode(c.pub_mode || 'php');
     updateKDisplay();
 }
@@ -1631,8 +1636,20 @@ function saveSettings() {
     };
     Object.keys(cfg).forEach(k=>cfg[k]===undefined&&delete cfg[k]);
     localStorage.setItem(ST.cfg,JSON.stringify(cfg));
-    toast('✅ Configuração guardada','ok');
-    closeMo('mo-settings');
+
+    // API Key — guardar e re-autenticar se mudou
+    const newKey = document.getElementById('s-apikey').value.trim();
+    if (newKey && newKey !== localStorage.getItem(ST.token)) {
+        token = newKey;
+        localStorage.setItem(ST.token, newKey);
+        toast('✅ Configuração guardada — a verificar nova API Key…','ok');
+        closeMo('mo-settings');
+        checkAuth();
+    } else {
+        toast('✅ Configuração guardada','ok');
+        closeMo('mo-settings');
+    }
+
     recalcPwm();
     if (cfg.pub_mode === 'ws') connectMqtt();
 }
