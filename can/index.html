@@ -566,12 +566,18 @@ k = largura [m] / (6 × Q_max [l/min])</div>
         <input id="s-pass" class="inp mb8" type="password" placeholder="(opcional)">
         <div class="frow mb8">
             <div>
-                <label class="flabel">Tópico MQTT</label>
+                <label class="flabel">Tópico CAN</label>
                 <input id="s-topic" class="inp sm mono" type="text" placeholder="/tlvt/can/in">
             </div>
             <div id="wsport-wrap">
                 <label class="flabel">Porta WebSocket</label>
                 <input id="s-wsport" class="inp sm mono" type="number" placeholder="9001">
+            </div>
+        </div>
+        <div class="frow mb8">
+            <div style="flex:1">
+                <label class="flabel">Tópico GNSS (GPS + PWM)</label>
+                <input id="s-gnss-topic" class="inp mono" type="text" placeholder="/tlvt/can/gnss">
             </div>
         </div>
 
@@ -1508,10 +1514,14 @@ function toggleAutoPublish() {
         }
         setAutoPublishUI(true);
         autoPublishIv = setInterval(() => {
-            // publica 0% se não houver valor de zona (fora do terreno)
             const pct = getCurrentPwm() ?? 0;
-            if (getPubMode() === 'ws') mqttPublish(pct);
-            else publishViaApi(pct);
+            if (getPubMode() === 'ws') {
+                mqttPublish(pct);
+                publishGnssWs();
+            } else {
+                publishViaApi(pct);
+                publishGnssApi();
+            }
         }, 500);
     }
 }
@@ -1530,6 +1540,52 @@ function publishOnce() {
     }
 }
 
+function getGnssTopic() { return getCfg().gnss_topic || '/tlvt/can/gnss'; }
+
+function gnssPayload() {
+    if (!gpsPos) return null;
+    const {latitude:lat, longitude:lng, accuracy:acc} = gpsPos.coords;
+    return JSON.stringify({
+        lat:   parseFloat(lat.toFixed(7)),
+        lng:   parseFloat(lng.toFixed(7)),
+        acc:   Math.round(acc || 0),
+        spd:   parseFloat(getSpeed().toFixed(2)),
+        pwm:   getCurrentPwm() ?? 0,
+        val:   window._zoneVal ?? null,
+        zone:  window._zoneId  ?? null,
+        ts:    Date.now(),
+    });
+}
+
+function publishGnssWs() {
+    const payload = gnssPayload();
+    if (!payload || !mqttClient || !mqttClient.connected) return;
+    mqttClient.publish(getGnssTopic(), payload, {qos:0, retain:false});
+}
+
+async function publishGnssApi() {
+    const payload = gnssPayload();
+    if (!payload) return;
+    const cfg = getCfg();
+    const body = {
+        action:     'publish_raw',
+        topic:      getGnssTopic(),
+        payload,
+        mqtt_host:  cfg.host  || undefined,
+        mqtt_port:  cfg.port  || undefined,
+        mqtt_user:  cfg.user  || undefined,
+        mqtt_pass:  cfg.pass  || undefined,
+    };
+    Object.keys(body).forEach(k => body[k]===undefined && delete body[k]);
+    try {
+        await fetch('api.php?action=publish_raw', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json', 'Authorization':'Bearer '+token},
+            body: JSON.stringify(body),
+        });
+    } catch(e) { console.warn('[GNSS]', e); }
+}
+
 // ── Settings ─────────────────────────────────────────────────────────────────
 function getCfg() {
     try { return JSON.parse(localStorage.getItem(ST.cfg)||'{}'); } catch { return {}; }
@@ -1543,8 +1599,9 @@ function loadCfgUI() {
     document.getElementById('s-port').value   = c.port||'';
     document.getElementById('s-user').value   = c.user||'';
     document.getElementById('s-pass').value   = c.pass||'';
-    document.getElementById('s-topic').value  = c.topic||'';
-    document.getElementById('s-wsport').value = c.wsport||'';
+    document.getElementById('s-topic').value      = c.topic||'';
+    document.getElementById('s-wsport').value     = c.wsport||'';
+    document.getElementById('s-gnss-topic').value = c.gnss_topic||'';
     setPubMode(c.pub_mode || 'php');
     updateKDisplay();
 }
@@ -1567,7 +1624,8 @@ function saveSettings() {
         port: parseInt(document.getElementById('s-port').value)||undefined,
         user: document.getElementById('s-user').value.trim()||undefined,
         pass:   document.getElementById('s-pass').value||undefined,
-        topic:  document.getElementById('s-topic').value.trim()||undefined,
+        topic:       document.getElementById('s-topic').value.trim()||undefined,
+        gnss_topic:  document.getElementById('s-gnss-topic').value.trim()||undefined,
         wsport: parseInt(document.getElementById('s-wsport').value)||undefined,
         pub_mode: getCfg().pub_mode || 'php',
     };

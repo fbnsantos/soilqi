@@ -371,6 +371,29 @@ try {
             $response['topic']   = $topic;
             break;
 
+        case 'publish_raw':
+            $topic   = !empty($body['topic'])     ? trim($body['topic'])           : '/tlvt/can/gnss';
+            $payload = !empty($body['payload'])   ? $body['payload']               : '';
+            if (!$payload) { $response['message'] = 'Payload vazio.'; break; }
+
+            $mqttHost = !empty($body['mqtt_host']) ? trim($body['mqtt_host'])  : MQTT_HOST;
+            $mqttPort = !empty($body['mqtt_port']) ? intval($body['mqtt_port']): MQTT_PORT;
+            $mqttUser = !empty($body['mqtt_user']) ? $body['mqtt_user']        : (MQTT_USER ?: null);
+            $mqttPass = !empty($body['mqtt_pass']) ? $body['mqtt_pass']        : (MQTT_PASS ?: null);
+
+            require_once '../lib/MqttPublisher.php';
+            $mqtt = new MqttPublisher(
+                $mqttHost, $mqttPort,
+                'soilqi-gnss-' . $currentUser['id'] . '-' . time(),
+                $mqttUser, $mqttPass
+            );
+            $mqtt->publish($topic, $payload, 0);
+            $mqtt->disconnect();
+
+            $response['success'] = true;
+            $response['topic']   = $topic;
+            break;
+
         default:
             http_response_code(400);
             $response['message'] = 'Ação desconhecida: ' . htmlspecialchars($action);
