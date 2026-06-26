@@ -326,6 +326,17 @@
 </head>
 <body>
 
+<!-- ── Update banner ───────────────────────────────────── -->
+<div id="update-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;
+     background:#1d4ed8;color:#fff;padding:10px 16px;display:none;
+     align-items:center;gap:10px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.3)">
+    <span style="flex:1">🆕 Nova versão disponível</span>
+    <button onclick="applyUpdate()" style="background:#fff;color:#1d4ed8;border:none;border-radius:6px;
+            padding:6px 14px;font-weight:800;font-size:12px;cursor:pointer">Atualizar</button>
+    <button onclick="document.getElementById('update-banner').style.display='none'"
+            style="background:none;border:none;color:#fff;font-size:18px;cursor:pointer;padding:0 4px">✕</button>
+</div>
+
 <!-- ── Header ──────────────────────────────────────────── -->
 <header class="hdr">
     <div>
@@ -645,6 +656,20 @@ let simPtA = null, simPtB = null; // {lat,lng}
 let pickMode = null; // 'A' | 'B' | null
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
+// ── SW update detection ───────────────────────────────────────────────────────
+let _swReg = null;
+function showUpdateBanner() {
+    document.getElementById('update-banner').style.display = 'flex';
+}
+function applyUpdate() {
+    if (_swReg && _swReg.waiting) {
+        _swReg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        navigator.serviceWorker.addEventListener('controllerchange', () => location.reload());
+    } else {
+        location.reload();
+    }
+}
+
 let _installPrompt = null;
 window.addEventListener('beforeinstallprompt', e => {
     e.preventDefault();
@@ -664,7 +689,22 @@ function installPwa() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('./sw.js').then(reg => {
+            _swReg = reg;
+            // SW já está em espera (página recarregada após update)
+            if (reg.waiting) showUpdateBanner();
+            // Novo SW encontrado durante a sessão
+            reg.addEventListener('updatefound', () => {
+                const sw = reg.installing;
+                sw.addEventListener('statechange', () => {
+                    if (sw.state === 'installed' && navigator.serviceWorker.controller) {
+                        showUpdateBanner();
+                    }
+                });
+            });
+        }).catch(() => {});
+    }
     loadCfgUI();
     startGps();
     token ? checkAuth() : showLogin();

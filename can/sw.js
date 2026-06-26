@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v4';
 const CACHE = `soilqi-can-${CACHE_VERSION}`;
 
 const STATIC = [
@@ -13,10 +13,10 @@ const STATIC = [
 ];
 
 self.addEventListener('install', e => {
+    // Pre-cache static assets but do NOT skipWaiting —
+    // the app will prompt the user before activating.
     e.waitUntil(
-        caches.open(CACHE)
-              .then(c => c.addAll(STATIC))
-              .then(() => self.skipWaiting())
+        caches.open(CACHE).then(c => c.addAll(STATIC))
     );
 });
 
@@ -30,6 +30,7 @@ self.addEventListener('activate', e => {
     );
 });
 
+// App sends SKIP_WAITING when user confirms update
 self.addEventListener('message', e => {
     if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
@@ -37,6 +38,7 @@ self.addEventListener('message', e => {
 self.addEventListener('fetch', e => {
     const url = new URL(e.request.url);
 
+    // API: always network, fallback to offline message
     if (url.pathname.endsWith('api.php')) {
         e.respondWith(
             fetch(e.request).catch(() =>
@@ -49,6 +51,7 @@ self.addEventListener('fetch', e => {
         return;
     }
 
+    // Static: network-first, update cache, fallback to cache
     e.respondWith(
         fetch(e.request)
             .then(res => {
