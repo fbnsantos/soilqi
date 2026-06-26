@@ -78,7 +78,12 @@ function hexToRgb(string $hex): array {
 
 /**
  * Determina o zone_id (1-based) correspondente a lat/lng no PNG de zonação.
- * Retorna null se fora dos limites ou se GD não estiver disponível.
+ * Retorna null se fora dos limites, GD indisponível, ou pixel for fundo.
+ *
+ * Melhorias:
+ *  - Só rejeita pixels com alpha GD >= 100 (≈80% transparente), não qualquer transparência
+ *  - Amostra uma vizinhança 5×5 para tolerar imprecisão de GPS
+ *  - Só aceita correspondência se distância de cor ≤ 80 (em 0-765)
  */
 function getZoneAtLocation(array $zonation, float $lat, float $lng): ?int {
     if (!function_exists('imagecreatefromstring')) return null;
@@ -88,7 +93,12 @@ function getZoneAtLocation(array $zonation, float $lat, float $lng): ?int {
     $minLng = (float)$zonation['min_lng'];
     $maxLng = (float)$zonation['max_lng'];
 
-    if ($lat < $minLat || $lat > $maxLat || $lng < $minLng || $lng > $maxLng) {
+    // Largura/tolerância de 10% dos limites para aceitar posições ligeiramente fora
+    $latTol = ($maxLat - $minLat) * 0.01;
+    $lngTol = ($maxLng - $minLng) * 0.01;
+
+    if ($lat < $minLat - $latTol || $lat > $maxLat + $latTol ||
+        $lng < $minLng - $lngTol || $lng > $maxLng + $lngTol) {
         return null;
     }
 
@@ -98,36 +108,54 @@ function getZoneAtLocation(array $zonation, float $lat, float $lng): ?int {
     $w = imagesx($img);
     $h = imagesy($img);
 
-    $px = (int)round(($lng - $minLng) / ($maxLng - $minLng) * ($w - 1));
-    $py = (int)round(($maxLat - $lat) / ($maxLat - $minLat) * ($h - 1));
-    $px = max(0, min($w - 1, $px));
-    $py = max(0, min($h - 1, $py));
-
-    $rgb = imagecolorat($img, $px, $py);
-    imagedestroy($img);
-
-    $r = ($rgb >> 16) & 0xFF;
-    $g = ($rgb >> 8)  & 0xFF;
-    $b =  $rgb        & 0xFF;
-
-    // Pixel totalmente transparente → fora do polígono
-    if (($rgb >> 24) & 0x7F) return null;
-
     $legend = json_decode($zonation['legend'], true);
-    if (!$legend) return null;
+    if (!$legend) { imagedestroy($img); return null; }
 
-    $bestZone = null;
-    $bestDist = PHP_INT_MAX;
-    foreach ($legend as $i => $entry) {
-        [$lr, $lg, $lb] = hexToRgb($entry['color']);
-        $dist = abs($r - $lr) + abs($g - $lg) + abs($b - $lb);
-        if ($dist < $bestDist) {
-            $bestDist = $dist;
-            $bestZone = $i + 1; // 1-indexed
+    // Centro em pixels
+    $cx = (int)round(($lng - $minLng) / ($maxLng - $minLng) * ($w - 1));
+    $cy = (int)round(($maxLat - $lat) / ($maxLat - $minLat) * ($h - 1));
+
+    // Amostrar vizinhança 5×5 e votar pela zona mais frequente com melhor cor
+    $votes = []; // zone_id => total_dist
+    $radius = 2;
+
+    for ($dy = -$radius; $dy <= $radius; $dy++) {
+        for ($dx = -$radius; $dx <= $radius; $dx++) {
+            $px = max(0, min($w - 1, $cx + $dx));
+            $py = max(0, min($h - 1, $cy + $dy));
+
+            $raw   = imagecolorat($img, $px, $py);
+            $alpha = ($raw >> 24) & 0x7F;  // 0=opaco, 127=transparente (GD)
+
+            // Rejeitar pixels maioritariamente transparentes (fundo do PNG)
+            if ($alpha > 80) continue;
+
+            $r = ($raw >> 16) & 0xFF;
+            $g = ($raw >> 8)  & 0xFF;
+            $b =  $raw        & 0xFF;
+
+            $bestZone = null;
+            $bestDist = PHP_INT_MAX;
+            foreach ($legend as $i => $entry) {
+                [$lr, $lg, $lb] = hexToRgb($entry['color']);
+                $dist = abs($r - $lr) + abs($g - $lg) + abs($b - $lb);
+                if ($dist < $bestDist) { $bestDist = $dist; $bestZone = $i + 1; }
+            }
+
+            // Só contar se a cor for próxima de alguma zona (≤ 80 por canal em média)
+            if ($bestZone !== null && $bestDist <= 240) {
+                $votes[$bestZone] = ($votes[$bestZone] ?? 0) + (240 - $bestDist);
+            }
         }
     }
 
-    return $bestZone;
+    imagedestroy($img);
+
+    if (empty($votes)) return null;
+
+    // Zona com maior peso de votos
+    arsort($votes);
+    return (int)array_key_first($votes);
 }
 
 /**
@@ -219,8 +247,18 @@ try {
             $zone_id = getZoneAtLocation($row, $lat, $lng);
 
             if ($zone_id === null) {
-                $response['message'] = 'Posição GPS fora do terreno ou zonação indisponível.';
+                $response['message'] = 'Posição GPS fora do terreno ou sem correspondência no mapa.';
                 $response['out_of_bounds'] = true;
+                $response['debug'] = [
+                    'gd_available' => function_exists('imagecreatefromstring'),
+                    'has_png'      => !empty($row['png_data']),
+                    'has_legend'   => !empty($row['legend']),
+                    'bounds'       => [
+                        'min_lat' => $row['min_lat'], 'max_lat' => $row['max_lat'],
+                        'min_lng' => $row['min_lng'], 'max_lng' => $row['max_lng'],
+                    ],
+                    'gps' => ['lat' => $lat, 'lng' => $lng],
+                ];
                 break;
             }
 

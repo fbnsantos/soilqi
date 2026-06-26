@@ -882,7 +882,11 @@ async function fetchZone() {
     const {latitude:lat,longitude:lng}=gpsPos.coords;
     try {
         const r=await api('get_zone_value','POST',{prescription_id:prescId,lat,lng,field});
-        if (!r.success){ toast(r.message||'Erro','err'); return; }
+        if (!r.success){
+            if (r.debug) console.warn('[CAN] zone debug', r.debug);
+            toast(r.message||'Erro','err');
+            return;
+        }
         // Store prescription value for PWM calc
         window._zoneVal = r.value;
         window._zoneMax = r.max_value;
