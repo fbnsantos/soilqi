@@ -931,13 +931,16 @@ function recalcPwm() {
     ba.style.display=''; bm.style.display='none';
 
     if (!k) {
-        fl.textContent='Configure largura e Q máx em ⚙️';
-        warn.textContent='⚠️ Ganho k não configurado';
-        num.textContent='—'; bar.style.width='0%'; return;
+        fl.textContent = `Zona ${zid} · ${val} l/ha — configure k em ⚙️ para cálculo AUTO`;
+        warn.textContent = '';
+        // Sem k: mostra prescrição bruta, deixa botões manuais activos
+        autoPwm = null;
+        renderPwmRaw(val, zid);
+        return;
     }
     if (spd <= 0) {
-        fl.textContent=`${val} l/ha × ${k.toFixed(4)} × 0 km/h = 0%`;
-        warn.textContent=''; renderPwm(0); return;
+        fl.textContent = `${val} l/ha × k=${k.toFixed(4)} × 0 km/h = 0%`;
+        warn.textContent = ''; renderPwm(0); return;
     }
 
     let pwm = val * k * spd;
@@ -949,12 +952,11 @@ function recalcPwm() {
     } else if (pwm < 0) {
         pwm = 0; warn.textContent='';
     } else {
-        warn.textContent='';
+        warn.textContent = '';
     }
 
     autoPwm = Math.round(pwm);
 
-    // Highlight nearest manual button
     document.querySelectorAll('.pbtn').forEach(b => {
         const p = parseInt(b.dataset.pct);
         b.classList.toggle('auto-mark', Math.abs(p - autoPwm) <= 12);
@@ -964,6 +966,37 @@ function recalcPwm() {
     renderPwm(autoPwm);
     document.getElementById('pub-btn').disabled = false;
     document.getElementById('pub-btn').textContent = `📡 Publicar ${autoPwm}%`;
+}
+
+// Mostra o valor bruto de prescrição quando k não está configurado
+function renderPwmRaw(val, zid) {
+    const num = document.getElementById('pwm-num');
+    const bar = document.getElementById('pwm-bar');
+    num.textContent = val !== null ? val : '—';
+    num.style.color = '#93c5fd';
+    bar.style.width = '0%';
+    const inl  = document.getElementById('pwm-inline');
+    const inlM = document.getElementById('pwm-inline-mode');
+    if (inl) {
+        inl.textContent       = val !== null ? val : '—';
+        inl.style.color       = '#93c5fd';
+        inlM.textContent      = 'l/ha';
+        inlM.style.background = '#1e40af';
+        inlM.style.color      = '#fff';
+    }
+    const badge = document.getElementById('pwm-map-badge');
+    const badgeNum = document.getElementById('pwm-badge-num');
+    const badgeMod = document.getElementById('pwm-badge-mode');
+    if (badge) {
+        badge.style.display  = 'flex';
+        badgeNum.textContent = val !== null ? val : '—';
+        badgeNum.style.color = '#93c5fd';
+        badgeMod.textContent = 'l/ha';
+        badgeMod.className   = 'pwm-badge-mode manual';
+    }
+    // Habilitar botões manuais mesmo sem k
+    document.getElementById('pub-btn').disabled = true;
+    document.getElementById('pub-btn').textContent = '⚙️ Configure k para publicar AUTO';
 }
 
 function renderPwm(pct) {
