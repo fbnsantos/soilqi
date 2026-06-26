@@ -428,6 +428,15 @@ if (!$isLoggedIn) {
                               text-decoration:none;transition:background .15s;white-space:nowrap;">
                         📱 App Móvel
                     </a>
+                    <!-- Botão CAN Controller PWA -->
+                    <a href="can/" target="_blank" rel="noopener"
+                       title="CAN Controller — Taxa variável por prescrição GPS"
+                       style="display:inline-flex;align-items:center;gap:5px;padding:5px 12px;
+                              background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.35);
+                              border-radius:20px;color:#fff;font-size:11px;font-weight:600;
+                              text-decoration:none;transition:background .15s;white-space:nowrap;">
+                        🚜 CAN Controller
+                    </a>
                 </div>
             </div>
             <div class="header-right">

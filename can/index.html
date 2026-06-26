@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#1e3a5f">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="CAN Ctrl">
+    <title>SoilQI CAN Controller</title>
+    <link rel="manifest" href="manifest.json">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --blue:   #1e3a5f;
+            --blue2:  #2563eb;
+            --green:  #16a34a;
+            --red:    #dc2626;
+            --yellow: #ca8a04;
+            --gray:   #6b7280;
+            --light:  #f3f4f6;
+            --card:   #ffffff;
+            --radius: 12px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--light);
+            color: #111827;
+            min-height: 100dvh;
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
+        /* ── Header ── */
+        .app-header {
+            background: var(--blue);
+            color: #fff;
+            padding: 14px 16px calc(14px + env(safe-area-inset-top));
+            padding-top: calc(14px + env(safe-area-inset-top));
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .app-header h1 { font-size: 17px; font-weight: 700; }
+        .app-header .sub { font-size: 11px; opacity: .7; margin-top: 1px; }
+        .header-right { display: flex; align-items: center; gap: 10px; }
+        .status-dot {
+            width: 10px; height: 10px; border-radius: 50%;
+            background: #9ca3af; border: 2px solid rgba(255,255,255,.4);
+        }
+        .status-dot.online  { background: #4ade80; }
+        .status-dot.offline { background: #f87171; }
+
+        /* ── Login ── */
+        .login-screen {
+            display: flex; align-items: center; justify-content: center;
+            min-height: calc(100dvh - 60px); padding: 24px 16px;
+        }
+        .login-card {
+            background: var(--card); border-radius: var(--radius);
+            padding: 28px 24px; max-width: 380px; width: 100%;
+            box-shadow: 0 4px 24px rgba(0,0,0,.08);
+            text-align: center;
+        }
+        .login-logo { font-size: 40px; margin-bottom: 12px; }
+        .login-card h2 { font-size: 20px; margin-bottom: 6px; }
+        .login-card p  { font-size: 13px; color: var(--gray); line-height: 1.5; margin-bottom: 20px; }
+        .input-field {
+            width: 100%; padding: 11px 12px;
+            border: 1.5px solid #d1d5db; border-radius: 9px;
+            font-size: 13px; font-family: monospace;
+            outline: none; color: #111827;
+            transition: border-color .15s; margin-bottom: 14px;
+        }
+        .input-field:focus { border-color: var(--blue2); }
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+            padding: 12px 16px; border: none; border-radius: 9px;
+            font-size: 15px; font-weight: 700; cursor: pointer;
+            transition: opacity .15s; width: 100%;
+        }
+        .btn:active { opacity: .75; }
+        .btn-primary { background: var(--blue2); color: #fff; }
+        .btn-green   { background: var(--green); color: #fff; }
+        .btn-danger  { background: var(--red); color: #fff; }
+
+        /* ── Cards ── */
+        .card {
+            background: var(--card); border-radius: var(--radius);
+            padding: 16px; margin: 12px 12px 0;
+            box-shadow: 0 1px 4px rgba(0,0,0,.06);
+        }
+        .card-title {
+            font-size: 11px; font-weight: 700; color: var(--gray);
+            text-transform: uppercase; letter-spacing: .6px; margin-bottom: 10px;
+        }
+
+        /* ── GPS card ── */
+        .gps-card { border-left: 4px solid #9ca3af; }
+        .gps-card.fix  { border-color: var(--green); }
+        .gps-card.poor { border-color: var(--yellow); }
+        .gps-status { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+        .gps-coords { font-size: 12px; color: var(--gray); font-family: monospace; }
+        .gps-acc    { font-size: 11px; color: var(--gray); margin-top: 2px; }
+
+        /* ── Selects ── */
+        .select-field {
+            width: 100%; padding: 10px 12px;
+            border: 1.5px solid #d1d5db; border-radius: 9px;
+            font-size: 14px; background: #fff;
+            outline: none; color: #111827; cursor: pointer;
+        }
+        .select-field:focus { border-color: var(--blue2); }
+
+        /* ── Zone info ── */
+        .zone-box {
+            background: var(--light); border-radius: 10px;
+            padding: 14px 16px; text-align: center; margin-top: 10px;
+        }
+        .zone-label { font-size: 12px; color: var(--gray); margin-bottom: 4px; }
+        .zone-value { font-size: 32px; font-weight: 800; color: var(--blue); }
+        .zone-unit  { font-size: 13px; color: var(--gray); }
+        .zone-name  { font-size: 11px; color: var(--gray); margin-top: 4px; }
+
+        /* ── Percentagem buttons ── */
+        .pct-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 8px; margin-top: 10px;
+        }
+        .pct-btn {
+            padding: 14px 0; border: 2px solid #d1d5db;
+            border-radius: 10px; background: #fff;
+            font-size: 13px; font-weight: 700; color: #374151;
+            cursor: pointer; transition: all .15s; text-align: center;
+        }
+        .pct-btn:active { transform: scale(.94); }
+        .pct-btn.selected {
+            border-color: var(--blue2); background: var(--blue2); color: #fff;
+        }
+        .pct-btn.suggested {
+            border-color: var(--green);
+        }
+        .pct-btn.suggested.selected {
+            border-color: var(--blue2); background: var(--blue2); color: #fff;
+        }
+
+        /* ── Publish ── */
+        .publish-area { padding: 12px 12px 24px; }
+        .publish-btn {
+            width: 100%; padding: 18px;
+            background: var(--green); color: #fff;
+            border: none; border-radius: var(--radius);
+            font-size: 18px; font-weight: 800;
+            cursor: pointer; transition: opacity .15s;
+            box-shadow: 0 4px 12px rgba(22,163,74,.3);
+        }
+        .publish-btn:active { opacity: .8; transform: scale(.98); }
+        .publish-btn:disabled {
+            background: #9ca3af; box-shadow: none; cursor: not-allowed;
+        }
+
+        /* ── Toast ── */
+        .toast {
+            position: fixed; bottom: calc(24px + env(safe-area-inset-bottom));
+            left: 50%; transform: translateX(-50%) translateY(20px);
+            background: #1f2937; color: #fff;
+            padding: 10px 20px; border-radius: 20px;
+            font-size: 13px; font-weight: 600;
+            opacity: 0; transition: all .25s;
+            white-space: nowrap; max-width: 90vw;
+            z-index: 999; pointer-events: none;
+        }
+        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        .toast.ok   { background: #15803d; }
+        .toast.err  { background: #b91c1c; }
+
+        /* ── Last publish ── */
+        .last-pub {
+            font-size: 11px; color: var(--gray); text-align: center;
+            margin-top: 8px; font-family: monospace;
+        }
+
+        select option:disabled { color: #9ca3af; }
+        .spinner {
+            display: inline-block; width: 14px; height: 14px;
+            border: 2px solid rgba(255,255,255,.4);
+            border-top-color: #fff; border-radius: 50%;
+            animation: spin .6s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<header class="app-header">
+    <div>
+        <h1>🚜 CAN Controller</h1>
+        <div class="sub">SoilQI — Taxa variável</div>
+    </div>
+    <div class="header-right">
+        <span id="user-label" style="font-size:12px;opacity:.8;display:none"></span>
+        <div id="status-dot" class="status-dot" title="Estado"></div>
+    </div>
+</header>
+
+<!-- ── Login ─────────────────────────────────────────────── -->
+<div id="login-screen" class="login-screen" style="display:none">
+    <div class="login-card">
+        <div class="login-logo">🚜</div>
+        <h2>CAN Controller</h2>
+        <p>Introduza a sua <strong>API Key</strong> para aceder.<br>
+           Obtenha-a em <a href="../" target="_blank" style="color:var(--blue2);font-weight:600">SoilQI</a>
+           clicando em 🔑.</p>
+        <input id="apikey-input" type="text" autocomplete="off" spellcheck="false"
+               class="input-field" placeholder="Cole a sua API Key aqui…"
+               onkeydown="if(event.key==='Enter')submitApiKey()">
+        <button class="btn btn-primary" onclick="submitApiKey()" id="apikey-submit-btn">
+            🔑 Conectar
+        </button>
+        <div id="apikey-error" style="display:none;margin-top:10px;padding:8px 10px;
+             background:#fee2e2;color:#991b1b;border-radius:7px;font-size:12px;
+             font-weight:600;text-align:center;"></div>
+    </div>
+</div>
+
+<!-- ── Main UI ────────────────────────────────────────────── -->
+<div id="main-ui" style="display:none">
+
+    <!-- GPS -->
+    <div class="card gps-card" id="gps-card">
+        <div class="card-title">📍 Posição GPS</div>
+        <div class="gps-status" id="gps-status">A obter localização…</div>
+        <div class="gps-coords" id="gps-coords"></div>
+        <div class="gps-acc" id="gps-acc"></div>
+    </div>
+
+    <!-- Terreno -->
+    <div class="card">
+        <div class="card-title">🗺 Terreno</div>
+        <select id="terrain-select" class="select-field" onchange="onTerrainChange()">
+            <option value="">— Selecione um terreno —</option>
+        </select>
+    </div>
+
+    <!-- Prescrição -->
+    <div class="card" id="prescription-card" style="display:none">
+        <div class="card-title">📋 Prescrição</div>
+        <select id="prescription-select" class="select-field" onchange="onPrescriptionChange()">
+            <option value="">— Selecione uma prescrição —</option>
+        </select>
+        <div style="margin-top:8px;display:none" id="field-row">
+            <select id="field-select" class="select-field" onchange="onFieldChange()">
+                <option value="">— Parâmetro —</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Valor na zona actual -->
+    <div class="card" id="zone-card" style="display:none">
+        <div class="card-title">📊 Zona actual</div>
+        <div class="zone-box">
+            <div class="zone-label" id="zone-label">—</div>
+            <div class="zone-value" id="zone-value">—</div>
+            <div class="zone-unit"  id="zone-unit"></div>
+            <div class="zone-name"  id="zone-name"></div>
+        </div>
+    </div>
+
+    <!-- Percentagem -->
+    <div class="card" id="pct-card" style="display:none">
+        <div class="card-title">⚙️ Taxa de aplicação</div>
+        <div class="pct-grid" id="pct-grid">
+            <button class="pct-btn" data-pct="0"   onclick="selectPct(0)">0%</button>
+            <button class="pct-btn" data-pct="25"  onclick="selectPct(25)">25%</button>
+            <button class="pct-btn" data-pct="50"  onclick="selectPct(50)">50%</button>
+            <button class="pct-btn" data-pct="75"  onclick="selectPct(75)">75%</button>
+            <button class="pct-btn" data-pct="100" onclick="selectPct(100)">100%</button>
+        </div>
+    </div>
+
+    <!-- Publicar -->
+    <div class="publish-area" id="publish-area" style="display:none">
+        <button class="publish-btn" id="publish-btn" onclick="publishCan()" disabled>
+            📡 Publicar
+        </button>
+        <div class="last-pub" id="last-pub"></div>
+    </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+// ── State ─────────────────────────────────────────────────────────────────────
+const API   = './api.php';
+const TOKEN_KEY = 'soilqi_can_token';
+
+let token    = localStorage.getItem(TOKEN_KEY) || '';
+let gpsPos   = null;
+let gpsWatch = null;
+let selectedPct = null;
+let selectedPrescriptionId = null;
+let selectedField = null;
+let zoneUpdateTimer = null;
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('./sw.js').catch(() => {});
+    }
+    if (token) {
+        checkAuth();
+    } else {
+        showLogin();
+    }
+    startGps();
+});
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+function showLogin() {
+    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('main-ui').style.display = 'none';
+}
+
+function showMain(username) {
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('main-ui').style.display = 'block';
+    document.getElementById('user-label').textContent = username;
+    document.getElementById('user-label').style.display = '';
+    setStatus('online');
+    loadTerrains();
+}
+
+async function checkAuth() {
+    try {
+        const r = await apiFetch('check_auth', 'GET');
+        if (r.success) {
+            showMain(r.username);
+        } else {
+            localStorage.removeItem(TOKEN_KEY);
+            token = '';
+            showLogin();
+        }
+    } catch {
+        setStatus('offline');
+        if (token) showMain('…'); // mostrar UI offline
+        else showLogin();
+    }
+}
+
+async function submitApiKey() {
+    const btn = document.getElementById('apikey-submit-btn');
+    const err = document.getElementById('apikey-error');
+    const key = document.getElementById('apikey-input').value.trim();
+
+    err.style.display = 'none';
+    if (!key) { showError('Introduza a API Key.'); return; }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> A verificar…';
+
+    try {
+        token = key;
+        const r = await apiFetch('check_auth', 'GET');
+        if (r.success) {
+            localStorage.setItem(TOKEN_KEY, key);
+            showMain(r.username);
+        } else {
+            token = '';
+            err.textContent = r.message || 'API Key inválida.';
+            err.style.display = 'block';
+        }
+    } catch {
+        err.textContent = 'Sem ligação ao servidor.';
+        err.style.display = 'block';
+        token = '';
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '🔑 Conectar';
+    }
+}
+
+// ── GPS ───────────────────────────────────────────────────────────────────────
+function startGps() {
+    if (!navigator.geolocation) {
+        document.getElementById('gps-status').textContent = 'GPS não suportado';
+        return;
+    }
+    gpsWatch = navigator.geolocation.watchPosition(
+        pos => {
+            gpsPos = pos;
+            const { latitude: lat, longitude: lng, accuracy: acc } = pos.coords;
+            const card   = document.getElementById('gps-card');
+            const status = document.getElementById('gps-status');
+            const coords = document.getElementById('gps-coords');
+            const accEl  = document.getElementById('gps-acc');
+
+            coords.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+            accEl.textContent  = `Precisão: ±${Math.round(acc)} m`;
+
+            if (acc <= 20) {
+                card.className = 'card gps-card fix';
+                status.textContent = '✅ Sinal GPS fixo';
+            } else if (acc <= 100) {
+                card.className = 'card gps-card poor';
+                status.textContent = '⚠️ Sinal GPS fraco';
+            } else {
+                card.className = 'card gps-card';
+                status.textContent = '🔍 A melhorar sinal…';
+            }
+
+            // Actualizar zona se prescrição seleccionada
+            if (selectedPrescriptionId && selectedField) {
+                scheduleZoneUpdate();
+            }
+        },
+        err => {
+            document.getElementById('gps-status').textContent =
+                err.code === 1 ? '🚫 Permissão de GPS negada' : '📡 Sem sinal GPS';
+        },
+        { enableHighAccuracy: true, maximumAge: 3000, timeout: 15000 }
+    );
+}
+
+function scheduleZoneUpdate() {
+    clearTimeout(zoneUpdateTimer);
+    zoneUpdateTimer = setTimeout(fetchZoneValue, 500);
+}
+
+// ── Terrenos ──────────────────────────────────────────────────────────────────
+async function loadTerrains() {
+    try {
+        const r = await apiFetch('get_terrains', 'GET');
+        if (!r.success) return;
+        const sel = document.getElementById('terrain-select');
+        sel.innerHTML = '<option value="">— Selecione um terreno —</option>';
+        r.terrains.forEach(t => {
+            const o = document.createElement('option');
+            o.value = t.id;
+            o.textContent = t.name;
+            sel.appendChild(o);
+        });
+    } catch {}
+}
+
+function onTerrainChange() {
+    const tid = document.getElementById('terrain-select').value;
+    const pc  = document.getElementById('prescription-card');
+    resetZone();
+    if (!tid) { pc.style.display = 'none'; return; }
+    pc.style.display = 'block';
+    loadPrescriptions(tid);
+}
+
+// ── Prescrições ───────────────────────────────────────────────────────────────
+async function loadPrescriptions(terrainId) {
+    const sel = document.getElementById('prescription-select');
+    sel.innerHTML = '<option value="">A carregar…</option>';
+    document.getElementById('field-row').style.display = 'none';
+
+    try {
+        const r = await apiFetch(`get_prescriptions&terrain_id=${terrainId}`, 'GET');
+        if (!r.success) { sel.innerHTML = '<option value="">Erro ao carregar</option>'; return; }
+        sel.innerHTML = '<option value="">— Selecione uma prescrição —</option>';
+        if (!r.prescriptions.length) {
+            sel.innerHTML += '<option disabled>Sem prescrições concluídas</option>';
+            return;
+        }
+        r.prescriptions.forEach(p => {
+            const o = document.createElement('option');
+            o.value = p.id;
+            o.dataset.fields = JSON.stringify(p.fields);
+            o.textContent = `${p.name}`;
+            sel.appendChild(o);
+        });
+    } catch {
+        sel.innerHTML = '<option value="">Erro de ligação</option>';
+    }
+}
+
+function onPrescriptionChange() {
+    const sel = document.getElementById('prescription-select');
+    const opt = sel.options[sel.selectedIndex];
+    const fr  = document.getElementById('field-row');
+    const fs  = document.getElementById('field-select');
+
+    selectedPrescriptionId = sel.value || null;
+    selectedField = null;
+    resetZone();
+
+    if (!selectedPrescriptionId) { fr.style.display = 'none'; return; }
+
+    const fields = JSON.parse(opt.dataset.fields || '[]');
+    if (!fields.length) { fr.style.display = 'none'; return; }
+
+    fs.innerHTML = '';
+    if (fields.length > 1) {
+        fs.innerHTML = '<option value="">— Escolha o parâmetro —</option>';
+    }
+    fields.forEach(f => {
+        const o = document.createElement('option');
+        o.value = f; o.textContent = f;
+        fs.appendChild(o);
+    });
+    fr.style.display = 'block';
+
+    if (fields.length === 1) {
+        selectedField = fields[0];
+        if (gpsPos) scheduleZoneUpdate();
+    }
+}
+
+function onFieldChange() {
+    selectedField = document.getElementById('field-select').value || null;
+    resetZone();
+    if (selectedField && gpsPos) scheduleZoneUpdate();
+}
+
+// ── Zona ──────────────────────────────────────────────────────────────────────
+function resetZone() {
+    document.getElementById('zone-card').style.display = 'none';
+    document.getElementById('pct-card').style.display = 'none';
+    document.getElementById('publish-area').style.display = 'none';
+    selectedPct = null;
+    clearPctSelection();
+}
+
+async function fetchZoneValue() {
+    if (!selectedPrescriptionId || !selectedField || !gpsPos) return;
+
+    const { latitude: lat, longitude: lng } = gpsPos.coords;
+
+    try {
+        const r = await apiFetch('get_zone_value', 'POST', {
+            prescription_id: selectedPrescriptionId,
+            lat, lng,
+            field: selectedField
+        });
+
+        if (!r.success) {
+            if (r.out_of_bounds) showZoneOutOfBounds();
+            else toast(r.message || 'Erro ao obter zona', 'err');
+            return;
+        }
+
+        showZoneValue(r);
+    } catch (e) {
+        toast('Erro de ligação', 'err');
+    }
+}
+
+function showZoneOutOfBounds() {
+    const zc = document.getElementById('zone-card');
+    zc.style.display = 'block';
+    document.getElementById('zone-label').textContent = 'Posição fora do terreno';
+    document.getElementById('zone-value').textContent = '—';
+    document.getElementById('zone-unit').textContent = '';
+    document.getElementById('zone-name').textContent = '';
+    document.getElementById('pct-card').style.display = 'none';
+    document.getElementById('publish-area').style.display = 'none';
+}
+
+function showZoneValue(r) {
+    const zc = document.getElementById('zone-card');
+    zc.style.display = 'block';
+    document.getElementById('zone-label').textContent = `Zona ${r.zone_id} — ${r.field}`;
+    document.getElementById('zone-value').textContent = r.value !== null ? r.value : '—';
+    document.getElementById('zone-unit').textContent = '';
+    document.getElementById('zone-name').textContent =
+        r.max_value ? `Máximo: ${r.max_value}` : '';
+
+    // Mostrar botões de %
+    document.getElementById('pct-card').style.display = 'block';
+    document.getElementById('publish-area').style.display = 'block';
+
+    // Sugestão automática
+    clearPctSelection();
+    const suggested = r.suggested_pct;
+    document.querySelectorAll('.pct-btn').forEach(btn => {
+        if (parseInt(btn.dataset.pct) === suggested) btn.classList.add('suggested');
+    });
+
+    // Auto-seleccionar sugestão
+    selectPct(suggested);
+}
+
+// ── Percentagem ───────────────────────────────────────────────────────────────
+function clearPctSelection() {
+    document.querySelectorAll('.pct-btn').forEach(b => {
+        b.classList.remove('selected', 'suggested');
+    });
+    document.getElementById('publish-btn').disabled = true;
+}
+
+function selectPct(pct) {
+    selectedPct = pct;
+    document.querySelectorAll('.pct-btn').forEach(btn => {
+        btn.classList.toggle('selected', parseInt(btn.dataset.pct) === pct);
+    });
+    document.getElementById('publish-btn').disabled = false;
+    document.getElementById('publish-btn').textContent = `📡 Publicar ${pct}%`;
+}
+
+// ── Publicar ──────────────────────────────────────────────────────────────────
+async function publishCan() {
+    if (selectedPct === null) return;
+
+    const btn = document.getElementById('publish-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> A publicar…';
+
+    try {
+        const r = await apiFetch('publish_can', 'POST', { pct: selectedPct });
+        if (r.success) {
+            toast(`✅ Publicado ${r.pct}% → ${r.topic}`, 'ok');
+            document.getElementById('last-pub').textContent =
+                `Último envio: ${r.pct}% às ${new Date().toLocaleTimeString('pt-PT')} · ${r.raw}`;
+        } else {
+            toast(r.message || 'Erro ao publicar', 'err');
+        }
+    } catch {
+        toast('Sem ligação ao servidor', 'err');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = `📡 Publicar ${selectedPct}%`;
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+async function apiFetch(action, method = 'GET', body = null) {
+    const headers = { 'Authorization': `Bearer ${token}` };
+    const opts = { method, headers };
+
+    if (method === 'POST' && body) {
+        headers['Content-Type'] = 'application/json';
+        opts.body = JSON.stringify({ action, ...body });
+    }
+
+    const url = method === 'GET' ? `${API}?action=${action}` : API;
+    const res = await fetch(url, opts);
+    return res.json();
+}
+
+function setStatus(state) {
+    const dot = document.getElementById('status-dot');
+    dot.className = `status-dot ${state}`;
+    dot.title = state === 'online' ? 'Ligado' : 'Sem ligação';
+}
+
+let toastTimer;
+function toast(msg, type = '') {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = `toast ${type} show`;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+}
+</script>
+</body>
+</html>
