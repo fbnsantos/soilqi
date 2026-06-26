@@ -368,7 +368,7 @@
             <span class="mgb-spd"    id="mgb-spd"></span>
             <span class="mgb-acc"    id="mgb-acc"></span>
             <span class="mgb-sim"    id="mgb-sim">SIM</span>
-            <span id="mgb-pwm" style="font-size:11px;font-weight:800;color:#4ade80;display:none">—%</span>
+            <span id="mgb-pwm" style="font-size:11px;font-weight:800;color:#4ade80;min-width:36px;text-align:right">—</span>
             <button id="pub-on-btn" onclick="toggleAutoPublish()" title="Publicação automática MQTT"
                 style="background:#e5e7eb;color:#374151;border:none;border-radius:8px;padding:2px 8px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">
                 📡 OFF
@@ -633,6 +633,8 @@ let zoneTimer = null;
 
 // Map
 let mapImg = null, mapBounds = null;
+let mapLegend = [], mapZonePresc = [];
+let mapOffCanvas = null; // offscreen canvas for pixel sampling
 let mapScale = 1, mapOffX = 0, mapOffY = 0;
 const MAX_ZOOM = 20;
 
@@ -788,16 +790,26 @@ async function loadMapImage(pid) {
     try {
         const r = await api(`get_map_image&prescription_id=${pid}`);
         if (!r.success) { ph.textContent=r.message||'Mapa indisponível.'; return; }
-        mapBounds = r.bounds;
+        mapBounds    = r.bounds;
+        mapLegend    = r.legend    || [];
+        mapZonePresc = r.zone_prescriptions || [];
         const img = new Image();
         img.onload = () => {
-            mapImg=img; cvs.width=img.naturalWidth; cvs.height=img.naturalHeight;
+            mapImg = img;
+            cvs.width = img.naturalWidth; cvs.height = img.naturalHeight;
+            // offscreen canvas for pixel sampling
+            mapOffCanvas = document.createElement('canvas');
+            mapOffCanvas.width  = img.naturalWidth;
+            mapOffCanvas.height = img.naturalHeight;
+            mapOffCanvas.getContext('2d').drawImage(img, 0, 0);
             ph.style.display='none'; cvs.style.display='block';
             applyTransform(); drawMapMarker();
+            // recalc zone now that image is ready
+            if (gpsPos) scheduleZone();
         };
         img.src = `data:image/png;base64,${r.png_b64}`;
-        if (r.legend&&r.legend.length)
-            lgnd.innerHTML = r.legend.map(e=>`<div class="li"><div class="lsw" style="background:${e.color}"></div><span>${e.label||''}</span></div>`).join('');
+        if (mapLegend.length)
+            lgnd.innerHTML = mapLegend.map(e=>`<div class="li"><div class="lsw" style="background:${e.color}"></div><span>${e.label||''}</span></div>`).join('');
     } catch { ph.textContent='Erro ao carregar mapa.'; }
 }
 
@@ -944,29 +956,63 @@ function resetAll() {
     document.getElementById('pub-btn').disabled=true;
 }
 function scheduleZone() { clearTimeout(zoneTimer); zoneTimer=setTimeout(fetchZone,600); }
-async function fetchZone() {
-    if (!prescId||!field||!gpsPos) return;
-    const {latitude:lat,longitude:lng}=gpsPos.coords;
-    const mgbPwm = document.getElementById('mgb-pwm');
-    try {
-        const r=await api('get_zone_value','POST',{prescription_id:prescId,lat,lng,field});
-        if (!r.success){
-            console.warn('[CAN] zone debug', r.debug);
-            // Mostrar estado "fora de zona" na barra GPS
-            if (mgbPwm) { mgbPwm.style.display=''; mgbPwm.textContent='—'; mgbPwm.style.color='#9ca3af'; }
-            // Só mostra toast na primeira falha, não em cada tick de simulação
-            if (!fetchZone._wasOut) toast('Fora de zona','err');
-            fetchZone._wasOut = true;
-            return;
+function hexToRgbJS(hex) {
+    hex = hex.replace('#','');
+    if (hex.length===3) hex=hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+    return [parseInt(hex.slice(0,2),16), parseInt(hex.slice(2,4),16), parseInt(hex.slice(4,6),16)];
+}
+
+function getZoneAtLocationJS(lat, lng) {
+    if (!mapOffCanvas || !mapBounds || !mapLegend.length) return null;
+    const {min_lat,max_lat,min_lng,max_lng} = mapBounds;
+    const w = mapOffCanvas.width, h = mapOffCanvas.height;
+    const cx = Math.round((lng - min_lng) / (max_lng - min_lng) * (w - 1));
+    const cy = Math.round((max_lat - lat) / (max_lat - min_lat) * (h - 1));
+    const radius = 2;
+    const ctx = mapOffCanvas.getContext('2d');
+    const votes = {};
+    for (let dy = -radius; dy <= radius; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+            const px = Math.max(0, Math.min(w-1, cx+dx));
+            const py = Math.max(0, Math.min(h-1, cy+dy));
+            const d  = ctx.getImageData(px, py, 1, 1).data; // [R,G,B,A]
+            if (d[3] < 30) continue; // transparent pixel
+            let bestZone = null, bestDist = Infinity;
+            mapLegend.forEach((e, i) => {
+                const [lr,lg,lb] = hexToRgbJS(e.color);
+                const dist = Math.abs(d[0]-lr) + Math.abs(d[1]-lg) + Math.abs(d[2]-lb);
+                if (dist < bestDist) { bestDist = dist; bestZone = i + 1; }
+            });
+            if (bestZone !== null && bestDist <= 360)
+                votes[bestZone] = (votes[bestZone]||0) + (360 - bestDist);
         }
-        fetchZone._wasOut = false;
-        window._zoneVal = r.value;
-        window._zoneMax = r.max_value;
-        window._zoneId  = r.zone_id;
-        document.getElementById('card-pwm').style.display='block';
-        document.getElementById('pub-wrap').style.display='block';
-        recalcPwm();
-    } catch(e) { console.error('[CAN] fetchZone', e); }
+    }
+    if (!Object.keys(votes).length) return null;
+    return parseInt(Object.entries(votes).sort((a,b)=>b[1]-a[1])[0][0]);
+}
+
+function fetchZone() {
+    if (!prescId || !field || !gpsPos || !mapOffCanvas) return;
+    const {latitude:lat, longitude:lng} = gpsPos.coords;
+    const mgbPwm = document.getElementById('mgb-pwm');
+
+    const zoneId = getZoneAtLocationJS(lat, lng);
+    if (zoneId === null) {
+        if (mgbPwm) { mgbPwm.style.display=''; mgbPwm.textContent='—'; mgbPwm.style.color='#9ca3af'; }
+        window._zoneVal = null; window._zoneId = null;
+        return;
+    }
+
+    const zoneData = mapZonePresc.find(z => parseInt(z.zone_id) === zoneId);
+    const value    = zoneData && zoneData[field] != null ? parseFloat(zoneData[field]) : null;
+    const maxVal   = mapZonePresc.reduce((m,z)=> z[field]!=null ? Math.max(m,parseFloat(z[field])) : m, 0);
+
+    window._zoneVal = value;
+    window._zoneMax = maxVal;
+    window._zoneId  = zoneId;
+    document.getElementById('card-pwm').style.display  = 'block';
+    document.getElementById('pub-wrap').style.display  = 'block';
+    recalcPwm();
 }
 
 // ── PWM calculation ───────────────────────────────────────────────────────────
