@@ -1214,7 +1214,7 @@ async function publishViaApi(pct) {
         const r = await fetch('api.php?action=publish_can', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json',
-                       'Authorization': 'Bearer ' + localStorage.getItem(ST.tok) },
+                       'Authorization': 'Bearer ' + token },
             body: JSON.stringify(body),
         });
         const j = await r.json();
