@@ -518,11 +518,26 @@ k = largura [m] / (6 × Q_max [l/min])</div>
 
         <div class="sep"></div>
         <div style="font-size:13px;font-weight:700;margin-bottom:8px;">📡 Broker MQTT</div>
+
+        <label class="flabel">Modo de publicação</label>
+        <div class="frow mb8" style="gap:8px">
+            <button id="pm-php" class="btn" style="flex:1;font-size:12px" onclick="setPubMode('php')">🌐 Via servidor PHP</button>
+            <button id="pm-ws"  class="btn" style="flex:1;font-size:12px" onclick="setPubMode('ws')">⚡ WebSocket direto</button>
+        </div>
+        <div id="pm-php-info" class="info-box" style="font-size:11px;margin-bottom:8px">
+            O browser envia cada mensagem ao servidor PHP que a publica via TCP MQTT.<br>
+            Funciona sempre que o servidor tenha acesso TCP ao broker (porta 1883).
+        </div>
+        <div id="pm-ws-info" class="info-box" style="font-size:11px;margin-bottom:8px;display:none">
+            Ligação WebSocket directa do browser ao broker.<br>
+            Requer que o broker exponha WSS (TLS) na porta WS configurada.
+        </div>
+
         <label class="flabel">Host</label>
         <input id="s-host" class="inp mono mb8" type="text" placeholder="localhost">
         <div class="frow mb8">
             <div>
-                <label class="flabel">Porta</label>
+                <label class="flabel">Porta TCP (PHP)</label>
                 <input id="s-port" class="inp sm mono" type="number" placeholder="1883">
             </div>
             <div>
@@ -537,14 +552,10 @@ k = largura [m] / (6 × Q_max [l/min])</div>
                 <label class="flabel">Tópico MQTT</label>
                 <input id="s-topic" class="inp sm mono" type="text" placeholder="/tlvt/can/in">
             </div>
-            <div>
+            <div id="wsport-wrap">
                 <label class="flabel">Porta WebSocket</label>
                 <input id="s-wsport" class="inp sm mono" type="number" placeholder="9001">
             </div>
-        </div>
-        <div class="info-box" style="font-size:11px">
-            A publicação usa WebSocket (porta WS) directamente do browser.<br>
-            Certifique-se que o broker tem WS activo (ex: Mosquitto: <code>listener 9001 / protocol websockets</code>).
         </div>
 
         <div class="sep"></div>
@@ -631,7 +642,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadCfgUI();
     startGps();
     token ? checkAuth() : showLogin();
-    if (getCfg().host || getCfg().wsport) connectMqtt();
+    if (getPubMode() === 'ws' && (getCfg().host || getCfg().wsport)) connectMqtt();
     // live k recompute in settings
     ['s-width','s-qmax'].forEach(id => document.getElementById(id).addEventListener('input', updateKDisplay));
 });
@@ -1128,7 +1139,10 @@ function connectMqtt() {
 
     if (mqttClient) { try { mqttClient.end(true); } catch(e){} mqttClient = null; }
 
-    setMqttDot('off', 'A ligar…');
+    let failCount = 0;
+    const MAX_RECONNECTS = 3;
+
+    setMqttDot('off', `A ligar… ${url}`);
     try {
         mqttClient = mqtt.connect(url, {
             clientId: 'soilqi-can-' + Math.random().toString(16).slice(2,8),
@@ -1137,10 +1151,19 @@ function connectMqtt() {
             connectTimeout: 8000,
             clean: true,
         });
-        mqttClient.on('connect', () => setMqttDot('on', 'Ligado'));
+        mqttClient.on('connect', () => { failCount=0; setMqttDot('on', `Ligado — ${url}`); });
         mqttClient.on('offline', () => setMqttDot('off', 'Desligado'));
-        mqttClient.on('error',   e  => { setMqttDot('err', 'Erro: ' + (e.message||'?')); console.warn('[MQTT]', e); });
-        mqttClient.on('reconnect', () => setMqttDot('off', 'A reconectar…'));
+        mqttClient.on('error',   e  => { console.warn('[MQTT]', e); });
+        mqttClient.on('reconnect', () => {
+            failCount++;
+            if (failCount >= MAX_RECONNECTS) {
+                mqttClient.end(true);
+                setMqttDot('err', `Falhou após ${MAX_RECONNECTS} tentativas — verifique host/porta WS`);
+                toast(`MQTT: sem ligação a ${url}`, 'err');
+            } else {
+                setMqttDot('off', `Tentativa ${failCount}/${MAX_RECONNECTS} — ${url}`);
+            }
+        });
     } catch(e) {
         setMqttDot('err', 'Erro ao ligar');
         console.warn('[MQTT connect]', e);
@@ -1161,6 +1184,48 @@ function mqttPublish(pct) {
 
 function getCurrentPwm() { return manualPwm !== null ? manualPwm : autoPwm; }
 
+function getPubMode() { return getCfg().pub_mode || 'php'; }
+
+function setPubMode(mode) {
+    document.getElementById('pm-php').style.fontWeight = mode==='php' ? '800' : '';
+    document.getElementById('pm-php').style.outline    = mode==='php' ? '2px solid var(--blue2)' : '';
+    document.getElementById('pm-ws').style.fontWeight  = mode==='ws'  ? '800' : '';
+    document.getElementById('pm-ws').style.outline     = mode==='ws'  ? '2px solid var(--blue2)' : '';
+    document.getElementById('pm-php-info').style.display = mode==='php' ? '' : 'none';
+    document.getElementById('pm-ws-info').style.display  = mode==='ws'  ? '' : 'none';
+    document.getElementById('wsport-wrap').style.display = mode==='ws'  ? '' : 'none';
+    // persist immediately so toggleAutoPublish sees it
+    const cfg = getCfg(); cfg.pub_mode = mode;
+    localStorage.setItem(ST.cfg, JSON.stringify(cfg));
+}
+
+async function publishViaApi(pct) {
+    const cfg = getCfg();
+    const body = {
+        action: 'publish_can', pct,
+        mqtt_host:  cfg.host  || undefined,
+        mqtt_port:  cfg.port  || undefined,
+        mqtt_user:  cfg.user  || undefined,
+        mqtt_pass:  cfg.pass  || undefined,
+        mqtt_topic: cfg.topic || undefined,
+    };
+    Object.keys(body).forEach(k => body[k]===undefined && delete body[k]);
+    try {
+        const r = await fetch('api.php?action=publish_can', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json',
+                       'Authorization': 'Bearer ' + localStorage.getItem(ST.tok) },
+            body: JSON.stringify(body),
+        });
+        const j = await r.json();
+        if (!j.success) console.warn('[CAN php-pub]', j.message);
+        return j.success;
+    } catch(e) {
+        console.warn('[CAN php-pub]', e);
+        return false;
+    }
+}
+
 function toggleAutoPublish() {
     if (autoPublishIv) {
         clearInterval(autoPublishIv);
@@ -1169,15 +1234,18 @@ function toggleAutoPublish() {
         btn.className = 'auto-toggle off';
         btn.textContent = '▶ Iniciar publicação automática';
     } else {
-        if (!mqttClient || !mqttClient.connected) {
-            toast('MQTT não ligado — verifique configuração ⚙️','err'); return;
+        const mode = getPubMode();
+        if (mode === 'ws' && (!mqttClient || !mqttClient.connected)) {
+            toast('MQTT WebSocket não ligado — verifique configuração ⚙️','err'); return;
         }
         const btn = document.getElementById('auto-toggle');
         btn.className = 'auto-toggle on';
         btn.textContent = '⏹ Parar publicação automática';
         autoPublishIv = setInterval(() => {
             const pct = getCurrentPwm();
-            if (pct !== null) mqttPublish(pct);
+            if (pct === null) return;
+            if (getPubMode() === 'ws') mqttPublish(pct);
+            else publishViaApi(pct);
         }, 500);
     }
 }
@@ -1185,8 +1253,15 @@ function toggleAutoPublish() {
 function publishOnce() {
     const pct = getCurrentPwm();
     if (pct === null) { toast('Sem valor PWM','err'); return; }
-    if (!mqttPublish(pct)) toast('MQTT não ligado','err');
-    else toast(`📡 ${pct}% → ${getMqttTopic()}`,'ok');
+    if (getPubMode() === 'ws') {
+        if (!mqttPublish(pct)) toast('MQTT não ligado','err');
+        else toast(`📡 ${pct}% → ${getMqttTopic()}`,'ok');
+    } else {
+        publishViaApi(pct).then(ok => {
+            if (ok) toast(`📡 ${pct}% → ${getMqttTopic()} (PHP)`,'ok');
+            else toast('Erro ao publicar via PHP','err');
+        });
+    }
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
@@ -1204,6 +1279,7 @@ function loadCfgUI() {
     document.getElementById('s-pass').value   = c.pass||'';
     document.getElementById('s-topic').value  = c.topic||'';
     document.getElementById('s-wsport').value = c.wsport||'';
+    setPubMode(c.pub_mode || 'php');
     updateKDisplay();
 }
 function updateKDisplay() {
@@ -1227,13 +1303,14 @@ function saveSettings() {
         pass:   document.getElementById('s-pass').value||undefined,
         topic:  document.getElementById('s-topic').value.trim()||undefined,
         wsport: parseInt(document.getElementById('s-wsport').value)||undefined,
+        pub_mode: getCfg().pub_mode || 'php',
     };
     Object.keys(cfg).forEach(k=>cfg[k]===undefined&&delete cfg[k]);
     localStorage.setItem(ST.cfg,JSON.stringify(cfg));
     toast('✅ Configuração guardada','ok');
     closeMo('mo-settings');
     recalcPwm();
-    connectMqtt();
+    if (cfg.pub_mode === 'ws') connectMqtt();
 }
 function openSettings() { loadCfgUI(); openMo('mo-settings'); }
 
