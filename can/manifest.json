@@ -1,8 +1,9 @@
 {
   "name": "SoilQI CAN Controller",
   "short_name": "CAN Ctrl",
+  "id": "/can/",
   "description": "Controlo de taxa variável por prescrição e GPS",
-  "start_url": "./index.html",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait-primary",
@@ -12,27 +13,15 @@
   "categories": ["productivity", "utilities"],
   "icons": [
     {
-      "src": "../pwa/icons/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "../pwa/icons/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "../pwa/icons/icon-maskable-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "maskable"
-    },
-    {
-      "src": "../pwa/icons/icon-maskable-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
       "purpose": "maskable"
     }
   ]

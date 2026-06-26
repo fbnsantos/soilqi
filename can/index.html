@@ -9,6 +9,7 @@
     <meta name="apple-mobile-web-app-title" content="CAN Ctrl">
     <title>SoilQI CAN Controller</title>
     <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="./icon.svg">
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         :root {
@@ -24,309 +25,307 @@
         }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: var(--light);
-            color: #111827;
+            background: var(--light); color: #111827;
             min-height: 100dvh;
             padding-bottom: calc(16px + env(safe-area-inset-bottom));
         }
 
         /* ── Header ── */
-        .app-header {
+        .hdr {
             background: var(--blue); color: #fff;
-            padding: calc(12px + env(safe-area-inset-top)) 14px 12px;
+            padding: calc(11px + env(safe-area-inset-top)) 12px 11px;
             display: flex; align-items: center; justify-content: space-between;
             position: sticky; top: 0; z-index: 200;
         }
-        .app-header h1 { font-size: 16px; font-weight: 700; }
-        .app-header .sub { font-size: 10px; opacity: .65; }
-        .hdr-btns { display: flex; align-items: center; gap: 8px; }
-        .hdr-btn {
-            background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3);
-            border-radius: 8px; color: #fff; font-size: 15px; padding: 5px 8px;
-            cursor: pointer; line-height: 1;
+        .hdr h1 { font-size: 15px; font-weight: 700; line-height: 1.2; }
+        .hdr .sub { font-size: 10px; opacity: .6; }
+        .hdr-btns { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+        .hbtn {
+            background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.28);
+            border-radius: 8px; color: #fff; font-size: 14px; padding: 5px 8px;
+            cursor: pointer; line-height: 1; white-space: nowrap;
         }
-        .sim-badge {
-            background: #f59e0b; color: #fff; font-size: 10px; font-weight: 700;
+        .sim-pill {
+            background: var(--amber); color: #fff; font-size: 9px; font-weight: 800;
             padding: 2px 7px; border-radius: 10px; display: none;
-            animation: pulse 1s ease-in-out infinite;
+            animation: blink 1s ease-in-out infinite;
         }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
-        .status-dot {
-            width: 9px; height: 9px; border-radius: 50%;
-            background: #9ca3af; border: 2px solid rgba(255,255,255,.35);
-        }
-        .status-dot.online  { background: #4ade80; }
-        .status-dot.offline { background: #f87171; }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.45} }
+        .sdot { width: 9px; height: 9px; border-radius: 50%; background: #9ca3af; border: 2px solid rgba(255,255,255,.3); }
+        .sdot.on  { background: #4ade80; }
+        .sdot.off { background: #f87171; }
 
         /* ── Login ── */
-        .login-screen {
+        .login-wrap {
             display: flex; align-items: center; justify-content: center;
-            min-height: calc(100dvh - 56px); padding: 20px 16px;
+            min-height: calc(100dvh - 52px); padding: 20px 16px;
         }
         .login-card {
             background: var(--card); border-radius: var(--r);
-            padding: 28px 22px; max-width: 380px; width: 100%;
+            padding: 26px 20px; max-width: 380px; width: 100%;
             box-shadow: 0 4px 24px rgba(0,0,0,.08); text-align: center;
         }
-        .login-logo { font-size: 40px; margin-bottom: 10px; }
-        .login-card h2 { font-size: 20px; margin-bottom: 6px; }
-        .login-card p  { font-size: 13px; color: var(--gray); line-height: 1.5; margin-bottom: 18px; }
+        .login-logo { font-size: 42px; margin-bottom: 10px; }
+        .login-card h2 { font-size: 19px; margin-bottom: 6px; }
+        .login-card p  { font-size: 13px; color: var(--gray); line-height: 1.5; margin-bottom: 16px; }
 
-        /* ── Common controls ── */
+        /* ── Controls ── */
         .inp {
-            width: 100%; padding: 10px 12px;
-            border: 1.5px solid #d1d5db; border-radius: 9px;
+            width: 100%; padding: 9px 11px;
+            border: 1.5px solid #d1d5db; border-radius: 8px;
             font-size: 14px; outline: none; color: #111827;
-            transition: border-color .15s; margin-bottom: 10px;
-            background: #fff;
+            transition: border-color .15s; background: #fff;
         }
-        .inp:focus { border-color: var(--blue2); }
+        .inp:focus  { border-color: var(--blue2); }
         .inp.mono   { font-family: monospace; font-size: 13px; }
+        .inp.sm     { font-size: 13px; padding: 7px 9px; }
+        select.inp  { cursor: pointer; }
+        .mb8  { margin-bottom: 8px; }
+        .mb12 { margin-bottom: 12px; }
         .btn {
             display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-            padding: 11px 16px; border: none; border-radius: 9px;
+            padding: 10px 14px; border: none; border-radius: 8px;
             font-size: 14px; font-weight: 700; cursor: pointer;
-            transition: opacity .15s; width: 100%;
+            transition: opacity .14s; width: 100%;
         }
-        .btn:active { opacity: .75; }
-        .btn-primary { background: var(--blue2); color: #fff; }
-        .btn-green   { background: var(--green); color: #fff; }
-        .btn-red     { background: var(--red);   color: #fff; }
-        .btn-amber   { background: var(--amber); color: #fff; }
+        .btn:active   { opacity: .75; }
+        .btn-blue     { background: var(--blue2); color: #fff; }
+        .btn-green    { background: var(--green); color: #fff; }
+        .btn-red      { background: var(--red);   color: #fff; }
+        .btn-amber    { background: var(--amber); color: #fff; }
 
         /* ── Card ── */
         .card {
             background: var(--card); border-radius: var(--r);
-            padding: 14px; margin: 10px 10px 0;
+            padding: 13px; margin: 8px 8px 0;
             box-shadow: 0 1px 4px rgba(0,0,0,.06);
         }
-        .card-title {
+        .ct {
             font-size: 10px; font-weight: 700; color: var(--gray);
-            text-transform: uppercase; letter-spacing: .6px; margin-bottom: 10px;
+            text-transform: uppercase; letter-spacing: .6px; margin-bottom: 8px;
         }
 
         /* ── Map ── */
         .map-outer {
-            margin: 10px 10px 0;
-            border-radius: var(--r);
-            overflow: hidden;
-            box-shadow: 0 1px 4px rgba(0,0,0,.06);
-            background: var(--card);
+            margin: 8px 8px 0; border-radius: var(--r); overflow: hidden;
+            box-shadow: 0 1px 4px rgba(0,0,0,.06); background: var(--card);
         }
         .map-gps-bar {
             background: var(--blue); color: #fff;
-            padding: 7px 12px; font-size: 12px; font-family: monospace;
-            display: flex; align-items: center; gap: 8px; min-height: 34px;
+            padding: 6px 11px; font-size: 11px; font-family: monospace;
+            display: flex; align-items: center; gap: 8px; min-height: 32px;
         }
-        .map-gps-bar .gps-icon { font-size: 14px; }
-        .map-gps-bar .coords   { flex: 1; }
-        .map-gps-bar .acc      { font-size: 10px; opacity: .7; }
-        .map-gps-bar .sim-tag  {
-            background: #f59e0b; color: #fff; font-size: 9px; font-weight: 800;
-            padding: 2px 6px; border-radius: 8px; letter-spacing: .5px;
-        }
+        .mgb-coords { flex: 1; }
+        .mgb-acc    { font-size: 10px; opacity: .7; }
+        .mgb-sim    { background: var(--amber); color:#fff; font-size:9px; font-weight:800; padding:2px 6px; border-radius:8px; display:none; }
+        .mgb-spd    { background: rgba(255,255,255,.18); font-size:10px; font-weight:700; padding:2px 7px; border-radius:8px; }
 
-        /* Zoom viewport */
-        .map-viewport {
+        .map-vp {
             width: 100%; overflow: hidden; position: relative;
             background: #e5e7eb; min-height: 200px;
             cursor: grab; touch-action: none;
         }
-        .map-viewport.grabbing { cursor: grabbing; }
-        .map-inner {
-            transform-origin: 0 0;
-            will-change: transform;
-            user-select: none;
-        }
-        .map-inner canvas {
-            display: block; width: 100%; height: auto;
-            image-rendering: pixelated;
-        }
-        .map-placeholder {
-            display: flex; align-items: center; justify-content: center;
-            min-height: 180px; color: var(--gray); font-size: 13px;
-        }
+        .map-vp.grabbing { cursor: grabbing; }
+        .map-inner { transform-origin: 0 0; will-change: transform; user-select: none; }
+        .map-inner canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+        .map-ph { display:flex; align-items:center; justify-content:center; min-height:180px; color:var(--gray); font-size:13px; }
 
-        /* Zoom buttons */
-        .zoom-btns {
-            position: absolute; right: 8px; bottom: 8px;
-            display: flex; flex-direction: column; gap: 4px; z-index: 10;
+        .zoom-btns { position:absolute; right:8px; bottom:8px; display:flex; flex-direction:column; gap:4px; z-index:10; }
+        .zbtn {
+            width:32px; height:32px; border-radius:8px;
+            background:rgba(255,255,255,.92); border:1px solid #d1d5db;
+            font-size:17px; font-weight:700; cursor:pointer;
+            display:flex; align-items:center; justify-content:center;
+            box-shadow:0 1px 4px rgba(0,0,0,.12); color:#374151; line-height:1;
         }
-        .zoom-btn {
-            width: 32px; height: 32px; border-radius: 8px;
-            background: rgba(255,255,255,.9); border: 1px solid #d1d5db;
-            font-size: 18px; font-weight: 700; cursor: pointer;
-            display: flex; align-items: center; justify-content: center;
-            box-shadow: 0 1px 4px rgba(0,0,0,.12); color: #374151;
-            line-height: 1;
-        }
+        .zbtn.reset { font-size:12px; }
 
-        .map-legend {
-            padding: 8px 12px; display: flex; flex-wrap: wrap; gap: 6px;
-            border-top: 1px solid #f3f4f6;
-        }
-        .legend-item { display: flex; align-items: center; gap: 4px; font-size: 11px; color: #374151; }
-        .legend-sw { width: 13px; height: 13px; border-radius: 3px; border: 1px solid rgba(0,0,0,.1); }
+        .map-legend { padding:7px 10px; display:flex; flex-wrap:wrap; gap:5px; border-top:1px solid #f3f4f6; }
+        .li { display:flex; align-items:center; gap:4px; font-size:11px; color:#374151; }
+        .lsw { width:12px; height:12px; border-radius:3px; border:1px solid rgba(0,0,0,.1); flex-shrink:0; }
 
-        /* ── GPS card ── */
+        /* ── GPS status ── */
         .gps-card { border-left: 4px solid #9ca3af; }
         .gps-card.fix  { border-color: var(--green); }
         .gps-card.poor { border-color: var(--amber); }
-        .gps-status { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
-        .gps-coords { font-size: 12px; color: var(--gray); font-family: monospace; }
+        .gps-card.sim  { border-color: var(--amber); }
+        .gs { font-size:13px; font-weight:600; margin-bottom:2px; }
+        .gc { font-size:12px; color:var(--gray); font-family:monospace; }
 
-        /* ── Selects ── */
-        select.inp { cursor: pointer; }
-
-        /* ── Zone ── */
-        .zone-box {
-            background: var(--light); border-radius: 10px;
-            padding: 14px; text-align: center; margin-top: 8px;
+        /* ── PWM display ── */
+        .pwm-box {
+            background: var(--blue); color: #fff;
+            border-radius: 10px; padding: 14px;
+            display: flex; align-items: center; gap: 14px;
+            margin-bottom: 10px;
         }
-        .zone-label { font-size: 11px; color: var(--gray); margin-bottom: 4px; }
-        .zone-value { font-size: 34px; font-weight: 800; color: var(--blue); }
-        .zone-sub   { font-size: 11px; color: var(--gray); margin-top: 3px; }
+        .pwm-num { font-size: 52px; font-weight: 900; line-height: 1; letter-spacing: -2px; }
+        .pwm-pct { font-size: 20px; font-weight: 700; align-self: flex-end; padding-bottom: 6px; }
+        .pwm-meta { flex: 1; }
+        .pwm-meta-line { font-size: 11px; opacity: .7; line-height: 1.6; }
+        .pwm-bar-wrap { height: 6px; background: rgba(255,255,255,.2); border-radius: 3px; margin-top: 8px; }
+        .pwm-bar      { height: 6px; background: #4ade80; border-radius: 3px; transition: width .4s; max-width: 100%; }
+        .pwm-warn     { font-size: 11px; color: #fca5a5; margin-top: 4px; }
+        .pwm-auto-badge {
+            font-size: 9px; font-weight: 800; background: #4ade80; color: #14532d;
+            padding: 2px 6px; border-radius: 8px; margin-left: 6px;
+        }
+        .pwm-manual-badge {
+            font-size: 9px; font-weight: 800; background: var(--amber); color: #fff;
+            padding: 2px 6px; border-radius: 8px; margin-left: 6px;
+        }
 
-        /* ── % grid ── */
+        /* ── Speed row ── */
+        .speed-row { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+        .speed-row label { font-size:12px; color:var(--gray); white-space:nowrap; }
+        .speed-toggle { font-size:11px; font-weight:700; color:var(--blue2); background:none; border:none; cursor:pointer; padding:0; white-space:nowrap; }
+
+        /* ── Manual % grid ── */
         .pct-grid {
-            display: grid; grid-template-columns: repeat(5, 1fr);
-            gap: 7px; margin-top: 8px;
+            display:grid; grid-template-columns:repeat(5,1fr); gap:6px;
         }
-        .pct-btn {
-            padding: 13px 0; border: 2px solid #d1d5db;
-            border-radius: 10px; background: #fff;
-            font-size: 13px; font-weight: 700; color: #374151;
-            cursor: pointer; transition: all .12s; text-align: center;
+        .pbtn {
+            padding:11px 0; border:2px solid #d1d5db; border-radius:9px;
+            background:#fff; font-size:13px; font-weight:700; color:#374151;
+            cursor:pointer; transition:all .12s; text-align:center;
         }
-        .pct-btn:active  { transform: scale(.92); }
-        .pct-btn.sel     { border-color: var(--blue2); background: var(--blue2); color: #fff; }
-        .pct-btn.suggest { border-color: var(--green); }
-        .pct-btn.suggest.sel { border-color: var(--blue2); background: var(--blue2); }
+        .pbtn:active    { transform:scale(.9); }
+        .pbtn.sel       { border-color:var(--blue2); background:var(--blue2); color:#fff; }
+        .pbtn.auto-mark { border-color:var(--green); }
+        .pbtn.auto-mark.sel { border-color:var(--blue2); background:var(--blue2); }
 
         /* ── Publish ── */
-        .pub-wrap { padding: 10px 10px 0; }
+        .pub-wrap { padding:8px 8px 0; }
         .pub-btn {
-            width: 100%; padding: 17px;
-            background: var(--green); color: #fff;
-            border: none; border-radius: var(--r);
-            font-size: 17px; font-weight: 800;
-            cursor: pointer; transition: opacity .15s;
-            box-shadow: 0 4px 12px rgba(22,163,74,.3);
+            width:100%; padding:17px;
+            background:var(--green); color:#fff;
+            border:none; border-radius:var(--r);
+            font-size:17px; font-weight:800;
+            cursor:pointer; transition:opacity .14s;
+            box-shadow: 0 4px 14px rgba(22,163,74,.3);
         }
-        .pub-btn:active   { opacity: .8; }
-        .pub-btn:disabled { background: #9ca3af; box-shadow: none; cursor: not-allowed; }
-        .last-pub { font-size: 10px; color: var(--gray); text-align: center; margin-top: 7px; font-family: monospace; }
+        .pub-btn:active   { opacity:.8; }
+        .pub-btn:disabled { background:#9ca3af; box-shadow:none; cursor:not-allowed; }
+        .last-pub { font-size:10px; color:var(--gray); text-align:center; margin-top:6px; font-family:monospace; }
 
         /* ── Modal ── */
-        .modal-overlay {
-            position: fixed; inset: 0; background: rgba(0,0,0,.55);
-            display: flex; align-items: flex-end; justify-content: center;
-            z-index: 500; opacity: 0; pointer-events: none;
-            transition: opacity .2s;
+        .mo {
+            position:fixed; inset:0; background:rgba(0,0,0,.5);
+            display:flex; align-items:flex-end; justify-content:center;
+            z-index:500; opacity:0; pointer-events:none; transition:opacity .2s;
         }
-        .modal-overlay.open { opacity: 1; pointer-events: all; }
-        .modal {
-            background: var(--card); border-radius: 18px 18px 0 0;
-            padding: 20px 18px calc(24px + env(safe-area-inset-bottom));
-            width: 100%; max-width: 540px;
-            transform: translateY(40px); transition: transform .2s;
-            max-height: 85dvh; overflow-y: auto;
+        .mo.open { opacity:1; pointer-events:all; }
+        .mdl {
+            background:var(--card); border-radius:18px 18px 0 0;
+            padding:18px 16px calc(22px + env(safe-area-inset-bottom));
+            width:100%; max-width:520px;
+            transform:translateY(30px); transition:transform .2s;
+            max-height:88dvh; overflow-y:auto;
         }
-        .modal-overlay.open .modal { transform: translateY(0); }
-        .modal-title {
-            font-size: 16px; font-weight: 700; margin-bottom: 14px;
-            display: flex; align-items: center; justify-content: space-between;
+        .mo.open .mdl { transform:translateY(0); }
+        .mtitle {
+            font-size:15px; font-weight:700; margin-bottom:12px;
+            display:flex; align-items:center; justify-content:space-between;
         }
-        .modal-close {
-            background: var(--light); border: none; border-radius: 50%;
-            width: 28px; height: 28px; font-size: 16px; cursor: pointer;
-            display: flex; align-items: center; justify-content: center;
+        .mclose {
+            background:var(--light); border:none; border-radius:50%;
+            width:26px; height:26px; font-size:14px; cursor:pointer;
+            display:flex; align-items:center; justify-content:center;
         }
-        .form-label { font-size: 11px; font-weight: 700; color: var(--gray); margin-bottom: 4px; display: block; text-transform: uppercase; letter-spacing: .5px; }
-        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-        .sep { height: 1px; background: var(--light); margin: 12px 0; }
-        .info-box { background: var(--light); border-radius: 8px; padding: 10px 12px; font-size: 12px; color: var(--gray); line-height: 1.5; margin-bottom: 10px; }
+        .flabel { font-size:10px; font-weight:700; color:var(--gray); margin-bottom:3px; display:block; text-transform:uppercase; letter-spacing:.5px; }
+        .frow   { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+        .frow3  { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+        .sep    { height:1px; background:var(--light); margin:12px 0; }
+        .info-box {
+            background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px;
+            padding:9px 11px; font-size:12px; color:#1e40af; line-height:1.5; margin-bottom:10px;
+        }
+        .k-display {
+            background:var(--light); border-radius:8px; padding:8px 11px;
+            font-size:12px; color:var(--gray); margin-top:6px; font-family:monospace;
+        }
+        .formula-box {
+            background:#f0fdf4; border:1px solid #86efac; border-radius:8px;
+            padding:9px 11px; font-size:12px; color:#15803d; line-height:1.6; margin:8px 0;
+            font-family: monospace;
+        }
 
         /* ── Toast ── */
         .toast {
-            position: fixed; bottom: calc(24px + env(safe-area-inset-bottom));
-            left: 50%; transform: translateX(-50%) translateY(16px);
-            background: #1f2937; color: #fff;
-            padding: 9px 18px; border-radius: 20px;
-            font-size: 13px; font-weight: 600;
-            opacity: 0; transition: all .22s;
-            white-space: nowrap; max-width: 92vw;
-            z-index: 999; pointer-events: none;
+            position:fixed; bottom:calc(22px + env(safe-area-inset-bottom));
+            left:50%; transform:translateX(-50%) translateY(14px);
+            background:#1f2937; color:#fff;
+            padding:8px 16px; border-radius:18px;
+            font-size:12px; font-weight:600;
+            opacity:0; transition:all .22s;
+            white-space:nowrap; max-width:92vw;
+            z-index:999; pointer-events:none;
         }
-        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-        .toast.ok  { background: #15803d; }
-        .toast.err { background: #b91c1c; }
+        .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+        .toast.ok   { background:#15803d; }
+        .toast.err  { background:#b91c1c; }
 
         .spinner {
-            display: inline-block; width: 13px; height: 13px;
-            border: 2px solid rgba(255,255,255,.4);
-            border-top-color: #fff; border-radius: 50%;
-            animation: spin .6s linear infinite;
+            display:inline-block; width:12px; height:12px;
+            border:2px solid rgba(255,255,255,.4); border-top-color:#fff;
+            border-radius:50%; animation:spin .6s linear infinite;
         }
-        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes spin { to { transform:rotate(360deg); } }
     </style>
 </head>
 <body>
 
-<!-- ── Header ──────────────────────────────────────────────── -->
-<header class="app-header">
+<!-- ── Header ──────────────────────────────────────────── -->
+<header class="hdr">
     <div>
         <h1>🚜 CAN Controller</h1>
         <div class="sub">SoilQI — Taxa variável</div>
     </div>
     <div class="hdr-btns">
-        <span class="sim-badge" id="sim-badge">SIM</span>
-        <button class="hdr-btn" onclick="openSim()"    title="Simulador de trajecto">🎬</button>
-        <button class="hdr-btn" onclick="openSettings()" title="Configuração MQTT">⚙️</button>
-        <div id="status-dot" class="status-dot"></div>
+        <span class="sim-pill" id="sim-pill">SIM</span>
+        <button class="hbtn" onclick="openSim()"    title="Simulador de trajecto">🎬</button>
+        <button class="hbtn" onclick="openSettings()" title="Configuração">⚙️</button>
+        <div class="sdot" id="sdot"></div>
     </div>
 </header>
 
-<!-- ── Login ─────────────────────────────────────────────────── -->
-<div id="login-screen" class="login-screen" style="display:none">
+<!-- ── Login ──────────────────────────────────────────── -->
+<div id="login-wrap" class="login-wrap" style="display:none">
     <div class="login-card">
         <div class="login-logo">🚜</div>
         <h2>CAN Controller</h2>
         <p>Introduza a sua <strong>API Key</strong> para aceder.<br>
-           Obtenha-a em <a href="../" target="_blank" style="color:var(--blue2);font-weight:600">SoilQI</a>
-           clicando em 🔑.</p>
-        <input id="apikey-input" type="text" autocomplete="off" spellcheck="false"
-               class="inp mono" placeholder="Cole a sua API Key aqui…"
-               onkeydown="if(event.key==='Enter')submitApiKey()">
-        <button class="btn btn-primary" onclick="submitApiKey()" id="apikey-submit-btn">
-            🔑 Conectar
-        </button>
-        <div id="apikey-error" style="display:none;margin-top:10px;padding:8px 10px;
-             background:#fee2e2;color:#991b1b;border-radius:7px;font-size:12px;
-             font-weight:600;text-align:center;"></div>
+           Obtenha-a em <a href="../" target="_blank" style="color:var(--blue2);font-weight:600">SoilQI</a> → 🔑.</p>
+        <input id="ak-inp" type="text" autocomplete="off" spellcheck="false"
+               class="inp mono mb12" placeholder="Cole a sua API Key aqui…"
+               onkeydown="if(event.key==='Enter')submitKey()">
+        <button class="btn btn-blue" onclick="submitKey()" id="ak-btn">🔑 Conectar</button>
+        <div id="ak-err" style="display:none;margin-top:10px;padding:8px;background:#fee2e2;
+             color:#991b1b;border-radius:7px;font-size:12px;font-weight:600;text-align:center;"></div>
     </div>
 </div>
 
-<!-- ── Main UI ────────────────────────────────────────────────── -->
+<!-- ── Main UI ─────────────────────────────────────────── -->
 <div id="main-ui" style="display:none">
 
-    <!-- MAP (topo, aparece quando prescrição carregada) -->
+    <!-- MAP (topo) -->
     <div class="map-outer" id="map-outer" style="display:none">
-        <div class="map-gps-bar" id="map-gps-bar">
-            <span class="gps-icon">📍</span>
-            <span class="coords" id="map-coords">A aguardar GPS…</span>
-            <span class="acc"    id="map-acc"></span>
-            <span class="sim-tag" id="map-sim-tag" style="display:none">SIM</span>
+        <div class="map-gps-bar">
+            <span>📍</span>
+            <span class="mgb-coords" id="mgb-coords">A aguardar GPS…</span>
+            <span class="mgb-spd"    id="mgb-spd"></span>
+            <span class="mgb-acc"    id="mgb-acc"></span>
+            <span class="mgb-sim"    id="mgb-sim">SIM</span>
         </div>
-        <div class="map-viewport" id="map-viewport">
+        <div class="map-vp" id="map-vp">
             <div class="map-inner" id="map-inner">
-                <div class="map-placeholder" id="map-ph">A carregar mapa…</div>
-                <canvas id="map-canvas" style="display:none"></canvas>
+                <div class="map-ph" id="map-ph">A carregar mapa…</div>
+                <canvas id="map-cvs" style="display:none"></canvas>
             </div>
             <div class="zoom-btns">
-                <button class="zoom-btn" onclick="zoomStep(+0.4)" title="Zoom in">+</button>
-                <button class="zoom-btn" onclick="zoomStep(-0.4)" title="Zoom out">−</button>
-                <button class="zoom-btn" onclick="zoomReset()"    title="Reset zoom" style="font-size:12px">⊡</button>
+                <button class="zbtn"       onclick="zoomStep(+0.5)"  title="Zoom in">+</button>
+                <button class="zbtn"       onclick="zoomStep(-0.5)"  title="Zoom out">−</button>
+                <button class="zbtn reset" onclick="zoomReset(true)" title="Reset">⊡</button>
             </div>
         </div>
         <div class="map-legend" id="map-legend"></div>
@@ -334,49 +333,71 @@
 
     <!-- GPS status -->
     <div class="card gps-card" id="gps-card">
-        <div class="card-title">📍 GPS</div>
-        <div class="gps-status" id="gps-status">A obter localização…</div>
-        <div class="gps-coords" id="gps-coords"></div>
+        <div class="ct">📍 GPS</div>
+        <div class="gs" id="gps-st">A obter localização…</div>
+        <div class="gc" id="gps-co"></div>
     </div>
 
     <!-- Terreno -->
     <div class="card">
-        <div class="card-title">🗺 Terreno</div>
-        <select id="terrain-select" class="inp" onchange="onTerrainChange()">
+        <div class="ct">🗺 Terreno</div>
+        <select id="sel-terrain" class="inp" onchange="onTerrainChange()">
             <option value="">— Selecione um terreno —</option>
         </select>
     </div>
 
-    <!-- Prescrição + Parâmetro -->
-    <div class="card" id="prescription-card" style="display:none">
-        <div class="card-title">📋 Prescrição</div>
-        <select id="prescription-select" class="inp" onchange="onPrescriptionChange()">
+    <!-- Prescrição -->
+    <div class="card" id="card-presc" style="display:none">
+        <div class="ct">📋 Prescrição</div>
+        <select id="sel-presc" class="inp mb8" onchange="onPrescChange()">
             <option value="">— Selecione uma prescrição —</option>
         </select>
         <div id="field-row" style="display:none">
-            <select id="field-select" class="inp" onchange="onFieldChange()" style="margin-bottom:0"></select>
+            <select id="sel-field" class="inp" onchange="onFieldChange()" style="margin-bottom:0"></select>
         </div>
     </div>
 
-    <!-- Zona actual -->
-    <div class="card" id="zone-card" style="display:none">
-        <div class="card-title">📊 Zona actual</div>
-        <div class="zone-box">
-            <div class="zone-label" id="zone-label">—</div>
-            <div class="zone-value" id="zone-value">—</div>
-            <div class="zone-sub"   id="zone-sub"></div>
+    <!-- PWM automático -->
+    <div class="card" id="card-pwm" style="display:none">
+        <div class="ct">
+            ⚙️ PWM calculado
+            <span class="pwm-auto-badge"   id="badge-auto"   style="display:none">AUTO</span>
+            <span class="pwm-manual-badge" id="badge-manual" style="display:none">MANUAL</span>
         </div>
-    </div>
 
-    <!-- Taxa -->
-    <div class="card" id="pct-card" style="display:none">
-        <div class="card-title">⚙️ Taxa de aplicação</div>
-        <div class="pct-grid">
-            <button class="pct-btn" data-pct="0"   onclick="selectPct(0)">0%</button>
-            <button class="pct-btn" data-pct="25"  onclick="selectPct(25)">25%</button>
-            <button class="pct-btn" data-pct="50"  onclick="selectPct(50)">50%</button>
-            <button class="pct-btn" data-pct="75"  onclick="selectPct(75)">75%</button>
-            <button class="pct-btn" data-pct="100" onclick="selectPct(100)">100%</button>
+        <!-- Velocidade -->
+        <div class="speed-row">
+            <label>🏎 Velocidade</label>
+            <input id="speed-inp" type="number" min="0" max="60" step="0.1"
+                   class="inp sm" style="width:90px"
+                   oninput="onSpeedInput()" placeholder="0.0">
+            <span style="font-size:12px;color:var(--gray)">km/h</span>
+            <button class="speed-toggle" id="speed-src-btn" onclick="toggleSpeedSrc()">usar GPS</button>
+        </div>
+
+        <!-- PWM display -->
+        <div class="pwm-box" id="pwm-box">
+            <div>
+                <div class="pwm-num" id="pwm-num">—</div>
+                <div class="pwm-bar-wrap"><div class="pwm-bar" id="pwm-bar" style="width:0%"></div></div>
+            </div>
+            <div class="pwm-pct">%</div>
+            <div class="pwm-meta">
+                <div class="pwm-meta-line" id="pwm-formula-line"></div>
+                <div class="pwm-warn" id="pwm-warn"></div>
+            </div>
+        </div>
+
+        <!-- Override manual -->
+        <div style="margin-bottom:8px">
+            <div style="font-size:10px;color:var(--gray);margin-bottom:6px;text-transform:uppercase;font-weight:700;letter-spacing:.5px;">Ajuste manual</div>
+            <div class="pct-grid" id="pct-grid">
+                <button class="pbtn" data-pct="0"   onclick="selectManual(0)">0%</button>
+                <button class="pbtn" data-pct="25"  onclick="selectManual(25)">25%</button>
+                <button class="pbtn" data-pct="50"  onclick="selectManual(50)">50%</button>
+                <button class="pbtn" data-pct="75"  onclick="selectManual(75)">75%</button>
+                <button class="pbtn" data-pct="100" onclick="selectManual(100)">100%</button>
+            </div>
         </div>
     </div>
 
@@ -388,69 +409,83 @@
 
 </div>
 
-<!-- ── Settings Modal ─────────────────────────────────────────── -->
-<div class="modal-overlay" id="settings-overlay" onclick="closeSettings(event)">
-    <div class="modal" onclick="event.stopPropagation()">
-        <div class="modal-title">
-            ⚙️ Configuração MQTT
-            <button class="modal-close" onclick="closeSettings()">✕</button>
-        </div>
+<!-- ── Settings Modal ──────────────────────────────────── -->
+<div class="mo" id="mo-settings" onclick="closeMo('mo-settings',event)">
+    <div class="mdl" onclick="event.stopPropagation()">
+        <div class="mtitle">⚙️ Configuração <button class="mclose" onclick="closeMo('mo-settings')">✕</button></div>
+
+        <div style="font-size:13px;font-weight:700;margin-bottom:8px;">🚜 Máquina / Pulverizador</div>
         <div class="info-box">
-            Estas definições substituem as do servidor para publicação MQTT.
-            Deixe em branco para usar os valores predefinidos do servidor.
+            Configure a largura de trabalho e o caudal máximo para calcular automaticamente o ganho <em>k</em>.<br>
+            Em alternativa, introduza <em>k</em> diretamente.
         </div>
-        <label class="form-label">Broker / Host</label>
-        <input id="s-host" class="inp mono" type="text" placeholder="localhost">
-        <div class="form-row">
+        <div class="formula-box">
+pwm [%] = prescrição [l/ha] × k × velocidade [km/h]
+k = largura [m] / (6 × Q_max [l/min])</div>
+
+        <div class="frow mb8">
             <div>
-                <label class="form-label">Porta</label>
-                <input id="s-port" class="inp mono" type="number" placeholder="1883">
+                <label class="flabel">Largura trabalho [m]</label>
+                <input id="s-width"    class="inp sm" type="number" step="0.1" min="0.1" placeholder="3.0">
             </div>
             <div>
-                <label class="form-label">Utilizador</label>
-                <input id="s-user" class="inp" type="text" placeholder="(opcional)">
+                <label class="flabel">Q máx 100% [l/min]</label>
+                <input id="s-qmax"     class="inp sm" type="number" step="0.1" min="0.1" placeholder="20.0">
             </div>
         </div>
-        <label class="form-label">Password</label>
-        <input id="s-pass" class="inp" type="password" placeholder="(opcional)">
+        <div class="k-display" id="k-display">k = —</div>
+        <div style="margin-top:8px">
+            <label class="flabel">Ou defina k diretamente (sobrepõe cálculo)</label>
+            <input id="s-k" class="inp sm" type="number" step="0.0001" min="0" placeholder="0.0250">
+        </div>
+
         <div class="sep"></div>
-        <button class="btn btn-primary" onclick="saveSettings()">💾 Guardar</button>
+        <div style="font-size:13px;font-weight:700;margin-bottom:8px;">📡 Broker MQTT</div>
+        <label class="flabel">Host</label>
+        <input id="s-host" class="inp mono mb8" type="text" placeholder="localhost">
+        <div class="frow mb8">
+            <div>
+                <label class="flabel">Porta</label>
+                <input id="s-port" class="inp sm mono" type="number" placeholder="1883">
+            </div>
+            <div>
+                <label class="flabel">Utilizador</label>
+                <input id="s-user" class="inp sm" type="text" placeholder="(opcional)">
+            </div>
+        </div>
+        <label class="flabel">Password</label>
+        <input id="s-pass" class="inp mb8" type="password" placeholder="(opcional)">
+
+        <div class="sep"></div>
+        <button class="btn btn-blue" onclick="saveSettings()">💾 Guardar configuração</button>
     </div>
 </div>
 
-<!-- ── Simulator Modal ────────────────────────────────────────── -->
-<div class="modal-overlay" id="sim-overlay" onclick="closeSim(event)">
-    <div class="modal" onclick="event.stopPropagation()">
-        <div class="modal-title">
-            🎬 Simulador de Trajecto
-            <button class="modal-close" onclick="closeSim()">✕</button>
-        </div>
-        <div class="info-box">
-            Simula um percurso linear entre dois pontos a velocidade constante,
-            gerando coordenadas GPS como se fosse o sensor real.
-        </div>
+<!-- ── Sim Modal ───────────────────────────────────────── -->
+<div class="mo" id="mo-sim" onclick="closeMo('mo-sim',event)">
+    <div class="mdl" onclick="event.stopPropagation()">
+        <div class="mtitle">🎬 Simulador de Trajecto <button class="mclose" onclick="closeMo('mo-sim')">✕</button></div>
+        <div class="info-box">Interpola linearmente entre dois pontos à velocidade indicada,
+        actualizando GPS e PWM em tempo real.</div>
 
-        <label class="form-label">Ponto inicial (lat, lng)</label>
-        <div class="form-row">
-            <input id="sim-lat1" class="inp mono" type="number" step="any" placeholder="38.000000">
-            <input id="sim-lng1" class="inp mono" type="number" step="any" placeholder="-8.000000">
+        <label class="flabel">Ponto inicial (lat, lng)</label>
+        <div class="frow mb8">
+            <input id="sim-lat1" class="inp sm mono" type="number" step="any" placeholder="38.000000">
+            <input id="sim-lng1" class="inp sm mono" type="number" step="any" placeholder="-8.000000">
         </div>
-
-        <label class="form-label">Ponto final (lat, lng)</label>
-        <div class="form-row">
-            <input id="sim-lat2" class="inp mono" type="number" step="any" placeholder="38.010000">
-            <input id="sim-lng2" class="inp mono" type="number" step="any" placeholder="-7.990000">
+        <label class="flabel">Ponto final (lat, lng)</label>
+        <div class="frow mb8">
+            <input id="sim-lat2" class="inp sm mono" type="number" step="any" placeholder="38.010000">
+            <input id="sim-lng2" class="inp sm mono" type="number" step="any" placeholder="-7.990000">
         </div>
+        <label class="flabel">Velocidade (km/h)</label>
+        <input id="sim-spd" class="inp sm mb8" type="number" value="5" min="0.5" max="60" step="0.5">
 
-        <label class="form-label">Velocidade (km/h)</label>
-        <input id="sim-speed" class="inp" type="number" value="5" min="0.5" max="60" step="0.5">
-
-        <div class="sep"></div>
-        <div style="display:flex;gap:8px">
+        <div style="display:flex;gap:8px;margin-bottom:8px">
             <button class="btn btn-amber" id="sim-start-btn" onclick="startSim()" style="flex:1">▶ Iniciar</button>
             <button class="btn btn-red"   id="sim-stop-btn"  onclick="stopSim()"  style="flex:1;display:none">⏹ Parar</button>
         </div>
-        <div id="sim-progress" style="margin-top:10px;font-size:12px;color:var(--gray);text-align:center;font-family:monospace"></div>
+        <div id="sim-prog" style="font-size:11px;color:var(--gray);text-align:center;font-family:monospace;min-height:16px"></div>
     </div>
 </div>
 
@@ -460,548 +495,521 @@
 'use strict';
 
 const API = './api.php';
-const STOR = {
-    token:  'soilqi_can_token',
-    mqtt:   'soilqi_can_mqtt',
-};
+const ST = { token:'soilqi_can_token', cfg:'soilqi_can_cfg' };
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let token    = localStorage.getItem(STOR.token) || '';
-let gpsPos   = null;   // current (real or simulated)
-let gpsReal  = null;   // always real GPS
-let gpsWatch = null;
-let selectedPct   = null;
-let selectedPrescId = null;
-let selectedField   = null;
+let token      = localStorage.getItem(ST.token) || '';
+let gpsPos     = null;   // current (real or sim)
+let gpsReal    = null;
+let gpsWatch   = null;
+let prevGpsPos = null;   // for speed computation
+let gpsSpeedKmh = 0;
+let speedSrcGps = false; // false=manual, true=GPS
+
+let prescId   = null;
+let field     = null;
+let autoPwm   = null;   // calculated
+let manualPwm = null;   // override
 let zoneTimer = null;
 
 // Map
-let mapImg    = null;
-let mapBounds = null;
-let mapScale  = 1;
-let mapOffX   = 0;
-let mapOffY   = 0;
+let mapImg = null, mapBounds = null;
+let mapScale = 1, mapOffX = 0, mapOffY = 0;
+const MAX_ZOOM = 20;
 
-// Simulation
-let simInterval = null;
-let simProgress = 0; // 0→1
+// Sim
+let simIv = null, simProg = 0;
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
-    loadSettingsUI();
+    loadCfgUI();
     startGps();
-    if (token) checkAuth(); else showLogin();
+    token ? checkAuth() : showLogin();
+    // live k recompute in settings
+    ['s-width','s-qmax'].forEach(id => document.getElementById(id).addEventListener('input', updateKDisplay));
 });
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 function showLogin() {
-    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('login-wrap').style.display = 'flex';
     document.getElementById('main-ui').style.display = 'none';
 }
-function showMain(username) {
-    document.getElementById('login-screen').style.display = 'none';
+function showMain() {
+    document.getElementById('login-wrap').style.display = 'none';
     document.getElementById('main-ui').style.display = 'block';
-    setStatus('online');
-    loadTerrains();
+    setStatus('on'); loadTerrains();
 }
 async function checkAuth() {
     try {
         const r = await api('check_auth');
-        if (r.success) showMain(r.username);
-        else { localStorage.removeItem(STOR.token); token = ''; showLogin(); }
-    } catch { setStatus('offline'); if (token) showMain(''); else showLogin(); }
+        r.success ? showMain() : (() => { localStorage.removeItem(ST.token); token=''; showLogin(); })();
+    } catch { setStatus('off'); token ? showMain() : showLogin(); }
 }
-async function submitApiKey() {
-    const btn = document.getElementById('apikey-submit-btn');
-    const err = document.getElementById('apikey-error');
-    const key = document.getElementById('apikey-input').value.trim();
+async function submitKey() {
+    const btn = document.getElementById('ak-btn');
+    const err = document.getElementById('ak-err');
+    const key = document.getElementById('ak-inp').value.trim();
     err.style.display = 'none';
     if (!key) { showErr('Introduza a API Key.'); return; }
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span>';
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
     try {
         token = key;
         const r = await api('check_auth');
-        if (r.success) { localStorage.setItem(STOR.token, key); showMain(r.username); }
-        else { token = ''; err.textContent = r.message || 'API Key inválida.'; err.style.display = 'block'; }
-    } catch { err.textContent = 'Sem ligação.'; err.style.display = 'block'; token = ''; }
-    finally { btn.disabled = false; btn.innerHTML = '🔑 Conectar'; }
+        if (r.success) { localStorage.setItem(ST.token, key); showMain(); }
+        else { token=''; err.textContent = r.message||'API Key inválida.'; err.style.display='block'; }
+    } catch { err.textContent='Sem ligação.'; err.style.display='block'; token=''; }
+    finally { btn.disabled=false; btn.innerHTML='🔑 Conectar'; }
 }
 
 // ── GPS ───────────────────────────────────────────────────────────────────────
 function startGps() {
-    if (!navigator.geolocation) { updateGpsUI(null, 'GPS não suportado'); return; }
-    gpsWatch = navigator.geolocation.watchPosition(
-        pos => {
-            gpsReal = pos;
-            if (!simInterval) { gpsPos = pos; onGpsUpdate(); }
-        },
-        err => updateGpsUI(null, err.code === 1 ? '🚫 Permissão negada' : '📡 Sem sinal'),
-        { enableHighAccuracy: true, maximumAge: 3000, timeout: 15000 }
-    );
+    if (!navigator.geolocation) { document.getElementById('gps-st').textContent='GPS não suportado'; return; }
+    gpsWatch = navigator.geolocation.watchPosition(pos => {
+        // Compute speed from successive positions
+        if (gpsReal) {
+            const dt = (pos.timestamp - gpsReal.timestamp) / 1000; // s
+            if (dt > 0.5 && dt < 10) {
+                const d = haversineM(
+                    gpsReal.coords.latitude, gpsReal.coords.longitude,
+                    pos.coords.latitude,     pos.coords.longitude
+                );
+                gpsSpeedKmh = (d / dt) * 3.6;
+            }
+        }
+        gpsReal = pos;
+        if (!simIv) { gpsPos = pos; onGpsUpdate(); }
+    },
+    err => { document.getElementById('gps-st').textContent = err.code===1?'🚫 Permissão negada':'📡 Sem sinal'; },
+    { enableHighAccuracy:true, maximumAge:3000, timeout:15000 });
 }
 
 function onGpsUpdate() {
     if (!gpsPos) return;
-    const { latitude: lat, longitude: lng, accuracy: acc } = gpsPos.coords;
-    const isReal = !simInterval;
+    const { latitude:lat, longitude:lng, accuracy:acc } = gpsPos.coords;
+    const isSim = !!simIv;
 
     // GPS card
     const card = document.getElementById('gps-card');
-    const st   = document.getElementById('gps-status');
-    const co   = document.getElementById('gps-coords');
+    const st   = document.getElementById('gps-st');
+    const co   = document.getElementById('gps-co');
     co.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-    if (isReal) {
-        if (acc <= 20)       { card.className = 'card gps-card fix';  st.textContent = '✅ Sinal fixo'; }
-        else if (acc <= 100) { card.className = 'card gps-card poor'; st.textContent = '⚠️ Sinal fraco'; }
-        else                 { card.className = 'card gps-card';      st.textContent = '🔍 A melhorar…'; }
-    } else {
-        card.className = 'card gps-card poor';
-        st.textContent = '🎬 Simulação activa';
-    }
+    if (isSim)       { card.className='card gps-card sim';  st.textContent='🎬 Simulação activa'; }
+    else if (acc<=20){ card.className='card gps-card fix';  st.textContent='✅ Sinal fixo'; }
+    else if (acc<=100){ card.className='card gps-card poor'; st.textContent='⚠️ Sinal fraco'; }
+    else             { card.className='card gps-card';      st.textContent='🔍 A melhorar…'; }
 
     // Map bar
-    document.getElementById('map-coords').textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-    document.getElementById('map-acc').textContent    = isReal ? `±${Math.round(acc)} m` : '';
-    document.getElementById('map-sim-tag').style.display = simInterval ? '' : 'none';
+    const spd = getSpeed();
+    document.getElementById('mgb-coords').textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+    document.getElementById('mgb-acc').textContent    = isSim ? '' : `±${Math.round(acc)}m`;
+    document.getElementById('mgb-spd').textContent    = `${spd.toFixed(1)} km/h`;
+    document.getElementById('mgb-sim').style.display  = isSim ? '' : 'none';
+
+    // Speed input sync if GPS mode
+    if (speedSrcGps) document.getElementById('speed-inp').value = spd.toFixed(1);
 
     drawMapMarker();
-
-    if (selectedPrescId && selectedField) scheduleZone();
+    recalcPwm();
+    if (prescId && field) scheduleZone();
 }
 
-function updateGpsUI(pos, msg) {
-    const st = document.getElementById('gps-status');
-    const co = document.getElementById('gps-coords');
-    st.textContent = msg;
-    co.textContent = pos ? `${pos.coords.latitude.toFixed(6)}, ${pos.coords.longitude.toFixed(6)}` : '';
+function getSpeed() {
+    if (speedSrcGps) return simIv ? (parseFloat(document.getElementById('sim-spd').value)||0) : gpsSpeedKmh;
+    return parseFloat(document.getElementById('speed-inp').value) || 0;
+}
+
+function toggleSpeedSrc() {
+    speedSrcGps = !speedSrcGps;
+    const btn = document.getElementById('speed-src-btn');
+    const inp = document.getElementById('speed-inp');
+    if (speedSrcGps) {
+        btn.textContent = 'usar manual';
+        inp.readOnly = true; inp.style.opacity = '.5';
+    } else {
+        btn.textContent = 'usar GPS';
+        inp.readOnly = false; inp.style.opacity = '';
+    }
+    recalcPwm();
+}
+function onSpeedInput() { manualPwm = null; recalcPwm(); }
+
+function haversineM(la1,lo1,la2,lo2) {
+    const R=6371000, r=Math.PI/180;
+    const dLa=(la2-la1)*r, dLo=(lo2-lo1)*r;
+    const a=Math.sin(dLa/2)**2+Math.cos(la1*r)*Math.cos(la2*r)*Math.sin(dLo/2)**2;
+    return 2*R*Math.asin(Math.sqrt(a));
 }
 
 // ── Map ───────────────────────────────────────────────────────────────────────
-async function loadMapImage(prescId) {
-    const outer  = document.getElementById('map-outer');
-    const ph     = document.getElementById('map-ph');
-    const cvs    = document.getElementById('map-canvas');
-    const legend = document.getElementById('map-legend');
-
-    outer.style.display = 'block';
-    ph.style.display    = 'flex'; ph.textContent = 'A carregar mapa…';
-    cvs.style.display   = 'none';
-    legend.innerHTML    = '';
-    mapImg = null; mapBounds = null;
-    zoomReset(false);
-
+async function loadMapImage(pid) {
+    const outer = document.getElementById('map-outer');
+    const ph    = document.getElementById('map-ph');
+    const cvs   = document.getElementById('map-cvs');
+    const lgnd  = document.getElementById('map-legend');
+    outer.style.display='block';
+    ph.style.display='flex'; ph.textContent='A carregar mapa…';
+    cvs.style.display='none'; lgnd.innerHTML='';
+    mapImg=null; mapBounds=null; zoomReset(false);
     try {
-        const r = await api(`get_map_image&prescription_id=${prescId}`);
-        if (!r.success) { ph.textContent = r.message || 'Mapa indisponível.'; return; }
-
+        const r = await api(`get_map_image&prescription_id=${pid}`);
+        if (!r.success) { ph.textContent=r.message||'Mapa indisponível.'; return; }
         mapBounds = r.bounds;
         const img = new Image();
         img.onload = () => {
-            mapImg = img;
-            cvs.width  = img.naturalWidth;
-            cvs.height = img.naturalHeight;
-            ph.style.display  = 'none';
-            cvs.style.display = 'block';
-            applyMapTransform();
-            drawMapMarker();
+            mapImg=img; cvs.width=img.naturalWidth; cvs.height=img.naturalHeight;
+            ph.style.display='none'; cvs.style.display='block';
+            applyTransform(); drawMapMarker();
         };
         img.src = `data:image/png;base64,${r.png_b64}`;
-
-        if (r.legend && r.legend.length) {
-            legend.innerHTML = r.legend.map(e =>
-                `<div class="legend-item">
-                    <div class="legend-sw" style="background:${e.color}"></div>
-                    <span>${e.label||''}</span>
-                </div>`
-            ).join('');
-        }
-    } catch { ph.textContent = 'Erro ao carregar mapa.'; }
+        if (r.legend&&r.legend.length)
+            lgnd.innerHTML = r.legend.map(e=>`<div class="li"><div class="lsw" style="background:${e.color}"></div><span>${e.label||''}</span></div>`).join('');
+    } catch { ph.textContent='Erro ao carregar mapa.'; }
 }
 
 function drawMapMarker() {
-    const cvs = document.getElementById('map-canvas');
-    if (!mapImg || !cvs || cvs.style.display === 'none') return;
+    const cvs = document.getElementById('map-cvs');
+    if (!mapImg||!cvs||cvs.style.display==='none') return;
     const ctx = cvs.getContext('2d');
-    ctx.clearRect(0, 0, cvs.width, cvs.height);
-    ctx.drawImage(mapImg, 0, 0);
-    if (!gpsPos || !mapBounds) return;
-
-    const { latitude: lat, longitude: lng } = gpsPos.coords;
-    const { min_lat, max_lat, min_lng, max_lng } = mapBounds;
-    if (lat < min_lat || lat > max_lat || lng < min_lng || lng > max_lng) return;
-
-    const px = ((lng - min_lng) / (max_lng - min_lng)) * cvs.width;
-    const py = ((max_lat - lat) / (max_lat - min_lat)) * cvs.height;
-    const r  = Math.max(10, cvs.width * 0.028);
-
-    ctx.beginPath(); ctx.arc(px, py, r + 5, 0, Math.PI*2);
-    ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.fill();
-
-    ctx.beginPath(); ctx.arc(px, py, r + 2, 0, Math.PI*2);
-    ctx.fillStyle = '#fff'; ctx.fill();
-
-    ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI*2);
-    ctx.fillStyle = simInterval ? '#f59e0b' : '#2563eb'; ctx.fill();
-
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = Math.max(2, r * 0.3); ctx.lineCap = 'round';
-    const a = r * 0.5;
-    ctx.beginPath(); ctx.moveTo(px-a, py); ctx.lineTo(px+a, py); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(px, py-a); ctx.lineTo(px, py+a); ctx.stroke();
+    ctx.clearRect(0,0,cvs.width,cvs.height);
+    ctx.drawImage(mapImg,0,0);
+    if (!gpsPos||!mapBounds) return;
+    const {latitude:lat,longitude:lng} = gpsPos.coords;
+    const {min_lat,max_lat,min_lng,max_lng} = mapBounds;
+    if (lat<min_lat||lat>max_lat||lng<min_lng||lng>max_lng) return;
+    const px = ((lng-min_lng)/(max_lng-min_lng))*cvs.width;
+    const py = ((max_lat-lat)/(max_lat-min_lat))*cvs.height;
+    const r  = Math.max(10, cvs.width*0.025);
+    const col = simIv ? '#f59e0b' : '#2563eb';
+    ctx.beginPath(); ctx.arc(px,py,r+5,0,Math.PI*2); ctx.fillStyle='rgba(0,0,0,.22)'; ctx.fill();
+    ctx.beginPath(); ctx.arc(px,py,r+2,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill();
+    ctx.beginPath(); ctx.arc(px,py,r,0,Math.PI*2);   ctx.fillStyle=col;   ctx.fill();
+    ctx.strokeStyle='#fff'; ctx.lineWidth=Math.max(2,r*.3); ctx.lineCap='round';
+    const a=r*.5;
+    ctx.beginPath(); ctx.moveTo(px-a,py); ctx.lineTo(px+a,py); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(px,py-a); ctx.lineTo(px,py+a); ctx.stroke();
 }
 
-// ── Zoom & Pan ────────────────────────────────────────────────────────────────
-function applyMapTransform(animate) {
-    const inner = document.getElementById('map-inner');
-    inner.style.transition = animate ? 'transform .2s ease' : '';
-    inner.style.transform  = `translate(${mapOffX}px,${mapOffY}px) scale(${mapScale})`;
+// ── Zoom ─────────────────────────────────────────────────────────────────────
+function applyTransform(anim) {
+    const el = document.getElementById('map-inner');
+    el.style.transition = anim ? 'transform .18s ease' : 'none';
+    el.style.transform  = `translate(${mapOffX}px,${mapOffY}px) scale(${mapScale})`;
 }
-
-function zoomStep(delta) {
-    mapScale = Math.min(6, Math.max(1, mapScale + delta));
-    clampOffset();
-    applyMapTransform(true);
+function zoomStep(d) {
+    mapScale = Math.min(MAX_ZOOM, Math.max(1, mapScale+d));
+    clamp(); applyTransform(true);
 }
-
-function zoomReset(animate = true) {
-    mapScale = 1; mapOffX = 0; mapOffY = 0;
-    applyMapTransform(animate);
+function zoomReset(anim=true) { mapScale=1; mapOffX=0; mapOffY=0; applyTransform(anim); }
+function clamp() {
+    const vp=document.getElementById('map-vp'), cvs=document.getElementById('map-cvs');
+    if (!cvs||cvs.style.display==='none') return;
+    const maxX=Math.max(0,vp.clientWidth*(mapScale-1));
+    const maxY=Math.max(0,cvs.clientHeight*(mapScale-1));
+    mapOffX=Math.min(0,Math.max(-maxX,mapOffX));
+    mapOffY=Math.min(0,Math.max(-maxY,mapOffY));
 }
-
-function clampOffset() {
-    const vp  = document.getElementById('map-viewport');
-    const cvs = document.getElementById('map-canvas');
-    if (!cvs || cvs.style.display === 'none') return;
-    const vw = vp.clientWidth;
-    const ih = cvs.clientHeight; // CSS-rendered height at scale 1
-    const maxX = Math.max(0, vw  * (mapScale - 1));
-    const maxY = Math.max(0, ih  * (mapScale - 1));
-    mapOffX = Math.min(0, Math.max(-maxX, mapOffX));
-    mapOffY = Math.min(0, Math.max(-maxY, mapOffY));
-}
-
-// ── Pinch + drag ─────────────────────────────────────────────────────────────
-(function initGestures() {
-    const vp = document.getElementById('map-viewport');
-    let drag = null; // {startX,startY,origOffX,origOffY}
-    let pinchDist0 = null, scale0 = null;
-
-    function dist(t) {
-        const dx = t[0].clientX - t[1].clientX;
-        const dy = t[0].clientY - t[1].clientY;
-        return Math.sqrt(dx*dx + dy*dy);
-    }
-
-    vp.addEventListener('touchstart', e => {
-        if (e.touches.length === 2) {
-            e.preventDefault();
-            pinchDist0 = dist(e.touches); scale0 = mapScale; drag = null;
-        } else if (e.touches.length === 1) {
-            drag = { startX: e.touches[0].clientX, startY: e.touches[0].clientY,
-                     origOffX: mapOffX, origOffY: mapOffY };
-        }
-    }, { passive: false });
-
-    vp.addEventListener('touchmove', e => {
-        if (e.touches.length === 2 && pinchDist0 !== null) {
-            e.preventDefault();
-            mapScale = Math.min(6, Math.max(1, scale0 * (dist(e.touches) / pinchDist0)));
-            clampOffset(); applyMapTransform();
-        } else if (e.touches.length === 1 && drag && mapScale > 1) {
-            e.preventDefault();
-            mapOffX = drag.origOffX + (e.touches[0].clientX - drag.startX);
-            mapOffY = drag.origOffY + (e.touches[0].clientY - drag.startY);
-            clampOffset(); applyMapTransform();
-        }
-    }, { passive: false });
-
-    vp.addEventListener('touchend', e => {
-        if (e.touches.length < 2) pinchDist0 = null;
-        if (e.touches.length === 0) drag = null;
-    });
-
-    // Mouse drag (desktop)
-    let md = null;
-    vp.addEventListener('mousedown', e => {
-        if (mapScale <= 1) return;
-        md = { startX: e.clientX, startY: e.clientY, origOffX: mapOffX, origOffY: mapOffY };
-        vp.classList.add('grabbing');
-    });
-    window.addEventListener('mousemove', e => {
-        if (!md) return;
-        mapOffX = md.origOffX + (e.clientX - md.startX);
-        mapOffY = md.origOffY + (e.clientY - md.startY);
-        clampOffset(); applyMapTransform();
-    });
-    window.addEventListener('mouseup', () => { md = null; vp.classList.remove('grabbing'); });
-    vp.addEventListener('wheel', e => {
-        e.preventDefault();
-        zoomStep(e.deltaY < 0 ? 0.3 : -0.3);
-    }, { passive: false });
+(function gestures() {
+    const vp=document.getElementById('map-vp');
+    let drag=null,pd=null,s0=null;
+    function td(t){ const dx=t[0].clientX-t[1].clientX,dy=t[0].clientY-t[1].clientY; return Math.sqrt(dx*dx+dy*dy); }
+    vp.addEventListener('touchstart',e=>{
+        if(e.touches.length===2){e.preventDefault();pd=td(e.touches);s0=mapScale;drag=null;}
+        else if(e.touches.length===1) drag={sx:e.touches[0].clientX,sy:e.touches[0].clientY,ox:mapOffX,oy:mapOffY};
+    },{passive:false});
+    vp.addEventListener('touchmove',e=>{
+        if(e.touches.length===2&&pd!=null){e.preventDefault();mapScale=Math.min(MAX_ZOOM,Math.max(1,s0*(td(e.touches)/pd)));clamp();applyTransform();}
+        else if(e.touches.length===1&&drag&&mapScale>1){e.preventDefault();mapOffX=drag.ox+(e.touches[0].clientX-drag.sx);mapOffY=drag.oy+(e.touches[0].clientY-drag.sy);clamp();applyTransform();}
+    },{passive:false});
+    vp.addEventListener('touchend',e=>{ if(e.touches.length<2)pd=null; if(e.touches.length===0)drag=null; });
+    let md=null;
+    vp.addEventListener('mousedown',e=>{ if(mapScale<=1)return; md={sx:e.clientX,sy:e.clientY,ox:mapOffX,oy:mapOffY}; vp.classList.add('grabbing'); });
+    window.addEventListener('mousemove',e=>{ if(!md)return; mapOffX=md.ox+(e.clientX-md.sx); mapOffY=md.oy+(e.clientY-md.sy); clamp(); applyTransform(); });
+    window.addEventListener('mouseup',()=>{ md=null; document.getElementById('map-vp').classList.remove('grabbing'); });
+    vp.addEventListener('wheel',e=>{ e.preventDefault(); zoomStep(e.deltaY<0?.5:-.5); },{passive:false});
 })();
 
-// ── Terrenos ──────────────────────────────────────────────────────────────────
+// ── Terrenos / Prescrições ────────────────────────────────────────────────────
 async function loadTerrains() {
     try {
         const r = await api('get_terrains');
         if (!r.success) return;
-        const sel = document.getElementById('terrain-select');
-        sel.innerHTML = '<option value="">— Selecione um terreno —</option>';
-        r.terrains.forEach(t => {
-            const o = document.createElement('option');
-            o.value = t.id; o.textContent = t.name; sel.appendChild(o);
-        });
+        const sel=document.getElementById('sel-terrain');
+        sel.innerHTML='<option value="">— Selecione um terreno —</option>';
+        r.terrains.forEach(t=>{ const o=document.createElement('option'); o.value=t.id; o.textContent=t.name; sel.appendChild(o); });
     } catch {}
 }
 function onTerrainChange() {
-    const tid = document.getElementById('terrain-select').value;
-    const pc  = document.getElementById('prescription-card');
-    resetZone();
-    if (!tid) { pc.style.display = 'none'; return; }
-    pc.style.display = 'block';
+    const tid=document.getElementById('sel-terrain').value;
+    resetAll();
+    if (!tid) { document.getElementById('card-presc').style.display='none'; return; }
+    document.getElementById('card-presc').style.display='block';
     loadPrescriptions(tid);
 }
 async function loadPrescriptions(tid) {
-    const sel = document.getElementById('prescription-select');
-    sel.innerHTML = '<option value="">A carregar…</option>';
-    document.getElementById('field-row').style.display = 'none';
+    const sel=document.getElementById('sel-presc');
+    sel.innerHTML='<option value="">A carregar…</option>';
+    document.getElementById('field-row').style.display='none';
     try {
-        const r = await api(`get_prescriptions&terrain_id=${tid}`);
-        sel.innerHTML = '<option value="">— Selecione uma prescrição —</option>';
-        if (!r.success || !r.prescriptions.length) {
-            sel.innerHTML += '<option disabled>Sem prescrições concluídas</option>';
-            return;
-        }
-        r.prescriptions.forEach(p => {
-            const o = document.createElement('option');
-            o.value = p.id; o.dataset.fields = JSON.stringify(p.fields);
-            o.textContent = p.name; sel.appendChild(o);
-        });
-    } catch { sel.innerHTML = '<option value="">Erro de ligação</option>'; }
+        const r=await api(`get_prescriptions&terrain_id=${tid}`);
+        sel.innerHTML='<option value="">— Selecione uma prescrição —</option>';
+        if (!r.success||!r.prescriptions.length){ sel.innerHTML+='<option disabled>Sem prescrições concluídas</option>'; return; }
+        r.prescriptions.forEach(p=>{ const o=document.createElement('option'); o.value=p.id; o.dataset.fields=JSON.stringify(p.fields); o.textContent=p.name; sel.appendChild(o); });
+    } catch { sel.innerHTML='<option value="">Erro</option>'; }
 }
-function onPrescriptionChange() {
-    const sel = document.getElementById('prescription-select');
-    const opt = sel.options[sel.selectedIndex];
-    selectedPrescId = sel.value || null;
-    selectedField   = null;
-    resetZone();
-    if (!selectedPrescId) return;
-    loadMapImage(selectedPrescId);
-    const fields = JSON.parse(opt.dataset.fields || '[]');
-    const fr  = document.getElementById('field-row');
-    const fs  = document.getElementById('field-select');
-    if (!fields.length) { fr.style.display = 'none'; return; }
-    fs.innerHTML = fields.length > 1 ? '<option value="">— Parâmetro —</option>' : '';
-    fields.forEach(f => { const o = document.createElement('option'); o.value = f; o.textContent = f; fs.appendChild(o); });
-    fr.style.display = 'block';
-    if (fields.length === 1) { selectedField = fields[0]; scheduleZone(); }
+function onPrescChange() {
+    const sel=document.getElementById('sel-presc');
+    const opt=sel.options[sel.selectedIndex];
+    prescId=sel.value||null; field=null; resetAll();
+    if (!prescId) return;
+    loadMapImage(prescId);
+    const fields=JSON.parse(opt.dataset.fields||'[]');
+    const fr=document.getElementById('field-row'), fs=document.getElementById('sel-field');
+    if (!fields.length){ fr.style.display='none'; return; }
+    fs.innerHTML=fields.length>1?'<option value="">— Parâmetro —</option>':'';
+    fields.forEach(f=>{ const o=document.createElement('option'); o.value=f; o.textContent=f; fs.appendChild(o); });
+    fr.style.display='block';
+    if (fields.length===1){ field=fields[0]; scheduleZone(); }
 }
-function onFieldChange() {
-    selectedField = document.getElementById('field-select').value || null;
-    if (selectedField && gpsPos) scheduleZone();
-}
+function onFieldChange() { field=document.getElementById('sel-field').value||null; if(field&&gpsPos)scheduleZone(); }
 
 // ── Zona ──────────────────────────────────────────────────────────────────────
-function resetZone() {
-    ['zone-card','pct-card','pub-wrap','map-outer'].forEach(id =>
-        document.getElementById(id).style.display = 'none');
-    selectedPct = null; mapImg = null; mapBounds = null;
-    zoomReset(false);
-    clearPct();
+function resetAll() {
+    ['card-pwm','pub-wrap','map-outer'].forEach(id=>document.getElementById(id).style.display='none');
+    manualPwm=null; autoPwm=null;
+    mapImg=null; mapBounds=null; zoomReset(false);
+    document.querySelectorAll('.pbtn').forEach(b=>b.className='pbtn');
+    document.getElementById('pub-btn').disabled=true;
 }
-function scheduleZone() {
-    clearTimeout(zoneTimer);
-    zoneTimer = setTimeout(fetchZone, 600);
-}
+function scheduleZone() { clearTimeout(zoneTimer); zoneTimer=setTimeout(fetchZone,600); }
 async function fetchZone() {
-    if (!selectedPrescId || !selectedField || !gpsPos) return;
-    const { latitude: lat, longitude: lng } = gpsPos.coords;
+    if (!prescId||!field||!gpsPos) return;
+    const {latitude:lat,longitude:lng}=gpsPos.coords;
     try {
-        const r = await api('get_zone_value', 'POST',
-            { prescription_id: selectedPrescId, lat, lng, field: selectedField });
-        if (!r.success) {
-            if (r.out_of_bounds) showOutOfBounds();
-            else toast(r.message || 'Erro', 'err');
-            return;
-        }
-        showZone(r);
-    } catch { toast('Erro de ligação', 'err'); }
-}
-function showOutOfBounds() {
-    document.getElementById('zone-card').style.display = 'block';
-    document.getElementById('zone-label').textContent = 'Fora do terreno';
-    document.getElementById('zone-value').textContent = '—';
-    document.getElementById('zone-sub').textContent   = '';
-    document.getElementById('pct-card').style.display  = 'none';
-    document.getElementById('pub-wrap').style.display  = 'none';
-}
-function showZone(r) {
-    document.getElementById('zone-card').style.display = 'block';
-    document.getElementById('zone-label').textContent  = `Zona ${r.zone_id} — ${r.field}`;
-    document.getElementById('zone-value').textContent  = r.value !== null ? r.value : '—';
-    document.getElementById('zone-sub').textContent    = r.max_value ? `Máx: ${r.max_value}` : '';
-    document.getElementById('pct-card').style.display  = 'block';
-    document.getElementById('pub-wrap').style.display  = 'block';
-    clearPct();
-    const sug = r.suggested_pct;
-    document.querySelectorAll('.pct-btn').forEach(b => {
-        if (parseInt(b.dataset.pct) === sug) b.classList.add('suggest');
-    });
-    selectPct(sug);
+        const r=await api('get_zone_value','POST',{prescription_id:prescId,lat,lng,field});
+        if (!r.success){ toast(r.message||'Erro','err'); return; }
+        // Store prescription value for PWM calc
+        window._zoneVal = r.value;
+        window._zoneMax = r.max_value;
+        window._zoneId  = r.zone_id;
+        document.getElementById('card-pwm').style.display='block';
+        document.getElementById('pub-wrap').style.display='block';
+        recalcPwm();
+    } catch { toast('Erro de ligação','err'); }
 }
 
-// ── % ─────────────────────────────────────────────────────────────────────────
-function clearPct() {
-    document.querySelectorAll('.pct-btn').forEach(b => b.className = 'pct-btn');
-    document.getElementById('pub-btn').disabled = true;
+// ── PWM calculation ───────────────────────────────────────────────────────────
+function getK() {
+    const cfg = getCfg();
+    if (cfg.k && cfg.k > 0) return cfg.k;
+    if (cfg.width > 0 && cfg.qmax > 0) return cfg.width / (6 * cfg.qmax);
+    return null;
 }
-function selectPct(pct) {
-    selectedPct = pct;
-    document.querySelectorAll('.pct-btn').forEach(b => {
-        b.classList.toggle('sel', parseInt(b.dataset.pct) === pct);
+
+function recalcPwm() {
+    const val  = window._zoneVal;
+    const zid  = window._zoneId;
+    if (val === undefined || val === null) return;
+
+    const k    = getK();
+    const spd  = getSpeed();
+    const warn = document.getElementById('pwm-warn');
+    const fl   = document.getElementById('pwm-formula-line');
+    const bar  = document.getElementById('pwm-bar');
+    const num  = document.getElementById('pwm-num');
+    const ba   = document.getElementById('badge-auto');
+    const bm   = document.getElementById('badge-manual');
+
+    if (manualPwm !== null) {
+        // Manual override
+        ba.style.display='none'; bm.style.display='';
+        warn.textContent='';
+        fl.textContent = `Zona ${zid} · ${val} l/ha · override manual`;
+        renderPwm(manualPwm);
+        return;
+    }
+
+    ba.style.display=''; bm.style.display='none';
+
+    if (!k) {
+        fl.textContent='Configure largura e Q máx em ⚙️';
+        warn.textContent='⚠️ Ganho k não configurado';
+        num.textContent='—'; bar.style.width='0%'; return;
+    }
+    if (spd <= 0) {
+        fl.textContent=`${val} l/ha × ${k.toFixed(4)} × 0 km/h = 0%`;
+        warn.textContent=''; renderPwm(0); return;
+    }
+
+    let pwm = val * k * spd;
+    fl.textContent = `${val} l/ha × ${k.toFixed(4)} × ${spd.toFixed(1)} km/h = ${pwm.toFixed(1)}%`;
+
+    if (pwm > 100) {
+        warn.textContent = `⚠️ Calculado: ${pwm.toFixed(1)}% — limitado a 100%`;
+        pwm = 100;
+    } else if (pwm < 0) {
+        pwm = 0; warn.textContent='';
+    } else {
+        warn.textContent='';
+    }
+
+    autoPwm = Math.round(pwm);
+
+    // Highlight nearest manual button
+    document.querySelectorAll('.pbtn').forEach(b => {
+        const p = parseInt(b.dataset.pct);
+        b.classList.toggle('auto-mark', Math.abs(p - autoPwm) <= 12);
+        b.classList.remove('sel');
     });
-    const btn = document.getElementById('pub-btn');
-    btn.disabled = false;
-    btn.textContent = `📡 Publicar ${pct}%`;
+
+    renderPwm(autoPwm);
+    document.getElementById('pub-btn').disabled = false;
+    document.getElementById('pub-btn').textContent = `📡 Publicar ${autoPwm}%`;
+}
+
+function renderPwm(pct) {
+    document.getElementById('pwm-num').textContent = pct;
+    document.getElementById('pwm-bar').style.width = pct + '%';
+    // colour shift: green→amber→red
+    const bar = document.getElementById('pwm-bar');
+    bar.style.background = pct>85 ? '#f87171' : pct>60 ? '#fbbf24' : '#4ade80';
+}
+
+function selectManual(pct) {
+    manualPwm = pct;
+    document.querySelectorAll('.pbtn').forEach(b => {
+        b.classList.remove('auto-mark');
+        b.classList.toggle('sel', parseInt(b.dataset.pct)===pct);
+    });
+    recalcPwm();
+    document.getElementById('pub-btn').disabled = false;
+    document.getElementById('pub-btn').textContent = `📡 Publicar ${pct}%`;
 }
 
 // ── Publish ───────────────────────────────────────────────────────────────────
 async function publishCan() {
-    if (selectedPct === null) return;
+    const pct = manualPwm !== null ? manualPwm : autoPwm;
+    if (pct === null) return;
     const btn = document.getElementById('pub-btn');
-    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> A publicar…';
-    const mqtt = getMqttCfg();
+    btn.disabled=true; btn.innerHTML='<span class="spinner"></span> A publicar…';
+    const cfg = getCfg();
+    const mqtt = { mqtt_host:cfg.host||undefined, mqtt_port:cfg.port||undefined, mqtt_user:cfg.user||undefined, mqtt_pass:cfg.pass||undefined };
+    Object.keys(mqtt).forEach(k=>mqtt[k]===undefined&&delete mqtt[k]);
     try {
-        const r = await api('publish_can', 'POST', { pct: selectedPct, ...mqtt });
+        const r=await api('publish_can','POST',{pct,...mqtt});
         if (r.success) {
-            toast(`✅ ${r.pct}% → ${r.topic}`, 'ok');
-            document.getElementById('last-pub').textContent =
-                `${r.pct}% às ${new Date().toLocaleTimeString('pt-PT')} · ${r.raw}`;
-        } else toast(r.message || 'Erro ao publicar', 'err');
-    } catch { toast('Sem ligação', 'err'); }
-    finally { btn.disabled = false; btn.textContent = `📡 Publicar ${selectedPct}%`; }
+            toast(`✅ ${r.pct}% → ${r.topic}`,'ok');
+            document.getElementById('last-pub').textContent=`${r.pct}% às ${new Date().toLocaleTimeString('pt-PT')} · ${r.raw}`;
+        } else toast(r.message||'Erro','err');
+    } catch { toast('Sem ligação','err'); }
+    finally { btn.disabled=false; btn.textContent=`📡 Publicar ${pct}%`; }
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
-function getMqttCfg() {
-    try { return JSON.parse(localStorage.getItem(STOR.mqtt) || '{}'); } catch { return {}; }
+function getCfg() {
+    try { return JSON.parse(localStorage.getItem(ST.cfg)||'{}'); } catch { return {}; }
 }
-function loadSettingsUI() {
-    const cfg = getMqttCfg();
-    document.getElementById('s-host').value = cfg.mqtt_host || '';
-    document.getElementById('s-port').value = cfg.mqtt_port || '';
-    document.getElementById('s-user').value = cfg.mqtt_user || '';
-    document.getElementById('s-pass').value = cfg.mqtt_pass || '';
+function loadCfgUI() {
+    const c=getCfg();
+    document.getElementById('s-width').value = c.width||'';
+    document.getElementById('s-qmax').value  = c.qmax||'';
+    document.getElementById('s-k').value     = c.k||'';
+    document.getElementById('s-host').value  = c.host||'';
+    document.getElementById('s-port').value  = c.port||'';
+    document.getElementById('s-user').value  = c.user||'';
+    document.getElementById('s-pass').value  = c.pass||'';
+    updateKDisplay();
+}
+function updateKDisplay() {
+    const w=parseFloat(document.getElementById('s-width').value);
+    const q=parseFloat(document.getElementById('s-qmax').value);
+    const kEl=document.getElementById('k-display');
+    if (w>0&&q>0) {
+        const k=w/(6*q);
+        kEl.textContent=`k = ${w} / (6 × ${q}) = ${k.toFixed(5)}  →  pwm = prescrição × ${k.toFixed(5)} × vel`;
+    } else { kEl.textContent='k = — (preencha largura e Q máx)'; }
 }
 function saveSettings() {
-    const cfg = {
-        mqtt_host: document.getElementById('s-host').value.trim() || undefined,
-        mqtt_port: document.getElementById('s-port').value ? parseInt(document.getElementById('s-port').value) : undefined,
-        mqtt_user: document.getElementById('s-user').value.trim() || undefined,
-        mqtt_pass: document.getElementById('s-pass').value || undefined,
+    const w=parseFloat(document.getElementById('s-width').value)||0;
+    const q=parseFloat(document.getElementById('s-qmax').value)||0;
+    const cfg={
+        width: w||undefined, qmax: q||undefined,
+        k: parseFloat(document.getElementById('s-k').value)||undefined,
+        host: document.getElementById('s-host').value.trim()||undefined,
+        port: parseInt(document.getElementById('s-port').value)||undefined,
+        user: document.getElementById('s-user').value.trim()||undefined,
+        pass: document.getElementById('s-pass').value||undefined,
     };
-    Object.keys(cfg).forEach(k => cfg[k] === undefined && delete cfg[k]);
-    localStorage.setItem(STOR.mqtt, JSON.stringify(cfg));
-    toast('✅ Configuração guardada', 'ok');
-    closeSettings();
+    Object.keys(cfg).forEach(k=>cfg[k]===undefined&&delete cfg[k]);
+    localStorage.setItem(ST.cfg,JSON.stringify(cfg));
+    toast('✅ Configuração guardada','ok');
+    closeMo('mo-settings');
+    recalcPwm();
 }
-function openSettings()   { document.getElementById('settings-overlay').classList.add('open'); }
-function closeSettings(e) { if (!e || e.target === document.getElementById('settings-overlay')) document.getElementById('settings-overlay').classList.remove('open'); }
+function openSettings() { loadCfgUI(); openMo('mo-settings'); }
 
 // ── Simulator ─────────────────────────────────────────────────────────────────
 function openSim() {
-    // pré-preencher com GPS actual
     if (gpsReal) {
-        document.getElementById('sim-lat1').value = gpsReal.coords.latitude.toFixed(7);
-        document.getElementById('sim-lng1').value = gpsReal.coords.longitude.toFixed(7);
+        document.getElementById('sim-lat1').value=gpsReal.coords.latitude.toFixed(7);
+        document.getElementById('sim-lng1').value=gpsReal.coords.longitude.toFixed(7);
     }
-    document.getElementById('sim-overlay').classList.add('open');
+    openMo('mo-sim');
 }
-function closeSim(e) { if (!e || e.target === document.getElementById('sim-overlay')) document.getElementById('sim-overlay').classList.remove('open'); }
-
 function startSim() {
-    const lat1 = parseFloat(document.getElementById('sim-lat1').value);
-    const lng1 = parseFloat(document.getElementById('sim-lng1').value);
-    const lat2 = parseFloat(document.getElementById('sim-lat2').value);
-    const lng2 = parseFloat(document.getElementById('sim-lng2').value);
-    const spd  = parseFloat(document.getElementById('sim-speed').value); // km/h
-
-    if ([lat1,lng1,lat2,lng2].some(isNaN) || spd <= 0) {
-        toast('Preencha todos os campos correctamente', 'err'); return;
-    }
-
-    // distância total em km (aprox. equirectangular)
-    const R = 6371;
-    const dlat = (lat2 - lat1) * Math.PI / 180;
-    const dlng = (lng2 - lng1) * Math.PI / 180;
-    const a    = Math.sin(dlat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dlng/2)**2;
-    const dist = 2 * R * Math.asin(Math.sqrt(a)); // km
-
-    if (dist < 0.001) { toast('Distância demasiado pequena', 'err'); return; }
-
-    const totalMs = (dist / spd) * 3600 * 1000; // ms
-    const tickMs  = 500;
-    const step    = tickMs / totalMs;
-
-    stopSim();
-    simProgress = 0;
-
-    document.getElementById('sim-start-btn').style.display = 'none';
-    document.getElementById('sim-stop-btn').style.display  = '';
-    document.getElementById('sim-badge').style.display     = '';
-    document.getElementById('sim-badge').style.display     = 'inline';
-
-    simInterval = setInterval(() => {
-        simProgress = Math.min(1, simProgress + step);
-        const lat = lat1 + (lat2 - lat1) * simProgress;
-        const lng = lng1 + (lng2 - lng1) * simProgress;
-
-        const pct_done = Math.round(simProgress * 100);
-        document.getElementById('sim-progress').textContent =
-            `${pct_done}% — ${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-
-        gpsPos = { coords: { latitude: lat, longitude: lng, accuracy: 1 } };
+    const la1=parseFloat(document.getElementById('sim-lat1').value);
+    const lo1=parseFloat(document.getElementById('sim-lng1').value);
+    const la2=parseFloat(document.getElementById('sim-lat2').value);
+    const lo2=parseFloat(document.getElementById('sim-lng2').value);
+    const spd =parseFloat(document.getElementById('sim-spd').value);
+    if([la1,lo1,la2,lo2].some(isNaN)||spd<=0){ toast('Preencha todos os campos','err'); return; }
+    const distM=haversineM(la1,lo1,la2,lo2);
+    if(distM<1){ toast('Distância demasiado pequena','err'); return; }
+    const totalMs=(distM/1000/spd)*3600*1000;
+    const tickMs=500, step=tickMs/totalMs;
+    stopSim(); simProg=0;
+    document.getElementById('sim-start-btn').style.display='none';
+    document.getElementById('sim-stop-btn').style.display='';
+    document.getElementById('sim-pill').style.display='';
+    simIv=setInterval(()=>{
+        simProg=Math.min(1,simProg+step);
+        const lat=la1+(la2-la1)*simProg;
+        const lng=lo1+(lo2-lo1)*simProg;
+        gpsPos={coords:{latitude:lat,longitude:lng,accuracy:1},timestamp:Date.now()};
+        document.getElementById('sim-prog').textContent=`${Math.round(simProg*100)}% — ${lat.toFixed(6)}, ${lng.toFixed(6)}`;
         onGpsUpdate();
-
-        if (simProgress >= 1) stopSim();
-    }, tickMs);
+        if(simProg>=1) stopSim();
+    },tickMs);
 }
-
 function stopSim() {
-    if (simInterval) { clearInterval(simInterval); simInterval = null; }
-    simProgress = 0;
-    document.getElementById('sim-start-btn').style.display = '';
-    document.getElementById('sim-stop-btn').style.display  = 'none';
-    document.getElementById('sim-badge').style.display     = 'none';
-    document.getElementById('sim-progress').textContent    = '';
-    document.getElementById('map-sim-tag').style.display   = 'none';
-    // voltar ao GPS real
-    if (gpsReal) { gpsPos = gpsReal; onGpsUpdate(); }
+    if(simIv){clearInterval(simIv);simIv=null;}
+    simProg=0;
+    document.getElementById('sim-start-btn').style.display='';
+    document.getElementById('sim-stop-btn').style.display='none';
+    document.getElementById('sim-pill').style.display='none';
+    document.getElementById('sim-prog').textContent='';
+    document.getElementById('mgb-sim').style.display='none';
+    if(gpsReal){gpsPos=gpsReal;onGpsUpdate();}
 }
 
-// ── API helper ────────────────────────────────────────────────────────────────
-async function api(action, method = 'GET', body = null) {
-    const headers = { 'Authorization': `Bearer ${token}` };
-    const opts    = { method, headers };
-    if (method === 'POST' && body) {
-        headers['Content-Type'] = 'application/json';
-        opts.body = JSON.stringify({ action, ...body });
-    }
-    const url = method === 'GET' ? `${API}?action=${action}` : API;
-    return (await fetch(url, opts)).json();
-}
+// ── Modal helpers ─────────────────────────────────────────────────────────────
+function openMo(id) { document.getElementById(id).classList.add('open'); }
+function closeMo(id,e) { if(!e||e.target===document.getElementById(id)) document.getElementById(id).classList.remove('open'); }
 
-function setStatus(s) {
-    const d = document.getElementById('status-dot');
-    d.className = 'status-dot ' + s;
+// ── API ───────────────────────────────────────────────────────────────────────
+async function api(action,method='GET',body=null) {
+    const h={'Authorization':`Bearer ${token}`};
+    const opts={method,headers:h};
+    if(method==='POST'&&body){h['Content-Type']='application/json';opts.body=JSON.stringify({action,...body});}
+    const url=method==='GET'?`${API}?action=${action}`:API;
+    return (await fetch(url,opts)).json();
 }
-
+function setStatus(s){ document.getElementById('sdot').className='sdot '+(s==='on'?'on':'off'); }
 let _tt;
-function toast(msg, type = '') {
-    const el = document.getElementById('toast');
-    el.textContent = msg; el.className = `toast ${type} show`;
-    clearTimeout(_tt); _tt = setTimeout(() => el.classList.remove('show'), 3000);
+function toast(msg,type=''){
+    const el=document.getElementById('toast');
+    el.textContent=msg; el.className=`toast ${type} show`;
+    clearTimeout(_tt); _tt=setTimeout(()=>el.classList.remove('show'),3000);
 }
 </script>
 </body>

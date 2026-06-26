@@ -291,9 +291,9 @@ try {
             break;
 
         case 'publish_can':
-            $pct = intval($body['pct'] ?? -1);
-            if (!in_array($pct, [0, 25, 50, 75, 100])) {
-                $response['message'] = 'Percentagem inválida. Use 0, 25, 50, 75 ou 100.';
+            $pct = intval(round(floatval($body['pct'] ?? -1)));
+            if ($pct < 0 || $pct > 100) {
+                $response['message'] = 'Percentagem inválida (0–100).';
                 break;
             }
 
