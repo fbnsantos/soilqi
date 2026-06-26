@@ -130,15 +130,25 @@
         .map-inner canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
         .map-ph { display:flex; align-items:center; justify-content:center; min-height:180px; color:var(--gray); font-size:13px; }
 
-        .zoom-btns { position:absolute; right:8px; bottom:8px; display:flex; flex-direction:column; gap:4px; z-index:10; }
+        .zoom-bar-btns { display:flex; gap:4px; flex-shrink:0; }
         .zbtn {
-            width:32px; height:32px; border-radius:8px;
-            background:rgba(255,255,255,.92); border:1px solid #d1d5db;
-            font-size:17px; font-weight:700; cursor:pointer;
-            display:flex; align-items:center; justify-content:center;
-            box-shadow:0 1px 4px rgba(0,0,0,.12); color:#374151; line-height:1;
+            width:28px; height:24px; border-radius:6px;
+            background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.3);
+            font-size:16px; font-weight:800; cursor:pointer; color:#fff;
+            display:flex; align-items:center; justify-content:center; line-height:1;
+            flex-shrink:0;
         }
-        .zbtn.reset { font-size:12px; }
+        .zbtn:active { background:rgba(255,255,255,.35); }
+        /* pick mode overlay */
+        .pick-overlay {
+            position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+            pointer-events:none; z-index:20;
+        }
+        .pick-banner {
+            background:rgba(30,58,95,.88); color:#fff; font-size:13px; font-weight:700;
+            padding:8px 18px; border-radius:20px; pointer-events:none;
+            box-shadow:0 2px 10px rgba(0,0,0,.3);
+        }
 
         .map-legend { padding:7px 10px; display:flex; flex-wrap:wrap; gap:5px; border-top:1px solid #f3f4f6; }
         .li { display:flex; align-items:center; gap:4px; font-size:11px; color:#374151; }
@@ -316,16 +326,19 @@
             <span class="mgb-spd"    id="mgb-spd"></span>
             <span class="mgb-acc"    id="mgb-acc"></span>
             <span class="mgb-sim"    id="mgb-sim">SIM</span>
+            <div class="zoom-bar-btns">
+                <button class="zbtn" onclick="zoomStep(-0.5)" title="Zoom out">−</button>
+                <button class="zbtn" onclick="zoomReset(true)" title="Reset" style="font-size:11px">⊡</button>
+                <button class="zbtn" onclick="zoomStep(+0.5)" title="Zoom in">+</button>
+            </div>
         </div>
         <div class="map-vp" id="map-vp">
             <div class="map-inner" id="map-inner">
                 <div class="map-ph" id="map-ph">A carregar mapa…</div>
                 <canvas id="map-cvs" style="display:none"></canvas>
             </div>
-            <div class="zoom-btns">
-                <button class="zbtn"       onclick="zoomStep(+0.5)"  title="Zoom in">+</button>
-                <button class="zbtn"       onclick="zoomStep(-0.5)"  title="Zoom out">−</button>
-                <button class="zbtn reset" onclick="zoomReset(true)" title="Reset">⊡</button>
+            <div class="pick-overlay" id="pick-overlay" style="display:none">
+                <div class="pick-banner" id="pick-banner"></div>
             </div>
         </div>
         <div class="map-legend" id="map-legend"></div>
@@ -465,19 +478,30 @@ k = largura [m] / (6 × Q_max [l/min])</div>
 <div class="mo" id="mo-sim" onclick="closeMo('mo-sim',event)">
     <div class="mdl" onclick="event.stopPropagation()">
         <div class="mtitle">🎬 Simulador de Trajecto <button class="mclose" onclick="closeMo('mo-sim')">✕</button></div>
-        <div class="info-box">Interpola linearmente entre dois pontos à velocidade indicada,
-        actualizando GPS e PWM em tempo real.</div>
+        <div class="info-box">Toque no mapa de prescrição para definir o ponto inicial (🟢) e final (🔴) do trajecto. A simulação interpola linearmente à velocidade indicada.</div>
 
-        <label class="flabel">Ponto inicial (lat, lng)</label>
-        <div class="frow mb8">
-            <input id="sim-lat1" class="inp sm mono" type="number" step="any" placeholder="38.000000">
-            <input id="sim-lng1" class="inp sm mono" type="number" step="any" placeholder="-8.000000">
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+            <!-- Ponto A -->
+            <div style="display:flex;align-items:center;gap:8px">
+                <div style="width:14px;height:14px;border-radius:50%;background:#16a34a;flex-shrink:0;border:2px solid #fff;box-shadow:0 0 0 2px #16a34a"></div>
+                <span style="font-size:12px;font-weight:700;min-width:60px">Início</span>
+                <span id="sim-ptA-label" class="inp sm mono" style="flex:1;padding:6px 9px;color:var(--gray);cursor:default">—</span>
+                <button class="hbtn" style="font-size:11px;padding:5px 9px;background:var(--blue);border-color:rgba(255,255,255,.3)" onclick="pickPoint('A')">📍 Picar</button>
+            </div>
+            <!-- Ponto B -->
+            <div style="display:flex;align-items:center;gap:8px">
+                <div style="width:14px;height:14px;border-radius:50%;background:#dc2626;flex-shrink:0;border:2px solid #fff;box-shadow:0 0 0 2px #dc2626"></div>
+                <span style="font-size:12px;font-weight:700;min-width:60px">Fim</span>
+                <span id="sim-ptB-label" class="inp sm mono" style="flex:1;padding:6px 9px;color:var(--gray);cursor:default">—</span>
+                <button class="hbtn" style="font-size:11px;padding:5px 9px;background:var(--blue);border-color:rgba(255,255,255,.3)" onclick="pickPoint('B')">📍 Picar</button>
+            </div>
         </div>
-        <label class="flabel">Ponto final (lat, lng)</label>
-        <div class="frow mb8">
-            <input id="sim-lat2" class="inp sm mono" type="number" step="any" placeholder="38.010000">
-            <input id="sim-lng2" class="inp sm mono" type="number" step="any" placeholder="-7.990000">
+
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+            <button class="hbtn" style="font-size:11px;padding:5px 10px;background:var(--blue);border-color:rgba(255,255,255,.3);white-space:nowrap" onclick="useGpsAsA()">📍 GPS → Início</button>
+            <button class="hbtn" style="font-size:11px;padding:5px 10px;background:var(--blue);border-color:rgba(255,255,255,.3);white-space:nowrap" onclick="clearSimPts()">🗑 Limpar</button>
         </div>
+
         <label class="flabel">Velocidade (km/h)</label>
         <input id="sim-spd" class="inp sm mb8" type="number" value="5" min="0.5" max="60" step="0.5">
 
@@ -519,6 +543,8 @@ const MAX_ZOOM = 20;
 
 // Sim
 let simIv = null, simProg = 0;
+let simPtA = null, simPtB = null; // {lat,lng}
+let pickMode = null; // 'A' | 'B' | null
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -667,27 +693,57 @@ async function loadMapImage(pid) {
     } catch { ph.textContent='Erro ao carregar mapa.'; }
 }
 
+function latLngToPx(lat, lng) {
+    const cvs = document.getElementById('map-cvs');
+    return {
+        px: ((lng - mapBounds.min_lng) / (mapBounds.max_lng - mapBounds.min_lng)) * cvs.width,
+        py: ((mapBounds.max_lat - lat) / (mapBounds.max_lat - mapBounds.min_lat)) * cvs.height
+    };
+}
+
+function drawDot(ctx, px, py, r, fill) {
+    ctx.beginPath(); ctx.arc(px,py,r+4,0,Math.PI*2); ctx.fillStyle='rgba(0,0,0,.22)'; ctx.fill();
+    ctx.beginPath(); ctx.arc(px,py,r+2,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill();
+    ctx.beginPath(); ctx.arc(px,py,r,0,Math.PI*2);   ctx.fillStyle=fill;  ctx.fill();
+}
+
 function drawMapMarker() {
     const cvs = document.getElementById('map-cvs');
     if (!mapImg||!cvs||cvs.style.display==='none') return;
     const ctx = cvs.getContext('2d');
     ctx.clearRect(0,0,cvs.width,cvs.height);
     ctx.drawImage(mapImg,0,0);
-    if (!gpsPos||!mapBounds) return;
-    const {latitude:lat,longitude:lng} = gpsPos.coords;
-    const {min_lat,max_lat,min_lng,max_lng} = mapBounds;
-    if (lat<min_lat||lat>max_lat||lng<min_lng||lng>max_lng) return;
-    const px = ((lng-min_lng)/(max_lng-min_lng))*cvs.width;
-    const py = ((max_lat-lat)/(max_lat-min_lat))*cvs.height;
-    const r  = Math.max(10, cvs.width*0.025);
-    const col = simIv ? '#f59e0b' : '#2563eb';
-    ctx.beginPath(); ctx.arc(px,py,r+5,0,Math.PI*2); ctx.fillStyle='rgba(0,0,0,.22)'; ctx.fill();
-    ctx.beginPath(); ctx.arc(px,py,r+2,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill();
-    ctx.beginPath(); ctx.arc(px,py,r,0,Math.PI*2);   ctx.fillStyle=col;   ctx.fill();
-    ctx.strokeStyle='#fff'; ctx.lineWidth=Math.max(2,r*.3); ctx.lineCap='round';
-    const a=r*.5;
-    ctx.beginPath(); ctx.moveTo(px-a,py); ctx.lineTo(px+a,py); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(px,py-a); ctx.lineTo(px,py+a); ctx.stroke();
+    if (!mapBounds) return;
+
+    const r = Math.max(10, cvs.width*0.025);
+
+    // Sim trajectory line + endpoint markers
+    if (simPtA || simPtB) {
+        if (simPtA && simPtB) {
+            const a = latLngToPx(simPtA.lat, simPtA.lng);
+            const b = latLngToPx(simPtB.lat, simPtB.lng);
+            ctx.beginPath(); ctx.moveTo(a.px,a.py); ctx.lineTo(b.px,b.py);
+            ctx.strokeStyle='rgba(255,255,255,.7)'; ctx.lineWidth=Math.max(2,r*.25);
+            ctx.setLineDash([r*.6, r*.4]); ctx.stroke(); ctx.setLineDash([]);
+        }
+        if (simPtA) { const {px,py}=latLngToPx(simPtA.lat,simPtA.lng); drawDot(ctx,px,py,r*.8,'#16a34a'); }
+        if (simPtB) { const {px,py}=latLngToPx(simPtB.lat,simPtB.lng); drawDot(ctx,px,py,r*.8,'#dc2626'); }
+    }
+
+    // GPS / sim vehicle marker
+    if (gpsPos) {
+        const {latitude:lat,longitude:lng} = gpsPos.coords;
+        const {min_lat,max_lat,min_lng,max_lng} = mapBounds;
+        if (lat>=min_lat&&lat<=max_lat&&lng>=min_lng&&lng<=max_lng) {
+            const {px,py} = latLngToPx(lat,lng);
+            const col = simIv ? '#f59e0b' : '#2563eb';
+            drawDot(ctx,px,py,r,col);
+            ctx.strokeStyle='#fff'; ctx.lineWidth=Math.max(2,r*.3); ctx.lineCap='round';
+            const a=r*.5;
+            ctx.beginPath(); ctx.moveTo(px-a,py); ctx.lineTo(px+a,py); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(px,py-a); ctx.lineTo(px,py+a); ctx.stroke();
+        }
+    }
 }
 
 // ── Zoom ─────────────────────────────────────────────────────────────────────
@@ -714,6 +770,7 @@ function clamp() {
     let drag=null,pd=null,s0=null;
     function td(t){ const dx=t[0].clientX-t[1].clientX,dy=t[0].clientY-t[1].clientY; return Math.sqrt(dx*dx+dy*dy); }
     vp.addEventListener('touchstart',e=>{
+        if(pickMode) return; // handled by pick tap listener
         if(e.touches.length===2){e.preventDefault();pd=td(e.touches);s0=mapScale;drag=null;}
         else if(e.touches.length===1) drag={sx:e.touches[0].clientX,sy:e.touches[0].clientY,ox:mapOffX,oy:mapOffY};
     },{passive:false});
@@ -723,7 +780,7 @@ function clamp() {
     },{passive:false});
     vp.addEventListener('touchend',e=>{ if(e.touches.length<2)pd=null; if(e.touches.length===0)drag=null; });
     let md=null;
-    vp.addEventListener('mousedown',e=>{ if(mapScale<=1)return; md={sx:e.clientX,sy:e.clientY,ox:mapOffX,oy:mapOffY}; vp.classList.add('grabbing'); });
+    vp.addEventListener('mousedown',e=>{ if(pickMode||mapScale<=1)return; md={sx:e.clientX,sy:e.clientY,ox:mapOffX,oy:mapOffY}; vp.classList.add('grabbing'); });
     window.addEventListener('mousemove',e=>{ if(!md)return; mapOffX=md.ox+(e.clientX-md.sx); mapOffY=md.oy+(e.clientY-md.sy); clamp(); applyTransform(); });
     window.addEventListener('mouseup',()=>{ md=null; document.getElementById('map-vp').classList.remove('grabbing'); });
     vp.addEventListener('wheel',e=>{ e.preventDefault(); zoomStep(e.deltaY<0?.5:-.5); },{passive:false});
@@ -948,22 +1005,102 @@ function saveSettings() {
 }
 function openSettings() { loadCfgUI(); openMo('mo-settings'); }
 
-// ── Simulator ─────────────────────────────────────────────────────────────────
-function openSim() {
-    if (gpsReal) {
-        document.getElementById('sim-lat1').value=gpsReal.coords.latitude.toFixed(7);
-        document.getElementById('sim-lng1').value=gpsReal.coords.longitude.toFixed(7);
-    }
-    openMo('mo-sim');
+// ── Pick mode ─────────────────────────────────────────────────────────────────
+function pixelToLatLng(clientX, clientY) {
+    if (!mapBounds || !document.getElementById('map-cvs') ||
+        document.getElementById('map-cvs').style.display==='none') return null;
+    const vp   = document.getElementById('map-vp');
+    const cvs  = document.getElementById('map-cvs');
+    const rect = vp.getBoundingClientRect();
+    const relX = clientX - rect.left;
+    const relY = clientY - rect.top;
+    // undo CSS transform: translate(offX,offY) scale(s)
+    const innerX = (relX - mapOffX) / mapScale;
+    const innerY = (relY - mapOffY) / mapScale;
+    // canvas fills 100% width of vp at scale 1
+    const cssW = vp.clientWidth;
+    const cssH = cssW * cvs.height / cvs.width;
+    const fx = innerX / cssW, fy = innerY / cssH;
+    if (fx<0||fx>1||fy<0||fy>1) return null;
+    return {
+        lat: mapBounds.max_lat - fy*(mapBounds.max_lat - mapBounds.min_lat),
+        lng: mapBounds.min_lng + fx*(mapBounds.max_lng - mapBounds.min_lng)
+    };
 }
+
+function pickPoint(which) {
+    if (!mapBounds) { toast('Carregue primeiro uma prescrição com mapa','err'); return; }
+    pickMode = which;
+    closeMo('mo-sim');
+    const overlay = document.getElementById('pick-overlay');
+    const banner  = document.getElementById('pick-banner');
+    overlay.style.display = 'flex';
+    banner.textContent = which==='A' ? '📍 Toque no mapa — Ponto inicial (🟢)' : '📍 Toque no mapa — Ponto final (🔴)';
+    // pointer cursor
+    document.getElementById('map-vp').style.cursor = 'crosshair';
+}
+
+function cancelPick() {
+    pickMode = null;
+    document.getElementById('pick-overlay').style.display = 'none';
+    document.getElementById('map-vp').style.cursor = '';
+}
+
+function setSimPt(which, pt) {
+    const fmt = `${pt.lat.toFixed(6)}, ${pt.lng.toFixed(6)}`;
+    if (which==='A') { simPtA=pt; document.getElementById('sim-ptA-label').textContent=fmt; }
+    else             { simPtB=pt; document.getElementById('sim-ptB-label').textContent=fmt; }
+    drawMapMarker();
+}
+
+function clearSimPts() {
+    simPtA=null; simPtB=null;
+    document.getElementById('sim-ptA-label').textContent='—';
+    document.getElementById('sim-ptB-label').textContent='—';
+    drawMapMarker();
+}
+
+function useGpsAsA() {
+    if (!gpsReal) { toast('GPS não disponível','err'); return; }
+    setSimPt('A', {lat:gpsReal.coords.latitude, lng:gpsReal.coords.longitude});
+}
+
+// Attach tap handler to map viewport
+(function initMapTap() {
+    const vp = document.getElementById('map-vp');
+    function handleTap(clientX, clientY) {
+        if (!pickMode) return;
+        const pt = pixelToLatLng(clientX, clientY);
+        if (!pt) { toast('Toque dentro do mapa','err'); return; }
+        const which = pickMode;
+        cancelPick();
+        setSimPt(which, pt);
+        // Auto-open sim modal again after short delay
+        setTimeout(()=>openMo('mo-sim'), 120);
+    }
+    vp.addEventListener('click', e => {
+        if (!pickMode) return;
+        e.stopPropagation();
+        handleTap(e.clientX, e.clientY);
+    });
+    vp.addEventListener('touchend', e => {
+        if (!pickMode) return;
+        e.preventDefault(); e.stopPropagation();
+        const t = e.changedTouches[0];
+        handleTap(t.clientX, t.clientY);
+    }, {passive:false});
+    // ESC to cancel pick
+    document.addEventListener('keydown', e => { if (e.key==='Escape' && pickMode) cancelPick(); });
+})();
+
+// ── Simulator ─────────────────────────────────────────────────────────────────
+function openSim() { openMo('mo-sim'); }
+
 function startSim() {
-    const la1=parseFloat(document.getElementById('sim-lat1').value);
-    const lo1=parseFloat(document.getElementById('sim-lng1').value);
-    const la2=parseFloat(document.getElementById('sim-lat2').value);
-    const lo2=parseFloat(document.getElementById('sim-lng2').value);
-    const spd =parseFloat(document.getElementById('sim-spd').value);
-    if([la1,lo1,la2,lo2].some(isNaN)||spd<=0){ toast('Preencha todos os campos','err'); return; }
-    const distM=haversineM(la1,lo1,la2,lo2);
+    if (!simPtA||!simPtB){ toast('Pique os dois pontos no mapa','err'); return; }
+    const spd=parseFloat(document.getElementById('sim-spd').value);
+    if (spd<=0){ toast('Velocidade inválida','err'); return; }
+    const distM=haversineM(simPtA.lat,simPtA.lng,simPtB.lat,simPtB.lng);
     if(distM<1){ toast('Distância demasiado pequena','err'); return; }
     const totalMs=(distM/1000/spd)*3600*1000;
     const tickMs=500, step=tickMs/totalMs;
@@ -973,14 +1110,16 @@ function startSim() {
     document.getElementById('sim-pill').style.display='';
     simIv=setInterval(()=>{
         simProg=Math.min(1,simProg+step);
-        const lat=la1+(la2-la1)*simProg;
-        const lng=lo1+(lo2-lo1)*simProg;
+        const lat=simPtA.lat+(simPtB.lat-simPtA.lat)*simProg;
+        const lng=simPtA.lng+(simPtB.lng-simPtA.lng)*simProg;
         gpsPos={coords:{latitude:lat,longitude:lng,accuracy:1},timestamp:Date.now()};
-        document.getElementById('sim-prog').textContent=`${Math.round(simProg*100)}% — ${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+        document.getElementById('sim-prog').textContent=
+            `${Math.round(simProg*100)}% — ${lat.toFixed(6)}, ${lng.toFixed(6)}`;
         onGpsUpdate();
         if(simProg>=1) stopSim();
     },tickMs);
 }
+
 function stopSim() {
     if(simIv){clearInterval(simIv);simIv=null;}
     simProg=0;
