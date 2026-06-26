@@ -1516,8 +1516,8 @@ function onPrescZonationChange(id) {
                 </tr>
             </thead>
             <tbody>
-                ${legend.map(z => {
-                    const zid  = z.zone_id ?? z.id ?? 0;
+                ${legend.map((z, idx) => {
+                    const zid  = z.zone_id ?? z.id ?? (idx + 1);
                     const lbl  = _pdfStr(z.label || `Zona ${zid}`);
                     const col  = z.color || '#999';
                     return `
@@ -1557,8 +1557,8 @@ function generatePrescription() {
     const legend = opt ? JSON.parse(opt.dataset.legend || '[]') : [];
     if (!legend.length) { _prescStatus('Zonagem sem zonas na legenda.', 'error'); return; }
 
-    const prescriptions = legend.map(z => {
-        const zid = z.zone_id ?? z.id ?? 0;
+    const prescriptions = legend.map((z, idx) => {
+        const zid = z.zone_id ?? z.id ?? (idx + 1);
         const v   = id => parseFloat(document.getElementById(id)?.value || 0) || 0;
         return {
             zone_id: zid,

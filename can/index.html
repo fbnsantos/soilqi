@@ -801,7 +801,7 @@ async function loadMapImage(pid) {
             mapOffCanvas = document.createElement('canvas');
             mapOffCanvas.width  = img.naturalWidth;
             mapOffCanvas.height = img.naturalHeight;
-            mapOffCanvas.getContext('2d').drawImage(img, 0, 0);
+            mapOffCanvas.getContext('2d', {willReadFrequently: true}).drawImage(img, 0, 0);
             ph.style.display='none'; cvs.style.display='block';
             applyTransform(); drawMapMarker();
             // recalc zone now that image is ready
