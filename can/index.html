@@ -368,6 +368,10 @@
             <span class="mgb-spd"    id="mgb-spd"></span>
             <span class="mgb-acc"    id="mgb-acc"></span>
             <span class="mgb-sim"    id="mgb-sim">SIM</span>
+            <button id="pub-on-btn" onclick="toggleAutoPublish()" title="Publicação automática MQTT"
+                style="background:#e5e7eb;color:#374151;border:none;border-radius:8px;padding:2px 8px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">
+                📡 OFF
+            </button>
             <div class="zoom-bar-btns">
                 <button class="zbtn" onclick="zoomStep(-0.5)" title="Zoom out">−</button>
                 <button class="zbtn" onclick="zoomReset(true)" title="Reset" style="font-size:11px">⊡</button>
@@ -1199,6 +1203,9 @@ function setPubMode(mode) {
     localStorage.setItem(ST.cfg, JSON.stringify(cfg));
 }
 
+let lastPubOk = true;
+let lastPubErr = 0; // consecutive errors
+
 async function publishViaApi(pct) {
     const cfg = getCfg();
     const body = {
@@ -1218,11 +1225,39 @@ async function publishViaApi(pct) {
             body: JSON.stringify(body),
         });
         const j = await r.json();
-        if (!j.success) console.warn('[CAN php-pub]', j.message);
+        if (j.success) {
+            lastPubErr = 0;
+            const t = new Date().toLocaleTimeString('pt');
+            const lp = document.getElementById('last-pub');
+            if (lp) lp.textContent = `✅ ${t} — ${pct}% → ${j.topic}`;
+            setMqttDot('on', `PHP OK ${t}`);
+        } else {
+            lastPubErr++;
+            console.warn('[CAN php-pub]', j.message);
+            if (lastPubErr === 1) toast('Erro MQTT: ' + j.message, 'err');
+            setMqttDot('err', j.message);
+        }
         return j.success;
     } catch(e) {
+        lastPubErr++;
         console.warn('[CAN php-pub]', e);
+        if (lastPubErr === 1) toast('Erro ao publicar: ' + e.message, 'err');
+        setMqttDot('err', e.message);
         return false;
+    }
+}
+
+function setAutoPublishUI(active) {
+    const onBtn  = document.getElementById('pub-on-btn');
+    const togBtn = document.getElementById('auto-toggle');
+    if (onBtn) {
+        onBtn.textContent = active ? '📡 ON' : '📡 OFF';
+        onBtn.style.background = active ? 'var(--green)' : '#e5e7eb';
+        onBtn.style.color      = active ? '#fff'         : '#374151';
+    }
+    if (togBtn) {
+        togBtn.className  = active ? 'auto-toggle on' : 'auto-toggle off';
+        togBtn.textContent = active ? '⏹ Parar publicação automática' : '▶ Iniciar publicação automática';
     }
 }
 
@@ -1230,20 +1265,16 @@ function toggleAutoPublish() {
     if (autoPublishIv) {
         clearInterval(autoPublishIv);
         autoPublishIv = null;
-        const btn = document.getElementById('auto-toggle');
-        btn.className = 'auto-toggle off';
-        btn.textContent = '▶ Iniciar publicação automática';
+        setAutoPublishUI(false);
     } else {
         const mode = getPubMode();
         if (mode === 'ws' && (!mqttClient || !mqttClient.connected)) {
             toast('MQTT WebSocket não ligado — verifique configuração ⚙️','err'); return;
         }
-        const btn = document.getElementById('auto-toggle');
-        btn.className = 'auto-toggle on';
-        btn.textContent = '⏹ Parar publicação automática';
+        setAutoPublishUI(true);
         autoPublishIv = setInterval(() => {
-            const pct = getCurrentPwm();
-            if (pct === null) return;
+            // publica 0% se não houver valor de zona (fora do terreno)
+            const pct = getCurrentPwm() ?? 0;
             if (getPubMode() === 'ws') mqttPublish(pct);
             else publishViaApi(pct);
         }, 500);
