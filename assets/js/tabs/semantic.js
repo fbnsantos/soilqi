@@ -279,8 +279,25 @@ function renderTreeLayer(layer, ref) {
         });
 
         // Ramos (curvas Bézier projetadas em 2D)
+        // for (const branch of (tree.branches || [])) {
+        //     const pts2d = sampleBezier2D(branch.points || []);
+        //     if (pts2d.length < 2) continue;
+        //     const coords = pts2d.map(([x,y]) => localToLngLat(x, y, ref));
+        //     branchFeats.push({
+        //         type: 'Feature',
+        //         geometry: { type: 'LineString', coordinates: coords },
+        //         properties: { tree_id: tree.id || '?' }
+        //     });
+        // }
+
+        // Modificação para polylines nas varas
+
         for (const branch of (tree.branches || [])) {
-            const pts2d = sampleBezier2D(branch.points || []);
+            const rawPts = branch.points || [];
+            const pts2d = branch.type === 'polyline3'
+                ? rawPts.map(p => [p[0], p[1]])
+                : sampleBezier2D(rawPts);
+
             if (pts2d.length < 2) continue;
             const coords = pts2d.map(([x,y]) => localToLngLat(x, y, ref));
             branchFeats.push({
@@ -1078,11 +1095,67 @@ function _taperTube(curve, tubSegs, rStart, rEnd, radSegs) {
 
 // ── 3D: Árvores ───────────────────────────────────────────────────────────────
 // Sistema local ROS → Three.js:  local(x, y, z)  →  Three.js(x, z−minE, −y)
+
+// Função de helper para adicionar contornos
+function addContourShapesToGroup(shapes, grp, lx, ly, lz, material, depth = 0.06) {
+    let drewAny = false;
+
+    for (const shape of (shapes || [])) {
+        const pts = shape.points || [];
+        if (shape.type !== 'contour3' || pts.length < 3) continue;
+
+        const shape2d = new THREE.Shape();
+
+        for (let i=0; i < pts.length; i++) {
+            const [px, py, pz = lz] = pts[i];
+
+            const sx = px - lx;
+            const sy = pz - lz;
+
+            if (i === 0) {
+                shape2d.moveTo(sx, sy);
+            } else {
+                shape2d.lineTo(sx, sy);
+            }
+        }
+
+        shape2d.closePath();
+
+        // With edges
+        //const geo = new THREE.ExtrudeGeometry(shape2d, {depth, bevelEnabled: false, });
+
+        // Soft edges/round
+        const geo = new THREE.ExtrudeGeometry(shape2d, {
+            depth, 
+            bevelEnabled: true,
+            bevelThickness: depth * 0.2,
+            bevelSize: depth * 0.2,
+            bevelSegment: 4,
+        });
+
+        const mesh = new THREE.Mesh(geo, material);
+        mesh.position.z = -depth / 2;
+        mesh.castShadow = mesh.receiveShadow = true;
+        grp.add(mesh);
+
+        drewAny = true;
+    }
+
+    return drewAny;
+}
+
+
+
+
+
 function _render3DTrees(layer, elevCtx) {
     const minE = elevCtx?.minE ?? 0;
 
     const MAT_TRUNK  = new THREE.MeshLambertMaterial({ color: 0x8B5E3C });
     const MAT_BRANCH = new THREE.MeshLambertMaterial({ color: 0x7B4F2E });
+
+    const MAT_CORDON = new THREE.MeshLambertMaterial({color: 0x6B3F1F});
+    const MAT_SPUR = new THREE.MeshLambertMaterial({color: 0x9A6A3A});
 
     for (const tree of (layer.data || [])) {
         const [lx, ly, lz = 0] = tree.position || [0, 0, 0];
@@ -1109,11 +1182,89 @@ function _render3DTrees(layer, elevCtx) {
         grp.userData.sem = true;
 
         // Tronco (cilindro cónico — taper linear entre rBase e rTop)
-        const tGeo  = new THREE.CylinderGeometry(rTop, rBase, tH, 8);
-        const tMesh = new THREE.Mesh(tGeo, MAT_TRUNK);
-        tMesh.position.y = tH / 2;
-        tMesh.castShadow = tMesh.receiveShadow = true;
-        grp.add(tMesh);
+        // const tGeo  = new THREE.CylinderGeometry(rTop, rBase, tH, 8);
+        // const tMesh = new THREE.Mesh(tGeo, MAT_TRUNK);
+        // tMesh.position.y = tH / 2;
+        // tMesh.castShadow = tMesh.receiveShadow = true;
+        // grp.add(tMesh);
+
+
+        // Tronco: fazer contorno se for passado uma shape, caso contrário faz como estava
+        
+        // Versão funcional sem cordão e talão, apenas tronco
+        // const trunkShapes = Array.isArray(trunk.shapes) ? trunk.shapes : [];
+        // let drewTrunkShape = false;
+
+        // for (const shape of trunkShapes) {
+        //     const pts = shape.points || [];
+        //     if (shape.type !== 'contour3' || pts.length < 3) continue;
+
+        //     const shape2d = new THREE.Shape();
+
+        //     for (let i=0; i < pts.length; i++) {
+        //         const [px, py, pz = lz] = pts[i];
+
+        //         const sx = px - lx;
+        //         const sy = pz - lz;
+
+        //         if (i === 0) {
+        //             shape2d.moveTo(sx, sy);
+        //         } else {
+        //             shape2d.lineTo(sx, sy);
+        //         }    
+        //     }
+
+        //     shape2d.closePath();
+
+        //     const trunkDepth = 0.06;
+        //     const tGeo = new THREE.ExtrudeGeometry(shape2d, {
+        //         depth: trunkDepth,
+        //         bevelEnabled: false
+        //     });
+
+        //     const tMesh = new THREE.Mesh(tGeo, MAT_TRUNK);
+
+        //     tMesh.position.z = -trunkDepth / 2;
+
+        //     tMesh.castShadow = tMesh.receiveShadow = true;
+        //     grp.add(tMesh);
+        //     drewTrunkShape = true;
+
+        // }
+
+
+        // if (!drewTrunkShape) {
+        //     const tGeo = new THREE.CylinderGeometry(rTop, rBase, tH, 8);
+        //     const tMesh = new THREE.Mesh(tGeo, MAT_TRUNK);
+        //     tMesh.position.y = tH / 2;
+        //     tMesh.castShadow = tMesh.receiveShadow = true;
+        //     grp.add(tMesh);
+        // }
+
+        // Versão a usar a função helper para gerar contornos variados
+        
+        const trunkShapes = Array.isArray(trunk.shapes) ? trunk.shapes : [];
+        const drewTrunkShape = addContourShapesToGroup(
+            trunkShapes,
+            grp,
+            lx,
+            ly,
+            lz,
+            MAT_TRUNK,
+            0.06
+        );
+
+        if (!drewTrunkShape) {
+            const tGeo = new THREE.CylinderGeometry(rTop, rBase, tH, 8);
+            const tMesh = new THREE.Mesh(tGeo, MAT_TRUNK);
+            tMesh.position.y = tH / 2;
+            tMesh.castShadow = tMesh.receiveShadow = true;
+            grp.add(tMesh);
+        }
+
+        addContourShapesToGroup(tree.cordons, grp, lx, ly, lz, MAT_CORDON, 0.05);
+        addContourShapesToGroup(tree.spurs, grp, lx, ly, lz, MAT_SPUR, 0.04);
+
 
         // ── Ramos com taper ──────────────────────────────────────────────────
         for (const br of (tree.branches || [])) {
@@ -1131,9 +1282,31 @@ function _render3DTrees(layer, elevCtx) {
                 brEnd   = r * 0.35;   // taper padrão: afila para ~35% no final
             }
 
-            const is3D  = brPts[0].length >= 3;
+            // const is3D  = brPts[0].length >= 3;
+            // let pts3d;
+            // if (is3D) {
+            //     pts3d = sampleBezier3D(brPts, 16).map(([bx, by, bz]) =>
+            //         new THREE.Vector3(bx - lx, bz - lz, -(by - ly))
+            //     );
+            // } else {
+            //     pts3d = sampleBezier2D(brPts, 16).map(([bx, by]) => {
+            //         const rx = bx - lx, rz = -(by - ly);
+            //         const d  = Math.sqrt(rx*rx + rz*rz);
+            //         return new THREE.Vector3(rx, Math.max(tH*0.40 + d*0.38 - d*d*0.045, tH*0.22), rz);
+            //     });
+            // }
+
+            // Modificação para polylines nas varas
+
+            const isPolyline = br.type === 'polyline3';
+            const is3D = brPts[0].length >= 3;
             let pts3d;
-            if (is3D) {
+
+            if (isPolyline) {
+                pts3d = brPts.map(([bx, by, bz = lz]) =>
+                    new THREE.Vector3(bx - lx, bz - lz, -(by - ly))
+                );
+            } else if (is3D) {
                 pts3d = sampleBezier3D(brPts, 16).map(([bx, by, bz]) =>
                     new THREE.Vector3(bx - lx, bz - lz, -(by - ly))
                 );
@@ -1145,14 +1318,59 @@ function _render3DTrees(layer, elevCtx) {
                 });
             }
 
+            pts3d = pts3d
+                .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z))
+                .filter((p, idx, arr) => idx === 0 || p.distanceToSquared(arr[idx - 1]) > 1e-10);
+
+            if (pts3d.length < 2) continue;
+
             try {
                 const curve  = new THREE.CatmullRomCurve3(pts3d, false, 'catmullrom', 0.5);
-                const brGeo  = _taperTube(curve, 10, brStart, brEnd, 5);
+                const tubeSegments = Math.max(10, pts3d.length - 1);
+                const brGeo  = _taperTube(curve, tubeSegments, brStart, brEnd, 5);
                 const brMesh = new THREE.Mesh(brGeo, MAT_BRANCH);
                 brMesh.castShadow = true;
                 grp.add(brMesh);
-            } catch (_) { /* Bézier degenerada */ }
+            } catch (error) {
+                console.warn('Could not render semantic branch', br, error);
+            }
         }
+
+        // Nós da Videira
+
+        for (const node of (tree.nodes || [])) {
+            const [nx, ny, nz = lz] = node.position || [lx, ly, lz];
+
+            let sx = 0.04;
+            let sy = 0.04;
+            let sz = 0.04;
+
+            if (Array.isArray(node.size)) {
+                sx = node.size[0] ?? sx;
+                sy = node.size[0] ?? sy;
+                sz = node.size[0] ?? sz;
+            } 
+            else if (node.size != null) {
+                sx = sy = sz = node.size;
+            }
+
+            const colorInt = node.color
+                ? parseInt(String(node.color).replace('#', ''), 16)
+                : 0xef4444;
+
+            const nodeGeo = new THREE.BoxGeometry(sx, sz, sy);
+            const nodeMat = new THREE.MeshLambertMaterial({ color:colorInt});
+            const nodeMesh = new THREE.Mesh(nodeGeo, nodeMat);
+
+            nodeMesh.position.set(nx - lx, nz - lz, -(ny - ly));
+            nodeMesh.castShadow = nodeMesh.receiveShadow = true;
+            nodeMesh.userData.sem = true;
+            nodeMesh.userData.nodeId = node.id || '';
+
+            grp.add(nodeMesh);
+        }
+
+
 
         // ── Copa ─────────────────────────────────────────────────────────────
         const canopyR   = tree.canopy_radius || 1.5;
