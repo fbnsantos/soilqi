@@ -1018,25 +1018,120 @@ function _render3DMap(mapData) {
 }
 
 /** Posicionar câmara para ver a área completa */
+// function _fit3DCamera(mapData, elevCtx) {
+//     let maxW = 15, cx = 0, cz = 0;
+//     (mapData.layers || []).forEach(l => {
+//         if (l.origin && l.width && l.resolution) {
+//             const w = l.width  * l.resolution;
+//             const h = l.height * l.resolution;
+//             maxW = Math.max(maxW, w, h);
+//             cx   = l.origin[0] + w / 2;
+//             cz   = -(l.origin[1] + h / 2);
+//         }
+//     });
+//     const d    = maxW * 0.85;
+//     // Apontar para o centro médio do terreno (metade da amplitude de elevação)
+//     const midH = elevCtx ? (elevCtx.maxE - elevCtx.minE) / 2 : 0;
+//     _3d.camera.position.set(cx + d * 0.65, d * 0.55 + midH, cz + d * 0.65);
+//     const target = new THREE.Vector3(cx, midH, cz);
+//     _3d.camera.lookAt(target);
+//     if (_3d.controls) { _3d.controls.target.copy(target); _3d.controls.update(); }
+// }
+
+
+// Change to camera vew on the 3D view to consider objects outside of the predefined map
 function _fit3DCamera(mapData, elevCtx) {
-    let maxW = 15, cx = 0, cz = 0;
+    let minX = Infinity, maxX = -Infinity;
+    let minZ = Infinity, maxZ = -Infinity;
+
+    const includePoint = (x, z) => {
+        if (!Number.isFinite(x) || !Number.isFinite(z)) return;
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minZ = Math.min(minZ, z);
+        maxZ = Math.max(maxZ, z);
+    };
+
     (mapData.layers || []).forEach(l => {
-        if (l.origin && l.width && l.resolution) {
-            const w = l.width  * l.resolution;
+        if (l.origin && l.width && l.height && l.resolution) {
+            const w = l.width * l.resolution;
             const h = l.height * l.resolution;
-            maxW = Math.max(maxW, w, h);
-            cx   = l.origin[0] + w / 2;
-            cz   = -(l.origin[1] + h / 2);
+
+            includePoint(l.origin[0], -(l.origin[1]));
+            includePoint(l.origin[0] + w, -(l.origin[1] + h));
+        }
+
+        if (l.type === 'trees' && Array.isArray(l.data)) {
+            for (const tree of l.data) {
+                const [x, y] = tree.position || [0, 0];
+                includePoint(x, -y);
+
+                const addShapePoints = shapes => {
+                    for (const shape of (shapes || [])) {
+                        for (const pt of (shape.points || [])) {
+                            includePoint(pt[0], -pt[1]);
+                        }
+                    }
+                };
+
+                addShapePoints(tree.trunk?.shapes);
+                addShapePoints(tree.cordons);
+                addShapePoints(tree.spurs);
+
+                for (const br of (tree.branches || [])) {
+                    for (const pt of (br.points || [])) {
+                        includePoint(pt[0], -pt[1]);
+                    }
+                }
+
+                for (const node of (tree.nodes || [])) {
+                    const pt = node.position;
+                    if (pt) includePoint(pt[0], -pt[1]);
+                }
+            }
+        }
+
+        if (l.type === 'poles' && Array.isArray(l.data)) {
+            for (const pole of l.data) {
+                const [x, y] = pole.position || [0, 0];
+                includePoint(x, -y);
+            }
         }
     });
-    const d    = maxW * 0.85;
-    // Apontar para o centro médio do terreno (metade da amplitude de elevação)
+
+    if (!Number.isFinite(minX)) {
+        minX = -7.5;
+        maxX = 7.5;
+        minZ = -7.5;
+        maxZ = 7.5;
+    }
+
+    const cx = (minX + maxX) / 2;
+    const cz = (minZ + maxZ) / 2;
+
+    const spanX = Math.max(maxX - minX, 1);
+    const spanZ = Math.max(maxZ - minZ, 1);
+    const maxW = Math.max(spanX, spanZ, 15);
+
+    const d = maxW * 0.85;
     const midH = elevCtx ? (elevCtx.maxE - elevCtx.minE) / 2 : 0;
-    _3d.camera.position.set(cx + d * 0.65, d * 0.55 + midH, cz + d * 0.65);
+
+    _3d.camera.position.set(
+        cx + d * 0.65,
+        d * 0.55 + midH,
+        cz + d * 0.65
+    );
+
     const target = new THREE.Vector3(cx, midH, cz);
     _3d.camera.lookAt(target);
-    if (_3d.controls) { _3d.controls.target.copy(target); _3d.controls.update(); }
+
+    if (_3d.controls) {
+        _3d.controls.target.copy(target);
+        _3d.controls.update();
+    }
 }
+
+
 
 // ── 3D: Helper — tubo cónico ao longo de uma curva ───────────────────────────
 // Cria um BufferGeometry para um tubo com raio que varia de rStart a rEnd.
@@ -1341,14 +1436,14 @@ function _render3DTrees(layer, elevCtx) {
         for (const node of (tree.nodes || [])) {
             const [nx, ny, nz = lz] = node.position || [lx, ly, lz];
 
-            let sx = 0.04;
-            let sy = 0.04;
-            let sz = 0.04;
+            let sx = 0.02;
+            let sy = 0.02;
+            let sz = 0.02;
 
             if (Array.isArray(node.size)) {
                 sx = node.size[0] ?? sx;
-                sy = node.size[0] ?? sy;
-                sz = node.size[0] ?? sz;
+                sy = node.size[1] ?? sy;
+                sz = node.size[2] ?? sz;
             } 
             else if (node.size != null) {
                 sx = sy = sz = node.size;
@@ -1358,7 +1453,15 @@ function _render3DTrees(layer, elevCtx) {
                 ? parseInt(String(node.color).replace('#', ''), 16)
                 : 0xef4444;
 
-            const nodeGeo = new THREE.BoxGeometry(sx, sz, sy);
+            //const nodeGeo = new THREE.BoxGeometry(sx, sz, sy);
+            const isSphere = node.shape === 'sphere' || node.type === 'Midpoint';
+            const radius = Math.max(sx, sy, sz) / 2;
+
+            const nodeGeo = isSphere
+                ? new THREE.SphereGeometry(radius, 16, 12)
+                : new THREE.BoxGeometry(sx, sz, sy);
+
+
             const nodeMat = new THREE.MeshLambertMaterial({ color:colorInt});
             const nodeMesh = new THREE.Mesh(nodeGeo, nodeMat);
 
