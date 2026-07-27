@@ -1011,11 +1011,29 @@ function toggle3DView() {
 
     if (_3d.active) {
         if (!_3d.scene) _init3D();
+        else _start3DAnimation();
+
+        _on3DResize();
+        
         if (currentSemData) _render3DMap(currentSemData);
         else setSemStatus('Carregue um mapa semântico para ver em 3D.');
     } else {
         if (_3d.animId) { cancelAnimationFrame(_3d.animId); _3d.animId = null; }
     }
+}
+
+/** Helper function to stop the crash between toggle of 2D to 3D */
+
+function _start3DAnimation() {
+    if (_3d.animId || !_3d.renderer || !_3d.scene || !_3d.camera) return;
+
+    const animate = () => {
+        _3d.animId = requestAnimationFrame(animate);
+        if (_3d.controls) _3d.controls.update();
+        _3d.renderer.render(_3d.scene, _3d.camera);
+    };
+
+    animate();
 }
 
 /** Inicializar cena Three.js */
@@ -1092,12 +1110,14 @@ function _init3D() {
     window.addEventListener('resize', _on3DResize);
 
     // Loop de animação
-    const animate = () => {
-        _3d.animId = requestAnimationFrame(animate);
-        if (_3d.controls) _3d.controls.update();
-        _3d.renderer.render(_3d.scene, _3d.camera);
-    };
-    animate();
+    // const animate = () => {
+    //     _3d.animId = requestAnimationFrame(animate);
+    //     if (_3d.controls) _3d.controls.update();
+    //     _3d.renderer.render(_3d.scene, _3d.camera);
+    // };
+    // animate();
+
+    _start3DAnimation();
 }
 
 function _on3DResize() {
