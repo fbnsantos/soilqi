@@ -1462,6 +1462,25 @@ function _on3DCanvasPick(event) {
     const actionMode = document.getElementById('pruning-action-mode')?.value || 'cut_here';
     const segment = match.segment;
 
+    const clickedCaneId = segment.cane_id || branch.cane_id || '';
+
+    if (actionMode !== 'erase') {
+        const existing = (tree.pruning_annotations || []).find(annotation =>
+            annotation.cane_id &&
+            clickedCaneId &&
+            String(annotation.cane_id) === String(clickedCaneId)
+        );
+
+        if (existing) {
+            setSemStatus(
+                existing.action === 'remove_cane'
+                    ? `A vara ${clickedCaneId} já está marcada para remoção`
+                    : `A vara ${clickedCaneId} já tem um corte de poda marcado`
+            );
+            return;
+        }
+    }
+
     const treePosition = tree.position || [0,0,0];
     const worldPosition = [
         treePosition[0] + match.point.x,
@@ -1478,6 +1497,7 @@ function _on3DCanvasPick(event) {
     };
 
     if (actionMode === 'cut_here') {
+        annotation.cane_id = clickedCaneId;
         annotation.edge = {
             parent: segment.parent,
             child: segment.child,
@@ -1486,7 +1506,7 @@ function _on3DCanvasPick(event) {
     }
 
     if (actionMode === 'remove_cane') {
-        annotation.cane_id = segment.cane_id || branch.cane_id || '';
+        annotation.cane_id = clickedCaneId;
         annotation.edge = {
             parent: segment.parent,
             child: segment.child,
