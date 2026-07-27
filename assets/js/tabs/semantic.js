@@ -10,6 +10,17 @@ let semMap          = null;
 let currentSemData  = null;   // mapa semântico actualmente carregado
 const semActiveSrc  = new Set(); // source IDs adicionadas ao mapa
 
+function getTreesLayer(mapData) {
+    return (mapData.layers || []).find(layer => layer.type === 'trees');
+}
+
+function ensurePruningAnnotations(tree) {
+    if (!Array.isArray(tree.pruning_annotations)) {
+        tree.pruning_annotations = [];
+    }
+    return tree.pruning_annotations;
+}
+
 // ── Boot ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function () {
     if (typeof activeTab === 'undefined' || activeTab !== 'semantic') return;
@@ -788,6 +799,114 @@ function exportSemanticMap() {
     setSemStatus('✅ Exportado.');
 }
 
+
+// Função de teste da anotação para pruning --------------------
+
+// function addTestPruningAnnotation() {
+//     if (!currentSemData) {
+//         setSemStatus('Nenhum mapa carregado');
+//         return;
+//     }
+
+//     const treesLayer = getTreesLayer(currentSemData);
+//     const tree = treesLayer?.data?.[0];
+
+//     if (!tree) {
+//         setSemStatus('Nenhuma videira encontrada');
+//         return;
+//     }
+
+//     const branch = (tree.branches || [])[0];
+//     const segment = branch?.segments?.[0];
+
+//     const actionMode = document.getElementById('pruning-action-mode')?.value || 'cut_here';
+
+//     if (!branch || !segment) {
+//         setSemStatus('Nenhum segmento de vara encontrada');
+//         return;
+//     }
+
+//     const start = branch.points[segment.point_start_index];
+//     const end = branch.points[segment.point_end_index];
+
+//     if (!start || !end) {
+//         setSemStatus('Segmento inválido');
+//         return;
+//     }
+
+//     const position = [
+//         (start[0] + end[0]) / 2,
+//         (start[1] + end[1]) / 2,
+//         (start[2] + end[2]) / 2
+//     ];
+
+//     // Cut test
+//     // ensurePruningAnnotations(tree).push({
+//     //     id: `pa_${Date.now()}`,
+//     //     action: 'cut_here',
+//     //     tree_id: tree.id,
+//     //     edge: {
+//     //         parent: segment.parent,
+//     //         child: segment.child,
+//     //         t:0.5
+//     //     },
+//     //     position,
+//     //     source: 'expert'
+//     // });
+
+//     //Remove test
+//     // ensurePruningAnnotations(tree).push({
+//     //     id: `pa_${Date.now()}`,
+//     //     action: 'remove_cane',
+//     //     tree_id: tree.id,
+//     //     cane_id: segment.cane_id || branch.cane_id || '',
+//     //     base_node: '',
+//     //     edge: {
+//     //         parent: segment.parent,
+//     //         child: segment.child,
+//     //         t: 0.0
+//     //     },
+//     //     position,
+//     //     source: 'expert'
+//     // });
+
+//     const annotation = {
+//         id: `pa_${new Date().toISOString().replace(/[:.]/g, '-')}`,
+//         action: actionMode,
+//         tree_id: tree.id,
+//         position,
+//         source: 'expert'
+//     };
+
+//     if (actionMode === 'cut_here') {
+//         annotation.edge = {
+//             parent: segment.parent,
+//             child: segment.child,
+//             t: 0.5
+//         };
+//     }
+
+//     if (actionMode === 'remove_cane') {
+//         annotation.cane_id = segment.cane_id || branch.cane_id || '';
+//         annotation.edge = {
+//             parent: segment.parent,
+//             child: segment.child,
+//             t: 0.0
+//         };
+//     }
+
+//     ensurePruningAnnotations(tree).push(annotation);
+
+//     setSemStatus(
+//         actionMode === 'remove_cane'
+//             ? `Vara ${annotation.cane_id || '?'} marcada para remover.`
+//             : 'Anotação de corte adicionada.'
+//     );
+
+//     if (_3d.active) _render3DMap(currentSemData, {preserveCamera: true});
+// }
+
+
 // ── Guardar / Carregar na BD ──────────────────────────────────────────────────
 function saveCurrentSemanticMap() {
     if (!currentSemData) { setSemStatus('⚠️ Nenhum mapa activo.'); return; }
@@ -855,8 +974,28 @@ function _esc(s) {
 
 const _3d = {
     scene: null, renderer: null, camera: null, controls: null,
-    animId: null, active: false
+    raycaster: null, mouse: null, branchMeshes: [], pointerDown: null,
+    annotationMode: false, animId: null, active: false
 };
+
+
+function togglePruningAnnotationMode() {
+    _3d.annotationMode = !_3d.annotationMode;
+
+    const btn = document.getElementById('pruning-mode-toggle');
+    if (btn) {
+        btn.classList.toggle('btn-primary', _3d.annotationMode);
+        btn.classList.toggle('btn-secondary', !_3d.annotationMode);
+        btn.textContent = _3d.annotationMode ? 'Pruning On' : 'Pruning mode';
+    }
+
+    setSemStatus(
+        _3d.annotationMode
+            ? 'Modo de anotação activo'
+            : 'Modo de anotação desligado'
+    );
+}
+
 
 /** Alterna entre vista 2D (MapLibre) e 3D (Three.js) */
 function toggle3DView() {
@@ -902,6 +1041,14 @@ function _init3D() {
     _3d.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     _3d.renderer.setSize(W, H);
     _3d.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+    _3d.raycaster = new THREE.Raycaster();
+    _3d.mouse = new THREE.Vector2();
+
+    _3d.renderer.domElement.addEventListener('pointerdown', _on3DPointerDown);
+    _3d.renderer.domElement.addEventListener('pointerup', _on3DPointerUp);
+
+
     _3d.renderer.shadowMap.enabled = true;
     _3d.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -975,10 +1122,12 @@ function _clear3DObjects() {
 }
 
 /** Renderizar mapa semântico completo em 3D */
-function _render3DMap(mapData) {
+function _render3DMap(mapData, options = {}) {
     if (!_3d.scene) _init3D();
     if (!_3d.scene) return;
     _clear3DObjects();
+
+    _3d.branchMeshes = [];
 
     const layers = mapData.layers || [];
     let hasElev  = false;
@@ -1014,7 +1163,9 @@ function _render3DMap(mapData) {
     ax.userData.sem = true;
     _3d.scene.add(ax);
 
-    _fit3DCamera(mapData, elevCtx);
+   if (!options.preserveCamera) {
+      _fit3DCamera(mapData, elevCtx);
+   }
 }
 
 /** Posicionar câmara para ver a área completa */
@@ -1130,6 +1281,236 @@ function _fit3DCamera(mapData, elevCtx) {
         _3d.controls.update();
     }
 }
+
+
+function _on3DPointerDown(event) {
+    _3d.pointerDown = {
+        x: event.clientX,
+        y: event.clientY
+    };
+}
+
+function _on3DPointerUp(event) {
+    if (!_3d.annotationMode || !_3d.pointerDown) {
+        _3d.pointerDown = null;
+        return;
+    }
+
+    const dx = event.clientX - _3d.pointerDown.x;
+    const dy = event.clientY - _3d.pointerDown.y;
+    const moved = Math.sqrt(dx * dx + dy * dy);
+
+    _3d.pointerDown = null;
+
+    if (moved > 4) return;
+
+    _on3DCanvasPick(event);
+}
+
+
+function _closestPointOnSegment(point, start, end) {
+    const segmentVector = end.clone().sub(start);
+    const lengthSq = segmentVector.lengthSq();
+
+    if (lengthSq === 0) {
+        return {
+            point: start.clone(),
+            t: 0,
+            distanceSq: point.distanceToSquared(start)
+        };
+    }
+
+    const t = Math.max(
+        0,
+        Math.min(1, point.clone().sub(start).dot(segmentVector) / lengthSq)
+    );
+
+    const closest = start.clone().add(segmentVector.multiplyScalar(t));
+
+    return {
+        point: closest,
+        t,
+        distanceSq: point.distanceToSquared(closest)
+    };
+}
+
+
+function _findClickedBranchSegment(localPoint, points3d, branch) {
+    let best = null;
+
+    for(let i=0; i < points3d.length - 1; i++) {
+        const candidate = _closestPointOnSegment(
+            localPoint,
+            points3d[i],
+            points3d[i + 1]
+        );
+
+        if (!best || candidate.distanceSq < best.distanceSq) {
+            best = {
+                pointIndex: i,
+                localT: candidate.t,
+                distanceSq: candidate.distanceSq,
+                point: candidate.point
+            };
+        }
+    }
+
+    if (!best) return null;
+
+    const graphSegment = (branch.segments || []).find(segment =>
+        best.pointIndex >= segment.point_start_index &&
+        best.pointIndex < segment.point_end_index
+    );
+
+    if (!graphSegment) return null;
+    
+    const span = graphSegment.point_end_index - graphSegment.point_start_index;
+    const edgeT = span > 0
+        ? (best.pointIndex + best.localT - graphSegment.point_start_index) / span
+        : 0;
+
+    return {
+        segment: graphSegment,
+        t: Math.max(0, Math.min(1, edgeT)),
+        point: best.point
+    };
+}
+
+function eraseNearestPruningAnnotation(tree, branch, segment, localPoint) {
+    const annotations = tree.pruning_annotations || [];
+
+    const clickedCaneId = segment.cane_id || branch.cane_id || '';
+
+    const removeIndex = annotations.findIndex(annotation =>
+        annotation.action === 'remove_cane' &&
+        annotation.cane_id &&
+        String(annotation.cane_id) === String(clickedCaneId)
+    );
+
+    if (removeIndex >= 0) {
+        annotations.splice(removeIndex, 1);
+        setSemStatus(`Remoção da anotação na vara ${clickedCaneId}`);
+        return true;
+    }
+
+    let bestIndex = -1;
+    let bestDistanceSq = Infinity;
+
+    for (let i = 0; i < annotations.length; i++) {
+        const annotation = annotations[i];
+        if (annotation.action !== 'cut_here' || !annotation.position) continue;
+
+        const [px, py, pz] = annotation.position;
+
+        const annotationLocal = new THREE.Vector3(
+            px - tree.position[0],
+            pz - tree.position[2],
+            -(py - tree.position[1])
+        );
+
+        const distanceSq = annotationLocal.distanceToSquared(localPoint);
+
+        if (distanceSq < bestDistanceSq) {
+            bestDistanceSq = distanceSq;
+            bestIndex = i;
+        }
+    }
+
+    const eraseRadius = 0.08;
+
+    if (bestIndex >= 0 && bestDistanceSq <= eraseRadius * eraseRadius) {
+        annotations.splice(bestIndex, 1);
+        setSemStatus('Anotação apagada');
+        return true;
+    }
+
+    setSemStatus('Nenhuma anotação próxima para apagar');
+    return false;
+}
+
+
+function _on3DCanvasPick(event) {
+    if (!_3d.active || !_3d.camera || !_3d.renderer || !_3d.raycaster) return;
+    if (!_3d.branchMeshes.length) return;
+
+    const rect = _3d.renderer.domElement.getBoundingClientRect();
+
+    _3d.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    _3d.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    _3d.raycaster.setFromCamera(_3d.mouse, _3d.camera);
+
+    const hits = _3d.raycaster.intersectObjects(_3d.branchMeshes, false);
+
+    if (!hits.length) return;
+
+    const hit = hits[0];
+    const mesh = hit.object;
+
+    const tree = mesh.userData.tree;
+    const branch = mesh.userData.branch;
+    const points3d = mesh.userData.points3d || [];
+
+    const localPoint = mesh.parent.worldToLocal(hit.point.clone());
+    const match = _findClickedBranchSegment(localPoint, points3d, branch);
+
+    if (!tree || !branch || !match) {
+        setSemStatus('Sem segmento associado');
+        return;
+    }
+
+    const actionMode = document.getElementById('pruning-action-mode')?.value || 'cut_here';
+    const segment = match.segment;
+
+    const treePosition = tree.position || [0,0,0];
+    const worldPosition = [
+        treePosition[0] + match.point.x,
+        treePosition[1] - match.point.z,
+        treePosition[2] + match.point.y
+    ];
+
+    const annotation = {
+        id: `pa_${new Date().toISOString().replace(/[:.]/g, '-')}`,
+        action: actionMode,
+        tree_id: tree.id,
+        position: worldPosition,
+        source: 'expert'
+    };
+
+    if (actionMode === 'cut_here') {
+        annotation.edge = {
+            parent: segment.parent,
+            child: segment.child,
+            t: match.t
+        };
+    }
+
+    if (actionMode === 'remove_cane') {
+        annotation.cane_id = segment.cane_id || branch.cane_id || '';
+        annotation.edge = {
+            parent: segment.parent,
+            child: segment.child,
+            t: match.t
+        };
+    }
+
+    if (actionMode === 'erase') {
+        eraseNearestPruningAnnotation(tree, branch, segment, match.point);
+        _render3DMap(currentSemData, {preserveCamera: true});
+        return;
+    }
+
+    ensurePruningAnnotations(tree).push(annotation);
+
+    setSemStatus(
+        actionMode === 'remove_cane'
+            ? `Vara ${annotation.cane_id || '?'} marcada para remoção`
+            : `Corte marcado em ${segment.parent} - ${segment.child}.`
+    );
+
+    _render3DMap(currentSemData, { preserveCamera: true });
+}
+
 
 
 
@@ -1252,6 +1633,24 @@ function _render3DTrees(layer, elevCtx) {
     const MAT_CORDON = new THREE.MeshLambertMaterial({color: 0x6B3F1F});
     const MAT_SPUR = new THREE.MeshLambertMaterial({color: 0x9A6A3A});
 
+    const MAT_BRANCH_REMOVE = new THREE.MeshLambertMaterial({
+        color: 0xdc2626,
+        emissive: 0x4a0000,
+        emissiveIntensity: 0.2
+    });
+
+    const MAT_PRUNING_CUT = new THREE.MeshLambertMaterial({
+        color: 0xfacc15,
+        emissive: 0x7c5c00,
+        emissiveIntensity: 0.25
+    });
+
+    // const MAT_PRUNING_REMOVE = new THREE.MeshLambertMaterial({
+    //     color: 0xdc2626,
+    //     emissive: 0x4a0000,
+    //     emissiveIntensity: 0.25
+    // });
+
     for (const tree of (layer.data || [])) {
         const [lx, ly, lz = 0] = tree.position || [0, 0, 0];
 
@@ -1275,6 +1674,12 @@ function _render3DTrees(layer, elevCtx) {
         const grp = new THREE.Group();
         grp.position.set(lx, lz - minE, -ly);
         grp.userData.sem = true;
+
+        const removedCaneIds = new Set(
+            (tree.pruning_annotations || [])
+                .filter(annotation => annotation.action === 'remove_cane' && annotation.cane_id)
+                .map(annotation => String(annotation.cane_id))
+        );
 
         // Tronco (cilindro cónico — taper linear entre rBase e rTop)
         // const tGeo  = new THREE.CylinderGeometry(rTop, rBase, tH, 8);
@@ -1423,8 +1828,20 @@ function _render3DTrees(layer, elevCtx) {
                 const curve  = new THREE.CatmullRomCurve3(pts3d, false, 'catmullrom', 0.5);
                 const tubeSegments = Math.max(10, pts3d.length - 1);
                 const brGeo  = _taperTube(curve, tubeSegments, brStart, brEnd, 5);
-                const brMesh = new THREE.Mesh(brGeo, MAT_BRANCH);
+                
+                const branchMaterial = removedCaneIds.has(String(br.cane_id))
+                    ? MAT_BRANCH_REMOVE
+                    : MAT_BRANCH;
+                const brMesh = new THREE.Mesh(brGeo, branchMaterial);
                 brMesh.castShadow = true;
+                brMesh.userData.sem = true;
+                brMesh.userData.kind = 'branch';
+                brMesh.userData.tree = tree;
+                brMesh.userData.branch = br;
+                brMesh.userData.points3d = pts3d;
+
+                _3d.branchMeshes.push(brMesh);
+
                 grp.add(brMesh);
             } catch (error) {
                 console.warn('Could not render semantic branch', br, error);
@@ -1471,6 +1888,31 @@ function _render3DTrees(layer, elevCtx) {
             nodeMesh.userData.nodeId = node.id || '';
 
             grp.add(nodeMesh);
+        }
+
+        // Pruning annotations markers
+
+        for (const annotation of (tree.pruning_annotations || [])) {
+            //if (annotation.action !== 'cut_here') continue;
+            if (annotation.action !== 'cut_here') continue;
+
+            const [px, py, pz = lz] = annotation.position || [];
+            if (![px, py, pz].every(Number.isFinite)) continue;
+
+            const markerMaterial = annotation.action === 'remove_cane'
+                ? MAT_PRUNING_REMOVE
+                : MAT_PRUNING_CUT;
+
+            const cutGeo = new THREE.SphereGeometry(0.018, 18, 12);
+            const cutMesh = new THREE.Mesh(cutGeo, markerMaterial);
+
+            cutMesh.position.set(px - lx, pz - lz, -(py - ly));
+            cutMesh.castShadow = cutMesh.receiveShadow = true;
+            cutMesh.userData.sem = true;
+            cutMesh.userData.kind = 'pruning_annotation';
+            cutMesh.userData.annotationId = annotation.id || '';
+
+            grp.add(cutMesh);
         }
 
 
