@@ -21,6 +21,69 @@ function ensurePruningAnnotations(tree) {
     return tree.pruning_annotations;
 }
 
+function renderPruningAnnotationPanel(mapData) {
+    const panel = document.getElementById('pruning-annotation-panel');
+    if (!panel) return;
+
+    const treesLayer = mapData ? getTreesLayer(mapData) : null;
+    const trees = treesLayer?.data || [];
+
+    if (!trees.length) {
+        panel.innerHTML = '';
+        return;
+    }
+
+    let html = '';
+
+    for (const tree of trees) {
+        const annotations = tree.pruning_annotations || [];
+        const treeId = tree.id || 'sem_id';
+
+        html += `
+            <details style="margin-top:6px; border-top:1px solid #e5e7eb; padding-top:6px;">
+                <summary style="cursor:pointer; font-weight:600; color:#374151;">
+                    Videira ${treeId} (${annotations.length})
+                </summary>
+        `;
+
+        if (!annotations.length) {
+            html += `
+                <div style="color:#9ca3af; padding:5px 0 2px 12px;">
+                    Sem anotações.
+                </div>
+            `;
+        }
+
+        for (const annotation of annotations) {
+            const actionLabel = annotation.action === 'remove_cane'
+                ? 'Remover vara'
+                : 'Podar aqui';
+
+            const caneLabel = annotation.cane_id
+                ? `Vara ${annotation.cane_id}`
+                : 'Vara ?';
+
+            const edgeLabel = annotation.edge
+                ? `${annotation.edge.parent || '?'} - ${annotation.edge.child || '?'}`
+                : 'sem edge';
+
+            html += `
+                <button type="button"
+                        onclick="flashPruningAnnotation('${treeId}', '${annotation.id || ''}')"
+                        style="display:block; width:100%; text-align:left; margin:4px 0 0 12px;
+                               padding:5px 7px; border:1px solid #e5e7eb; border-radius:6px;
+                               background:#fff; color:#374151; cursor:pointer; font-size:12px;">
+                    ${actionLabel} ; ${caneLabel}${annotation.action === 'cut_here' ? ` ; ${edgeLabel}` : ''}
+                </button>
+            `;
+        }
+
+        html += '</details>';
+    }
+
+    panel.innerHTML = html;
+}
+
 // ── Boot ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function () {
     if (typeof activeTab === 'undefined' || activeTab !== 'semantic') return;
@@ -202,6 +265,9 @@ function clearSemanticMap() {
     currentSemData = null;
     document.getElementById('sem-layers-list').innerHTML =
         '<span style="color:#9ca3af;font-size:12px;">Nenhum mapa carregado.</span>';
+
+    renderPruningAnnotationPanel(null);
+
     setSemStatus('Mapa limpo.');
 }
 
@@ -224,6 +290,8 @@ function renderSemanticMap(mapData) {
     });
 
     updateSemLayerList(layerItems, mapData);
+
+    renderPruningAnnotationPanel(mapData);
 
     // Zoom para a área coberta
     const ref2 = ref;
@@ -961,6 +1029,72 @@ function deleteSavedSemanticMap(id, name) {
 }
 
 // ── Utilitários ───────────────────────────────────────────────────────────────
+
+
+// Teste de função para piscar anotações quando clickadas no dropdown
+function flashPruningAnnotation(treeId, annotationId) {
+    if (!currentSemData) {
+        setSemStatus('Nenhum mapa ativo.');
+        return;
+    }
+
+    if (!_3d.active) {
+        setSemStatus('Abra mapa 3D para ver anotação.');
+        return;
+    }
+
+    const treesLayer = getTreesLayer(currentSemData);
+    const tree = (treesLayer?.data || []).find(t => String(t.id || '') === String(treeId));
+    const annotation = (tree?.pruning_annotations || []).find(a => String(a.id || '') === String(annotationId));
+
+    if (!tree || !annotation || !annotation.position) {
+        setSemStatus('Anotação não encontrada.');
+        return;
+    }
+
+    const [px, py, pz = 0] = annotation.position;
+
+    const elevLayer = (currentSemData.layers || []).find(layer => layer.type === 'elevation');
+    const minE = elevLayer?.min_elevation || 0;
+
+    const flashGeo = new THREE.SphereGeometry(0.04,18,12);
+    const flashMat = new THREE.MeshBasicMaterial({
+        color: annotation.action === 'remove_cane' ? 0xef4444 : 0xfacc15,
+        transparent: true,
+        opacity: 1
+    });
+
+    const flashMesh = new THREE.Mesh(flashGeo, flashMat);
+    flashMesh.position.set(px, pz - minE, -py);
+    flashMesh.userData.sem = true;
+    flashMesh.userData.kind = 'annotation_flash';
+
+    _3d.scene.add(flashMesh);
+
+    let ticks = 0;
+    const timer = setInterval(() => {
+        ticks += 1;
+
+        const visible = ticks % 2 === 0;
+        flashMesh.visible = visible;
+        flashMesh.scale.setScalar(visible ? 1.4 : 0.8);
+
+        if (ticks >= 10) {
+            clearInterval(timer);
+            _3d.scene.remove(flashMesh);
+            flashGeo.dispose();
+            flashMat.dispose();
+        }
+    },120);
+
+    setSemStatus(
+        annotation.action === 'remove_cane'
+            ? `Anotação de remoção na vara ${annotation.cane_id || '?'}`
+            : `Anotação de corte na vara ${annotation.cane_id || '?'}`
+    );
+
+}
+
 function setSemStatus(msg) {
     const el = document.getElementById('sem-status');
     if (el) el.textContent = msg;
@@ -1536,16 +1670,19 @@ function _on3DCanvasPick(event) {
 
     if (actionMode === 'erase') {
         eraseNearestPruningAnnotation(tree, branch, segment, match.point);
+        renderPruningAnnotationPanel(currentSemData);
         _render3DMap(currentSemData, {preserveCamera: true});
         return;
     }
 
     ensurePruningAnnotations(tree).push(annotation);
 
+    renderPruningAnnotationPanel(currentSemData);
+
     setSemStatus(
         actionMode === 'remove_cane'
             ? `Vara ${annotation.cane_id || '?'} marcada para remoção`
-            : `Corte marcado em ${segment.parent} - ${segment.child}.`
+            : `Corte marcado na vara ${annotation.cane_id || '?'}`
     );
 
     _render3DMap(currentSemData, { preserveCamera: true });

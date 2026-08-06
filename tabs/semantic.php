@@ -219,6 +219,7 @@ if ($isLoggedIn) {
             <div id="sem-3d-hint">🖱️ arrastar: rodar &nbsp;|&nbsp; scroll: zoom &nbsp;|&nbsp; Shift+arrastar: deslocar</div>
         </div>
         <div id="sem-status" style="font-size:12px; color:#6b7280; padding:6px 2px; min-height:18px;"></div>
+        <div id="pruning-annotation-panel" style="font-size:12px; color:#374151; padding: 6px 2px 0 2px;"></div>
     </div>
 
     <!-- Sidebar -->
