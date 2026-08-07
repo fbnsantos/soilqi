@@ -25,6 +25,10 @@ function renderPruningAnnotationPanel(mapData) {
     const panel = document.getElementById('pruning-annotation-panel');
     if (!panel) return;
 
+    const openTreeIds = new Set(
+        Array.from(panel.querySelectorAll('details[data-tree-id][open]')).map(details => details.dataset.treeId)
+    );
+
     const treesLayer = mapData ? getTreesLayer(mapData) : null;
     const trees = treesLayer?.data || [];
 
@@ -39,10 +43,22 @@ function renderPruningAnnotationPanel(mapData) {
         const annotations = tree.pruning_annotations || [];
         const treeId = tree.id || 'sem_id';
 
+        const isOpen = openTreeIds.has(String(treeId));
+
         html += `
-            <details style="margin-top:6px; border-top:1px solid #e5e7eb; padding-top:6px;">
+            <details data-tree-id="${treeId}" ${isOpen ? 'open' : ''}
+                     style="margin-top:6px; border-top:1px solid #e5e7eb; padding-top:6px;">
                 <summary style="cursor:pointer; font-weight:600; color:#374151;">
-                    Videira ${treeId} (${annotations.length})
+                    <span style="display:inline-flex; align-items:center; gap:6px;">
+                        <span>Videira ${treeId} (${annotations.length})</span>
+                        <button type="button"
+                                onclick="event.preventDefault(); event.stopPropagation(); focus3DTree('${treeId}')"
+                                title="Mover camera para esta videira"
+                                style="border:1px solid #d1d5db; border-radius:4px; background:#f9fafb;
+                                    color:#374151; cursor:pointer; font-size:11px; padding:1px 6px;">
+                            Ver
+                        </button>
+                    </span>
                 </summary>
         `;
 
@@ -68,13 +84,22 @@ function renderPruningAnnotationPanel(mapData) {
                 : 'sem edge';
 
             html += `
-                <button type="button"
-                        onclick="flashPruningAnnotation('${treeId}', '${annotation.id || ''}')"
-                        style="display:block; width:100%; text-align:left; margin:4px 0 0 12px;
-                               padding:5px 7px; border:1px solid #e5e7eb; border-radius:6px;
-                               background:#fff; color:#374151; cursor:pointer; font-size:12px;">
-                    ${actionLabel} ; ${caneLabel}${annotation.action === 'cut_here' ? ` ; ${edgeLabel}` : ''}
-                </button>
+                <div onclick="flashPruningAnnotation('${treeId}', '${annotation.id || ''}')"
+                    style="display:flex; align-items:center; gap:6px; margin:4px 0 0 12px;
+                            padding:5px 7px; border:1px solid #e5e7eb; border-radius:6px;
+                            background:#fff; color:#374151; cursor:pointer; font-size:12px;">
+                    <span style="flex:1;">
+                        ${actionLabel} ; ${caneLabel}${annotation.action === 'cut_here' ? ` ; ${edgeLabel}` : ''}
+                    </span>
+                    <button type="button"
+                            onclick="event.stopPropagation(); deletePruningAnnotation('${treeId}', '${annotation.id || ''}')"
+                            title="Apagar anotação"
+                            style="width:20px; height:20px; border:1px solid #fecaca; border-radius:4px;
+                                background:#fff5f5; color:#dc2626; cursor:pointer; line-height:16px;
+                                font-size:12px; padding:0;">
+                        x
+                    </button>
+                </div>
             `;
         }
 
@@ -1031,6 +1056,74 @@ function deleteSavedSemanticMap(id, name) {
 // ── Utilitários ───────────────────────────────────────────────────────────────
 
 
+// Teste de função para apagar anotação pelo dropdown
+function deletePruningAnnotation(treeId, annotationId) {
+    if (!currentSemData) return;
+
+    const treesLayer = getTreesLayer(currentSemData);
+    const tree = (treesLayer?.data || []).find(t => String(t.id || '') === String(treeId));
+    const annotations = tree?.pruning_annotations || [];
+
+    const index = annotations.findIndex(annotation => String(annotation.id || '') === String(annotationId));
+
+    if (index < 0) {
+        setSemStatus('Anotação não encontrada.');
+        return;
+    }
+
+    const removed = annotations[index];
+    annotations.splice(index, 1);
+
+    renderPruningAnnotationPanel(currentSemData);
+
+    if (_3d.active) {
+        _render3DMap(currentSemData, {preserveCamera: true});     
+    }
+
+    setSemStatus(
+        removed.action === 'remove_cane'
+            ? `Anotação (remoção) apagada da vara ${removed.cane_id || '?'}`
+            : `Anotação (corte) apagada da vara ${removed.cane_id || '?'}`
+    );
+}
+
+
+// Teste da função para ir para perto da videira
+function focus3DTree(treeId) {
+    if (!currentSemData) {
+        setSemStatus('Sem mapa ativo.');
+        return;
+    }
+
+    if (!_3d.active || !_3d.camera || !_3d.controls) {
+        setSemStatus('Abra vista 3D para mover a camera.');
+        return;
+    }
+
+    const treesLayer = getTreesLayer(currentSemData);
+    const tree = (treesLayer?.data || []).find(t => String(t.id || '') === String(treeId));
+
+    if (!tree || !tree.position) {
+        setSemStatus('Videira não encontrada.');
+        return;
+    }
+
+    const [x ,y , z = 0] = tree.position;
+    const elevLayer = (currentSemData.layers || []).find(layer => layer.type === 'elevation');
+    const minE = elevLayer?.min_elevation || 0;
+
+    const trunkHeight = tree.trunk?.height || tree.height || 1.0;
+    const target = new THREE.Vector3(x, z - minE + trunkHeight * 0.6, -y);
+
+    _3d.controls.target.copy(target);
+    _3d.camera.position.set(target.x + 1.6, target.y + 0.9, target.z + 1.6);
+
+    _3d.controls.update();
+    
+
+    setSemStatus(`Vista movida para a videira ${treeId}.`);
+}
+
 // Teste de função para piscar anotações quando clickadas no dropdown
 function flashPruningAnnotation(treeId, annotationId) {
     if (!currentSemData) {
@@ -1120,7 +1213,7 @@ function togglePruningAnnotationMode() {
     if (btn) {
         btn.classList.toggle('btn-primary', _3d.annotationMode);
         btn.classList.toggle('btn-secondary', !_3d.annotationMode);
-        btn.textContent = _3d.annotationMode ? 'Pruning On' : 'Pruning mode';
+        btn.textContent = _3d.annotationMode ? 'Poda Ativa' : 'Modo de Poda';
     }
 
     setSemStatus(

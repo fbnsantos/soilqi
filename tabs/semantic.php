@@ -197,13 +197,13 @@ if ($isLoggedIn) {
     <button class="btn btn-secondary" onclick="exportSemanticMap()">⬇️ Exportar JSON</button>
             <select id="pruning-action-mode" class="btn btn-secondary"
             style ="height:36px; cursor:pointer;">
-        <option value="cut_here">Cut here</option>
-        <option value="remove_cane">Remove cane</option>
-        <option value="erase">Erase annotation</option>
+        <option value="cut_here">Ponto de Corte</option>
+        <option value="remove_cane">Remover Vara</option>
+        <option value="erase">Apagar anotações</option>
     </select>
     <button class="btn btn-secondary" id="pruning-mode-toggle"
             onclick="togglePruningAnnotationMode()">
-            Pruning mode
+            Modo de Poda
     </button>
     <button class="btn btn-secondary" onclick="clearSemanticMap()">🗑️ Limpar</button>
     <button class="btn btn-secondary" id="sem-btn-3d" onclick="toggle3DView()">🧊 Vista 3D</button>
