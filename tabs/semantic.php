@@ -199,7 +199,7 @@ if ($isLoggedIn) {
             style ="height:36px; cursor:pointer;">
         <option value="cut_here">Ponto de Corte</option>
         <option value="remove_cane">Remover Vara</option>
-        <option value="erase">Apagar anotações</option>
+        <option value="erase">Apagar Anotação</option>
     </select>
     <button class="btn btn-secondary" id="pruning-mode-toggle"
             onclick="togglePruningAnnotationMode()">
@@ -236,6 +236,31 @@ if ($isLoggedIn) {
                 💾 Guardar na base de dados
             </button>
             <div id="sem-save-status" style="font-size:11px; color:#6b7280; margin-top:5px; min-height:14px;"></div>
+        </div>
+
+        <!-- Instruções de poda --> 
+        <div class="sem-panel">
+            <h4>✂️ Instruções de Poda </h4>
+            <p style="font-size:12px; color:#6b7280; margin:0; line-height:1.5;">
+                Para iniciar poda carregar no botão <strong>Modo de Poda</strong>.
+                <br>
+                <strong>Ponto de Corte</strong> - Escolha de corte de poda 
+                <br>
+                <strong>Remover Vara</strong> - Selecionar vara para remover totalmente
+                <br>
+                <Strong>Apagar Anotação</Strong> - Remover decisões efetuadas
+                <br>
+                <br>
+                <Strong>Legenda:</Strong>
+                <br>
+                🟥 - Nó da videira
+                <br>
+                🔵 - Ponto intermédio entre nós
+                <br>
+                🟡 - Ponto de corte
+                <br>
+                <Strong>Vara vermelha</Strong> - Vara marcada para remoção 
+            </p>
         </div>
 
         <!-- Mapas guardados -->
