@@ -10,9 +10,44 @@ let semMap          = null;
 let currentSemData  = null;   // mapa semântico actualmente carregado
 const semActiveSrc  = new Set(); // source IDs adicionadas ao mapa
 
+// "chave" para guardar no browser
+const SEM_AUTOSAVE_KEY = 'soilqi_current_semantic_map';
+
 function getTreesLayer(mapData) {
     return (mapData.layers || []).find(layer => layer.type === 'trees');
 }
+
+///////// Função para guardar mapa no browser //////////
+
+function saveCurrentSemanticMapToBrowser() {
+    if (!currentSemData) {
+        localStorage.removeItem(SEM_AUTOSAVE_KEY);
+        return;
+    }
+
+    localStorage.setItem(SEM_AUTOSAVE_KEY, JSON.stringify(currentSemData));
+}
+
+
+function restoreSemanticMapFromBrowser() {
+    const saved = localStorage.getItem(SEM_AUTOSAVE_KEY);
+    if (!saved) return;
+
+    try {
+        const mapData = JSON.parse(saved);
+        renderSemanticMap(mapData);
+        if (mapData.name) {
+            document.getElementById('sem-save-name').value = mapData.name;
+        }
+    } catch (error) {
+        localStorage.removeItem(SEM_AUTOSAVE_KEY);
+        setSemStatus('O mapa guardado está inválido.');
+    }
+}
+
+
+
+////////////////////////////////////////////////////////
 
 function ensurePruningAnnotations(tree) {
     if (!Array.isArray(tree.pruning_annotations)) {
@@ -166,6 +201,8 @@ function initSemanticMap() {
         loadSemTerrains();
         loadFieldObjectsForSem();
         setSemStatus('Mapa pronto. Carregue um exemplo ou importe um ficheiro JSON.');
+        restoreSemanticMapFromBrowser();
+        saveCurrentSemanticMapToBrowser();
     });
 }
 
@@ -298,6 +335,7 @@ function clearSemanticMap(askConfirmation = true) {
     }
 
     currentSemData = null;
+    saveCurrentSemanticMapToBrowser();
     document.getElementById('sem-layers-list').innerHTML =
         '<span style="color:#9ca3af;font-size:12px;">Nenhum mapa carregado.</span>';
 
@@ -310,6 +348,7 @@ function clearSemanticMap(askConfirmation = true) {
 function renderSemanticMap(mapData) {
     clearSemanticMap(false);
     currentSemData = mapData;
+    saveCurrentSemanticMapToBrowser();
     const ref = mapData.reference || { lat: 38.518, lng: -8.127, rotation: 0 };
     const layerItems = [];
 
@@ -1087,6 +1126,7 @@ function clearAllPruningAnnotations() {
         tree.pruning_annotations = [];
     }
 
+    saveCurrentSemanticMapToBrowser();
 
     renderPruningAnnotationPanel(currentSemData);
 
@@ -1121,6 +1161,8 @@ function deletePruningAnnotation(treeId, annotationId) {
 
     const removed = annotations[index];
     annotations.splice(index, 1);
+
+    saveCurrentSemanticMapToBrowser();
 
     renderPruningAnnotationPanel(currentSemData);
 
@@ -1811,6 +1853,7 @@ function _on3DCanvasPick(event) {
 
     if (actionMode === 'erase') {
         eraseNearestPruningAnnotation(tree, branch, segment, match.point);
+        saveCurrentSemanticMapToBrowser();
         renderPruningAnnotationPanel(currentSemData);
         _render3DMap(currentSemData, {preserveCamera: true});
         return;
@@ -1818,6 +1861,7 @@ function _on3DCanvasPick(event) {
 
     ensurePruningAnnotations(tree).push(annotation);
 
+    saveCurrentSemanticMapToBrowser();
     renderPruningAnnotationPanel(currentSemData);
 
     setSemStatus(
