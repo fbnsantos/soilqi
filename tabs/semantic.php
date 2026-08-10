@@ -202,8 +202,12 @@ if ($isLoggedIn) {
         <option value="erase">Apagar Anotação</option>
     </select>
     <button class="btn btn-secondary" id="pruning-mode-toggle"
-            onclick="togglePruningAnnotationMode()">
+            onclick="togglePruningAnnotationMode()"
+            style="width:130px;">
             Modo de Poda
+    </button>
+    <button class="btn btn-danger" onclick="clearAllPruningAnnotations()">
+            Limpar anotações
     </button>
     <button class="btn btn-secondary" onclick="clearSemanticMap()">🗑️ Limpar</button>
     <button class="btn btn-secondary" id="sem-btn-3d" onclick="toggle3DView()">🧊 Vista 3D</button>

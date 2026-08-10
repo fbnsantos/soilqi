@@ -275,7 +275,11 @@ function addSemLayer(layerDef, beforeId) {
 }
 
 // ── Limpar todas as camadas semânticas ───────────────────────────────────────
-function clearSemanticMap() {
+function clearSemanticMap(askConfirmation = true) {
+    if (askConfirmation && !confirm('Tem a certeza que quer limpar o mapa?')) {
+        return;
+    }
+
     // Remover layers e sources adicionadas pelo mapa semântico
     ['sem-canopy-fill','sem-canopy-line','sem-branches','sem-trunks',
      'sem-elev-layer','sem-occ-layer','sem-occ-line',
@@ -287,6 +291,12 @@ function clearSemanticMap() {
         if (semMap && semMap.getSource(id)) semMap.removeSource(id);
     });
     semActiveSrc.clear();
+
+    if (_3d.scene) {
+        _clear3DObjects();
+        _3d.branchMeshes = [];
+    }
+
     currentSemData = null;
     document.getElementById('sem-layers-list').innerHTML =
         '<span style="color:#9ca3af;font-size:12px;">Nenhum mapa carregado.</span>';
@@ -298,7 +308,7 @@ function clearSemanticMap() {
 
 // ── Renderizar mapa semântico ─────────────────────────────────────────────────
 function renderSemanticMap(mapData) {
-    clearSemanticMap();
+    clearSemanticMap(false);
     currentSemData = mapData;
     const ref = mapData.reference || { lat: 38.518, lng: -8.127, rotation: 0 };
     const layerItems = [];
@@ -1054,6 +1064,44 @@ function deleteSavedSemanticMap(id, name) {
 }
 
 // ── Utilitários ───────────────────────────────────────────────────────────────
+
+// Função para aplicar botão para apagar todas as anotações
+function clearAllPruningAnnotations() {
+    if (!currentSemData) {
+        setSemStatus('Nenhum mapa ativo.');
+        return;
+    }
+
+    if (!confirm('Tem a certeza que quer apagar todas as anotações?')) {
+        return;
+    }
+
+    const treesLayer = getTreesLayer(currentSemData);
+    const trees = treesLayer?.data || [];
+
+    let removedCount = 0;
+
+    for (const tree of trees) {
+        const annotations = tree.pruning_annotations || [];
+        removedCount += annotations.length;
+        tree.pruning_annotations = [];
+    }
+
+
+    renderPruningAnnotationPanel(currentSemData);
+
+    if (_3d.active) {
+        _render3DMap(currentSemData, { preserveCamera: true });
+    }
+
+    if (removedCount == 1) {
+        setSemStatus(`${removedCount} anotação apagada.`);
+    }
+    else if (removedCount > 1) {
+        setSemStatus(`${removedCount} anotações apagadas.`);
+    }
+    
+}
 
 
 // Teste de função para apagar anotação pelo dropdown
