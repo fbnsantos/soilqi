@@ -184,6 +184,31 @@ if ($isLoggedIn) {
 .maplibregl-popup-content table td:first-child { color:#6b7280; font-size:11px; white-space:nowrap; }
 .sem-toggle { cursor:pointer; font-size:11px; color:#667eea; border:none; background:none;
               padding:0; text-decoration:underline; }
+
+.semantic-map-wrap {
+    position:relative;
+}
+
+.pruning-list-sidebar {
+    position:absolute;
+    left:-300px;
+    top:0;
+    width:260px;
+    background:#fff;
+    border:1px solid #e5e7eb;
+    border-radius:10px;
+    padding:14px;
+    max-height:650px;
+    overflow:auto;
+    box-shadow:0 2px 10px rgba(0, 0, 0, 0.08);
+}
+
+.pruning-list-sidebar h4 {
+    margin:0 0 10px;
+    font-size:13px;
+    font-weight:700;
+    color:#374151;
+}
 </style>
 
 <!-- Controls -->
@@ -213,201 +238,211 @@ if ($isLoggedIn) {
     <button class="btn btn-secondary" id="sem-btn-3d" onclick="toggle3DView()">🧊 Vista 3D</button>
 </div>
 
-<div class="main-grid">
-    <!-- Mapa -->
-    <div class="map-section">
-        <div id="semantic-map"></div>
-        <!-- Vista 3D Three.js -->
-        <div id="semantic-3d">
-            <canvas id="semantic-3d-canvas"></canvas>
-            <div id="sem-3d-hint">🖱️ arrastar: rodar &nbsp;|&nbsp; scroll: zoom &nbsp;|&nbsp; Shift+arrastar: deslocar</div>
-        </div>
-        <div id="sem-status" style="font-size:12px; color:#6b7280; padding:6px 2px; min-height:18px;"></div>
-        <div id="pruning-annotation-panel" style="font-size:12px; color:#374151; padding: 6px 2px 0 2px;"></div>
+
+<div class="semantic-map-wrap">
+    
+    <!-- lista de videiras -->
+    <div class="pruning-list-sidebar">
+        <h4>🍇 Lista de Objetos</h4>
+        <div id="pruning-annotation-panel"
+             style="font-size:12px; color:#374151;"></div>
     </div>
 
-    <!-- Sidebar -->
-    <?php if ($isLoggedIn): ?>
-    <div class="sidebar">
-
-        <!-- Guardar mapa -->
-        <div class="sem-panel">
-            <h4>💾 Guardar Mapa</h4>
-            <input type="text" id="sem-save-name" placeholder="Nome do mapa semântico"
-                   style="width:100%; box-sizing:border-box; margin-bottom:8px;
-                          padding:7px 10px; border:1.5px solid #e5e7eb; border-radius:7px; font-size:13px;">
-            <button class="btn btn-primary btn-sm" onclick="saveCurrentSemanticMap()" style="width:100%;">
-                💾 Guardar na base de dados
-            </button>
-            <div id="sem-save-status" style="font-size:11px; color:#6b7280; margin-top:5px; min-height:14px;"></div>
+    <div class="main-grid">
+        <!-- Mapa -->
+        <div class="map-section">
+            <div id="semantic-map"></div>
+            <!-- Vista 3D Three.js -->
+            <div id="semantic-3d">
+                <canvas id="semantic-3d-canvas"></canvas>
+                <div id="sem-3d-hint">🖱️ arrastar: rodar &nbsp;|&nbsp; scroll: zoom &nbsp;|&nbsp; Shift+arrastar: deslocar</div>
+            </div>
+            <div id="sem-status" style="font-size:12px; color:#6b7280; padding:6px 2px; min-height:18px;"></div>
         </div>
 
-        <!-- Instruções de poda --> 
-        <div class="sem-panel">
-            <h4>✂️ Instruções de Poda </h4>
-            <p style="font-size:12px; color:#6b7280; margin:0; line-height:1.5;">
-                Para iniciar poda carregar no botão <strong>Modo de Poda</strong>.
-                <br>
-                <strong>Ponto de Corte</strong> - Escolha de corte de poda 
-                <br>
-                <strong>Remover Vara</strong> - Selecionar vara para remover totalmente
-                <br>
-                <Strong>Apagar Anotação</Strong> - Remover decisões efetuadas
-                <br>
-                <br>
-                <Strong>Legenda:</Strong>
-                <br>
-                🟥 - Nó da videira
-                <br>
-                🔵 - Ponto intermédio entre nós
-                <br>
-                🟡 - Ponto de corte
-                <br>
-                <Strong>Vara vermelha</Strong> - Vara marcada para remoção 
-            </p>
-        </div>
+        <!-- Sidebar -->
+        <?php if ($isLoggedIn): ?>
+        <div class="sidebar">
 
-        <!-- Mapas guardados -->
-        <div class="sem-panel">
-            <h4>📋 Mapas Guardados</h4>
-            <div id="sem-saved-list">
-            <?php if (empty($savedSemMaps)): ?>
-                <div style="color:#9ca3af; font-size:12px; text-align:center; padding:8px 0;">
-                    Nenhum mapa guardado ainda.
-                </div>
-            <?php else: ?>
-                <?php foreach ($savedSemMaps as $sm): ?>
-                <div class="sem-layer-row">
-                    <div style="flex:1; min-width:0;">
-                        <div style="font-weight:600; font-size:12px; white-space:nowrap;
-                                    overflow:hidden; text-overflow:ellipsis;"
-                             title="<?= htmlspecialchars($sm['name']) ?>">
-                            <?= htmlspecialchars($sm['name']) ?>
-                        </div>
-                        <div style="font-size:10px; color:#9ca3af;">
-                            <?= date('d/m/Y H:i', strtotime($sm['created_at'])) ?>
-                        </div>
+            <!-- Guardar mapa -->
+            <div class="sem-panel">
+                <h4>💾 Guardar Mapa</h4>
+                <input type="text" id="sem-save-name" placeholder="Nome do mapa semântico"
+                    style="width:100%; box-sizing:border-box; margin-bottom:8px;
+                            padding:7px 10px; border:1.5px solid #e5e7eb; border-radius:7px; font-size:13px;">
+                <button class="btn btn-primary btn-sm" onclick="saveCurrentSemanticMap()" style="width:100%;">
+                    💾 Guardar na base de dados
+                </button>
+                <div id="sem-save-status" style="font-size:11px; color:#6b7280; margin-top:5px; min-height:14px;"></div>
+            </div>
+
+            <!-- Instruções de poda --> 
+            <div class="sem-panel">
+                <h4>✂️ Instruções de Poda </h4>
+                <p style="font-size:12px; color:#6b7280; margin:0; line-height:1.5;">
+                    Para iniciar poda carregar no botão <strong>Modo de Poda</strong>.
+                    <br>
+                    <strong>Ponto de Corte</strong> - Escolha de corte de poda 
+                    <br>
+                    <strong>Remover Vara</strong> - Selecionar vara para remover totalmente
+                    <br>
+                    <Strong>Apagar Anotação</Strong> - Remover decisões efetuadas
+                    <br>
+                    <br>
+                    <Strong>Legenda:</Strong>
+                    <br>
+                    🟥 - Nó da videira
+                    <br>
+                    🔵 - Ponto intermédio entre nós
+                    <br>
+                    🟡 - Ponto de corte
+                    <br>
+                    <Strong>Vara vermelha</Strong> - Vara marcada para remoção 
+                </p>
+            </div>
+
+            <!-- Mapas guardados -->
+            <div class="sem-panel">
+                <h4>📋 Mapas Guardados</h4>
+                <div id="sem-saved-list">
+                <?php if (empty($savedSemMaps)): ?>
+                    <div style="color:#9ca3af; font-size:12px; text-align:center; padding:8px 0;">
+                        Nenhum mapa guardado ainda.
                     </div>
-                    <button class="btn btn-secondary btn-sm"
-                            onclick="loadSavedSemanticMap(<?= $sm['id'] ?>)"
-                            style="padding:2px 7px; font-size:11px;" title="Carregar">🗺️</button>
-                    <button class="btn btn-danger btn-sm"
-                            onclick="deleteSavedSemanticMap(<?= $sm['id'] ?>, '<?= htmlspecialchars(addslashes($sm['name'])) ?>')"
-                            style="padding:2px 7px; font-size:11px;" title="Eliminar">🗑️</button>
-                </div>
-                <?php endforeach; ?>
-            <?php endif; ?>
-            </div>
-        </div>
-
-        <!-- Camadas activas -->
-        <div class="sem-panel">
-            <h4>🗂️ Camadas Activas</h4>
-            <div id="sem-layers-list" style="color:#9ca3af; font-size:12px; padding:4px 0;">
-                Nenhum mapa carregado.
-            </div>
-        </div>
-
-        <!-- Terrenos -->
-        <div class="sem-panel">
-            <h4>🌿 Terrenos da Quinta</h4>
-            <label style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;">
-                <input type="checkbox" id="sem-show-terrains" onchange="toggleSemTerrains(this.checked)" checked>
-                Mostrar polígonos de terreno
-            </label>
-        </div>
-
-        <!-- Gerar de Objectos de Campo -->
-        <div class="sem-panel">
-            <h4>🤖 Gerar de Campo</h4>
-            <p style="font-size:11px; color:#6b7280; margin:0 0 8px; line-height:1.5;">
-                Converte árvores e postes registados no campo em mapa semântico 3D.
-            </p>
-            <div id="sem-field-terrains" style="margin-bottom:8px;">
-                <div style="color:#9ca3af; font-size:12px; text-align:center; padding:4px 0;">
-                    A carregar…
+                <?php else: ?>
+                    <?php foreach ($savedSemMaps as $sm): ?>
+                    <div class="sem-layer-row">
+                        <div style="flex:1; min-width:0;">
+                            <div style="font-weight:600; font-size:12px; white-space:nowrap;
+                                        overflow:hidden; text-overflow:ellipsis;"
+                                title="<?= htmlspecialchars($sm['name']) ?>">
+                                <?= htmlspecialchars($sm['name']) ?>
+                            </div>
+                            <div style="font-size:10px; color:#9ca3af;">
+                                <?= date('d/m/Y H:i', strtotime($sm['created_at'])) ?>
+                            </div>
+                        </div>
+                        <button class="btn btn-secondary btn-sm"
+                                onclick="loadSavedSemanticMap(<?= $sm['id'] ?>)"
+                                style="padding:2px 7px; font-size:11px;" title="Carregar">🗺️</button>
+                        <button class="btn btn-danger btn-sm"
+                                onclick="deleteSavedSemanticMap(<?= $sm['id'] ?>, '<?= htmlspecialchars(addslashes($sm['name'])) ?>')"
+                                style="padding:2px 7px; font-size:11px;" title="Eliminar">🗑️</button>
+                    </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
                 </div>
             </div>
-            <button class="btn btn-secondary btn-sm" onclick="loadFieldObjectsForSem()"
-                    style="width:100%; font-size:11px;">
-                🔄 Actualizar
-            </button>
-        </div>
 
-        <!-- Formato do ficheiro -->
-        <div class="sem-panel">
-            <h4>📄 Formato JSON</h4>
-            <details style="font-size:11px; color:#6b7280; line-height:1.6;">
-                <summary style="cursor:pointer; color:#667eea; font-size:12px;">Ver esquema</summary>
-                <pre style="margin-top:8px; background:#f9fafb; padding:8px; border-radius:6px;
-                            overflow:auto; font-size:10px; color:#374151;">{
-  "type": "semantic_map",
-  "version": "1.0",
-  "reference": {
-    "lat": 38.518,
-    "lng": -8.127,
-    "rotation": 0
-  },
-  "layers": [
-    {
-      "type": "poles",
-      "data": [{
-        "id": "P001",
-        "position": [x, y, z],
-        "height": 1.8,
-        "shape": "cylinder",
-        "diameter": 0.08,
-        "taper": { "max": 0.08, "a": 0.03 },
-        "color": "#7B4F2E"
-      }]
+            <!-- Camadas activas -->
+            <div class="sem-panel">
+                <h4>🗂️ Camadas Activas</h4>
+                <div id="sem-layers-list" style="color:#9ca3af; font-size:12px; padding:4px 0;">
+                    Nenhum mapa carregado.
+                </div>
+            </div>
+
+            <!-- Terrenos -->
+            <div class="sem-panel">
+                <h4>🌿 Terrenos da Quinta</h4>
+                <label style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;">
+                    <input type="checkbox" id="sem-show-terrains" onchange="toggleSemTerrains(this.checked)" checked>
+                    Mostrar polígonos de terreno
+                </label>
+            </div>
+
+            <!-- Gerar de Objectos de Campo -->
+            <div class="sem-panel">
+                <h4>🤖 Gerar de Campo</h4>
+                <p style="font-size:11px; color:#6b7280; margin:0 0 8px; line-height:1.5;">
+                    Converte árvores e postes registados no campo em mapa semântico 3D.
+                </p>
+                <div id="sem-field-terrains" style="margin-bottom:8px;">
+                    <div style="color:#9ca3af; font-size:12px; text-align:center; padding:4px 0;">
+                        A carregar…
+                    </div>
+                </div>
+                <button class="btn btn-secondary btn-sm" onclick="loadFieldObjectsForSem()"
+                        style="width:100%; font-size:11px;">
+                    🔄 Actualizar
+                </button>
+            </div>
+
+            <!-- Formato do ficheiro -->
+            <div class="sem-panel">
+                <h4>📄 Formato JSON</h4>
+                <details style="font-size:11px; color:#6b7280; line-height:1.6;">
+                    <summary style="cursor:pointer; color:#667eea; font-size:12px;">Ver esquema</summary>
+                    <pre style="margin-top:8px; background:#f9fafb; padding:8px; border-radius:6px;
+                                overflow:auto; font-size:10px; color:#374151;">{
+    "type": "semantic_map",
+    "version": "1.0",
+    "reference": {
+        "lat": 38.518,
+        "lng": -8.127,
+        "rotation": 0
     },
-    {
-      "type": "trees",
-      "data": [{
-        "id": "t001",
-        "position": [x, y, z],
-        "species": "olea_europaea",
-        "trunk": {
-          "height": 3.0,
-          "taper": { "max": 0.20, "a": 0.15 }
+    "layers": [
+        {
+        "type": "poles",
+        "data": [{
+            "id": "P001",
+            "position": [x, y, z],
+            "height": 1.8,
+            "shape": "cylinder",
+            "diameter": 0.08,
+            "taper": { "max": 0.08, "a": 0.03 },
+            "color": "#7B4F2E"
+        }]
         },
-        "branches": [{
-          "type": "bezier3",
-          "points": [[x0,y0,z0],[x1,y1,z1],[x2,y2,z2]],
-          "taper": { "max": 0.08, "a": 0.06 }
-        }],
-        "canopy_radius": 1.5,
-        "health": "good",
-        "fruit_load": 0.8,
-        "fruit_spec": { "color": "#3B5A1A", "radius": 0.055 },
-        "fruits": [
-          { "position": [x,y,z], "radius": 0.055, "color": "#3B5A1A" }
-        ]
-      }]
-    },
-    {
-      "type": "elevation",
-      "origin": [ox, oy],
-      "resolution": 1.0,
-      "width": 25, "height": 20,
-      "min_elevation": 95.0,
-      "max_elevation": 110.0,
-      "encoding": "png_base64",
-      "data": "data:image/png;base64,..."
-    },
-    {
-      "type": "occupancy",
-      "origin": [ox, oy],
-      "resolution": 0.1,
-      "width": 240, "height": 200,
-      "encoding": "png_base64",
-      "data": "data:image/png;base64,..."
-    }
-  ]
-}</pre>
-            </details>
-        </div>
+        {
+        "type": "trees",
+        "data": [{
+            "id": "t001",
+            "position": [x, y, z],
+            "species": "olea_europaea",
+            "trunk": {
+            "height": 3.0,
+            "taper": { "max": 0.20, "a": 0.15 }
+            },
+            "branches": [{
+            "type": "bezier3",
+            "points": [[x0,y0,z0],[x1,y1,z1],[x2,y2,z2]],
+            "taper": { "max": 0.08, "a": 0.06 }
+            }],
+            "canopy_radius": 1.5,
+            "health": "good",
+            "fruit_load": 0.8,
+            "fruit_spec": { "color": "#3B5A1A", "radius": 0.055 },
+            "fruits": [
+            { "position": [x,y,z], "radius": 0.055, "color": "#3B5A1A" }
+            ]
+        }]
+        },
+        {
+        "type": "elevation",
+        "origin": [ox, oy],
+        "resolution": 1.0,
+        "width": 25, "height": 20,
+        "min_elevation": 95.0,
+        "max_elevation": 110.0,
+        "encoding": "png_base64",
+        "data": "data:image/png;base64,..."
+        },
+        {
+        "type": "occupancy",
+        "origin": [ox, oy],
+        "resolution": 0.1,
+        "width": 240, "height": 200,
+        "encoding": "png_base64",
+        "data": "data:image/png;base64,..."
+        }
+    ]
+    }</pre>
+                </details>
+            </div>
 
+        </div>
+        <?php endif; ?>
     </div>
-    <?php endif; ?>
 </div>

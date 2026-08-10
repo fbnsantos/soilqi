@@ -1206,7 +1206,15 @@ function focus3DTree(treeId) {
     const target = new THREE.Vector3(x, z - minE + trunkHeight * 0.6, -y);
 
     _3d.controls.target.copy(target);
-    _3d.camera.position.set(target.x + 1.6, target.y + 0.9, target.z + 1.6);
+    //_3d.camera.position.set(target.x + 1.6, target.y + 0.9, target.z + 1.6);
+
+    // teste dados export para camera
+    if (tree.camera_position) {
+        const [cx, cy, cz = 0] = tree.camera_position;
+        _3d.camera.position.set(cx, cz - minE, -cy);
+    } else {
+        _3d.camera.position.set(target.x + 1.6, target.y + 0.9, target.z + 1.6);
+    }
 
     _3d.controls.update();
     
