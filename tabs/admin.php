@@ -410,6 +410,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn && $isAdmin) {
                 $mqttUser = $cfg['user'];
                 $mqttPass = $cfg['pass'];
 
+                // 0a — disable_functions
+                $disabledFns = array_filter(array_map('trim', explode(',', ini_get('disable_functions'))));
+                $diag[] = [
+                    'test'   => 'disable_functions (PHP web)',
+                    'ok'     => empty($disabledFns),
+                    'detail' => empty($disabledFns)
+                        ? 'Nenhuma função desactivada'
+                        : implode(', ', $disabledFns),
+                ];
+
+                // 0b — open_basedir
+                $openBasedir = ini_get('open_basedir');
+                $diag[] = [
+                    'test'   => 'open_basedir (PHP web)',
+                    'ok'     => ($openBasedir === '' || $openBasedir === false),
+                    'detail' => ($openBasedir === '' || $openBasedir === false)
+                        ? 'Não definido (sem restrição de paths)'
+                        : $openBasedir,
+                ];
+
+                // 0c — PHP SAPI e versão
+                $diag[] = [
+                    'test'   => 'PHP SAPI / versão',
+                    'ok'     => true,
+                    'detail' => php_sapi_name() . '  PHP ' . PHP_VERSION,
+                ];
+
                 // 1 — fsockopen disponível?
                 $disabled = array_map('trim', explode(',', ini_get('disable_functions')));
                 $fsockDisabled = in_array('fsockopen', $disabled);
