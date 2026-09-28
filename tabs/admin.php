@@ -378,8 +378,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn && $isAdmin) {
                 break;
 
             case 'save_mqtt_settings':
-                // Verificar se é admin
-                if (!isAdmin()) { $response['message'] = 'Sem permissões.'; break; }
                 $allowed = ['mqtt_host','mqtt_port','mqtt_user','mqtt_pass','mqtt_topic'];
                 $saved   = [];
                 foreach ($allowed as $k) {
@@ -393,7 +391,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn && $isAdmin) {
                 break;
 
             case 'get_mqtt_settings':
-                if (!isAdmin()) { $response['message'] = 'Sem permissões.'; break; }
                 $cfg = getMqttConfig();
                 $response['success']  = true;
                 $response['settings'] = [
