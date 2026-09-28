@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS system_settings (
     `key`        VARCHAR(64)   NOT NULL PRIMARY KEY,
-    `value`      TEXT          NOT NULL DEFAULT '',
+    `value`      TEXT          NOT NULL,
     `updated_at` TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
