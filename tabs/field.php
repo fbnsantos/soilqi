@@ -964,15 +964,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
 
                 // Publicar via MQTT
                 $mqttError = null;
-                if (defined('MQTT_HOST') && MQTT_HOST !== '' && MQTT_HOST !== '{{MQTT_HOST}}') {
+                $_fmc = getMqttConfig();
+                if ($_fmc['host'] !== '' && $_fmc['host'] !== '{{MQTT_HOST}}') {
                     try {
                         require_once __DIR__ . '/../lib/MqttPublisher.php';
                         $mqtt = new MqttPublisher(
-                            MQTT_HOST,
-                            defined('MQTT_PORT') ? (int)MQTT_PORT : 1883,
+                            $_fmc['host'], $_fmc['port'],
                             'soilqi_web_' . substr($requestId, 0, 8),
-                            defined('MQTT_USER') ? MQTT_USER : '',
-                            defined('MQTT_PASS') ? MQTT_PASS : ''
+                            $_fmc['user'], $_fmc['pass']
                         );
                         $payload = json_encode([
                             'request_id'   => $requestId,
@@ -988,13 +987,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                             'callback_url' => (defined('SITE_URL') ? rtrim(SITE_URL,'/') : '') . '/api/raster_result.php',
                             'api_key'      => defined('RASTER_API_KEY') ? RASTER_API_KEY : '',
                         ]);
-                        $mqtt->publish(defined('MQTT_TOPIC') ? MQTT_TOPIC : '/soilqi/request', $payload, 1, false);
+                        $mqtt->publish($_fmc['topic'], $payload, 1, false);
                         $mqtt->disconnect();
                     } catch (Throwable $mqttEx) {
                         $mqttError = $mqttEx->getMessage();
                     }
                 } else {
-                    $mqttError = 'MQTT não configurado — verifique config.php.';
+                    $mqttError = 'MQTT não configurado — configure em Admin → Configuração MQTT.';
                 }
 
                 $response['success']    = true;

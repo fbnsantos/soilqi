@@ -518,6 +518,49 @@ function displayMqttDiagnostics(tests) {
         </div>`;
 }
 
+function loadMqttSettings() {
+    const fd = new FormData();
+    fd.append('action', 'get_mqtt_settings');
+    fetch('?tab=admin', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) return;
+            const s = data.settings;
+            document.getElementById('mqtt-cfg-host').value  = s.mqtt_host  || '';
+            document.getElementById('mqtt-cfg-port').value  = s.mqtt_port  || '';
+            document.getElementById('mqtt-cfg-user').value  = s.mqtt_user  || '';
+            document.getElementById('mqtt-cfg-topic').value = s.mqtt_topic || '';
+        })
+        .catch(() => {});
+}
+
+function saveMqttSettings() {
+    const status = document.getElementById('mqtt-cfg-status');
+    status.textContent = '⏳ A guardar…';
+    const fd = new FormData();
+    fd.append('action',     'save_mqtt_settings');
+    fd.append('mqtt_host',  document.getElementById('mqtt-cfg-host').value.trim());
+    fd.append('mqtt_port',  document.getElementById('mqtt-cfg-port').value.trim());
+    fd.append('mqtt_user',  document.getElementById('mqtt-cfg-user').value.trim());
+    fd.append('mqtt_topic', document.getElementById('mqtt-cfg-topic').value.trim());
+    const pass = document.getElementById('mqtt-cfg-pass').value;
+    if (pass !== '') fd.append('mqtt_pass', pass);
+
+    fetch('?tab=admin', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                status.style.color = '#166534';
+                status.textContent = '✅ ' + (data.message || 'Guardado.');
+                document.getElementById('mqtt-cfg-pass').value = '';
+            } else {
+                status.style.color = '#991b1b';
+                status.textContent = '❌ ' + (data.message || 'Erro.');
+            }
+        })
+        .catch(() => { status.style.color='#991b1b'; status.textContent='❌ Erro de rede.'; });
+}
+
 // Carregar utilizadores quando a página carrega
 document.addEventListener('DOMContentLoaded', function() {
     if (activeTab === 'admin') {
@@ -525,6 +568,7 @@ document.addEventListener('DOMContentLoaded', function() {
         loadMigrations();
         loadAdminParams();
         loadLandingEditor();
+        loadMqttSettings();
 
         // Atalhos de teclado para o SQL editor
         const sqlQuery = document.getElementById('sql-query');

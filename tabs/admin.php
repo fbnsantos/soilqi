@@ -377,12 +377,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn && $isAdmin) {
                 }, $filenames));
                 break;
 
+            case 'save_mqtt_settings':
+                // Verificar se é admin
+                if (!isAdmin()) { $response['message'] = 'Sem permissões.'; break; }
+                $allowed = ['mqtt_host','mqtt_port','mqtt_user','mqtt_pass','mqtt_topic'];
+                $saved   = [];
+                foreach ($allowed as $k) {
+                    if (array_key_exists($k, $_POST)) {
+                        setSystemSetting($k, trim($_POST[$k]));
+                        $saved[] = $k;
+                    }
+                }
+                $response['success'] = true;
+                $response['message'] = 'Configuração MQTT guardada (' . implode(', ', $saved) . ').';
+                break;
+
+            case 'get_mqtt_settings':
+                if (!isAdmin()) { $response['message'] = 'Sem permissões.'; break; }
+                $cfg = getMqttConfig();
+                $response['success']  = true;
+                $response['settings'] = [
+                    'mqtt_host'  => $cfg['host'],
+                    'mqtt_port'  => $cfg['port'],
+                    'mqtt_user'  => $cfg['user'],
+                    'mqtt_topic' => $cfg['topic'],
+                    // password omitida intencionalmente
+                ];
+                break;
+
             case 'mqtt_diagnostics':
                 $diag    = [];
-                $mqttHost = defined('MQTT_HOST') ? MQTT_HOST : '';
-                $mqttPort = defined('MQTT_PORT') ? (int)MQTT_PORT : 1883;
-                $mqttUser = defined('MQTT_USER') ? MQTT_USER : '';
-                $mqttPass = defined('MQTT_PASS') ? MQTT_PASS : '';
+                $cfg      = getMqttConfig();
+                $mqttHost = $cfg['host'];
+                $mqttPort = $cfg['port'];
+                $mqttUser = $cfg['user'];
+                $mqttPass = $cfg['pass'];
 
                 // 1 — fsockopen disponível?
                 $disabled = array_map('trim', explode(',', ini_get('disable_functions')));
@@ -398,11 +427,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn && $isAdmin) {
                 // 2 — Configuração definida?
                 $cfgOk = $mqttHost !== '';
                 $diag[] = [
-                    'test'   => 'Configuração MQTT (config.php)',
+                    'test'   => 'Configuração MQTT',
                     'ok'     => $cfgOk,
                     'detail' => $cfgOk
-                        ? "MQTT_HOST={$mqttHost}  MQTT_PORT={$mqttPort}  " . ($mqttUser ? "user={$mqttUser}" : 'sem autenticação')
-                        : 'MQTT_HOST não definido em config.php',
+                        ? "host={$mqttHost}  port={$mqttPort}  " . ($mqttUser ? "user={$mqttUser}" : 'sem autenticação')
+                        : 'MQTT_HOST não definido (nem em config.php nem na BD)',
                 ];
 
                 if (!$fsockDisabled && $cfgOk) {
@@ -786,6 +815,46 @@ try {
         <div id="migrations-list">
             <div class="text-center" style="padding:20px;color:#6b7280;">A carregar…</div>
         </div>
+    </div>
+
+    <!-- Configuração MQTT -->
+    <div class="section">
+        <div class="section-title">
+            <h3>📡 Configuração MQTT</h3>
+            <button class="btn btn-primary btn-sm" onclick="saveMqttSettings()">💾 Guardar</button>
+        </div>
+        <p style="color:#6b7280;font-size:14px;margin-bottom:16px;">
+            Os valores aqui definidos sobrepõem-se às constantes do <code>config.php</code>.
+            Deixar um campo em branco usa o valor do <code>config.php</code>.
+        </p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;" id="mqtt-cfg-form">
+            <div>
+                <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:5px;">Host</label>
+                <input type="text" id="mqtt-cfg-host" placeholder="ex: mqtt.vifield.com"
+                       style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;box-sizing:border-box;">
+            </div>
+            <div>
+                <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:5px;">Porta</label>
+                <input type="number" id="mqtt-cfg-port" placeholder="1883"
+                       style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;box-sizing:border-box;">
+            </div>
+            <div>
+                <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:5px;">Utilizador</label>
+                <input type="text" id="mqtt-cfg-user" placeholder="deixar vazio se sem auth"
+                       style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;box-sizing:border-box;">
+            </div>
+            <div>
+                <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:5px;">Password</label>
+                <input type="password" id="mqtt-cfg-pass" placeholder="deixar vazio para não alterar"
+                       style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;box-sizing:border-box;">
+            </div>
+            <div style="grid-column:1/-1;">
+                <label style="font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:5px;">Tópico de pedidos</label>
+                <input type="text" id="mqtt-cfg-topic" placeholder="/soilqi/request"
+                       style="width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;box-sizing:border-box;">
+            </div>
+        </div>
+        <div id="mqtt-cfg-status" style="margin-top:10px;font-size:13px;color:#6b7280;"></div>
     </div>
 
     <!-- Diagnóstico MQTT -->

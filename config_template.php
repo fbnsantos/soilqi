@@ -248,4 +248,55 @@ function verifyPassword($password, $hash) {
     return password_verify($password, $hash);
 }
 
+/**
+ * Lê uma definição da tabela system_settings.
+ * Devolve $default se a chave não existir ou a BD falhar.
+ */
+function getSystemSetting(string $key, string $default = ''): string {
+    try {
+        $pdo  = getDBConnection();
+        $stmt = $pdo->prepare("SELECT `value` FROM system_settings WHERE `key` = ? LIMIT 1");
+        $stmt->execute([$key]);
+        $row  = $stmt->fetch();
+        return $row !== false ? $row['value'] : $default;
+    } catch (Throwable $e) {
+        return $default;
+    }
+}
+
+/**
+ * Escreve (upsert) uma definição na tabela system_settings.
+ */
+function setSystemSetting(string $key, string $value): bool {
+    try {
+        $pdo = getDBConnection();
+        $pdo->prepare(
+            "INSERT INTO system_settings (`key`, `value`) VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)"
+        )->execute([$key, $value]);
+        return true;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+/**
+ * Devolve a configuração MQTT efectiva:
+ * valores da BD têm precedência sobre as constantes de config.php.
+ */
+function getMqttConfig(): array {
+    $host  = getSystemSetting('mqtt_host');
+    $port  = getSystemSetting('mqtt_port');
+    $user  = getSystemSetting('mqtt_user');
+    $pass  = getSystemSetting('mqtt_pass');
+    $topic = getSystemSetting('mqtt_topic');
+    return [
+        'host'  => $host  !== '' ? $host  : (defined('MQTT_HOST')  ? MQTT_HOST  : ''),
+        'port'  => $port  !== '' ? (int)$port : (defined('MQTT_PORT')  ? (int)MQTT_PORT  : 1883),
+        'user'  => $user  !== '' ? $user  : (defined('MQTT_USER')  ? MQTT_USER  : ''),
+        'pass'  => $pass  !== '' ? $pass  : (defined('MQTT_PASS')  ? MQTT_PASS  : ''),
+        'topic' => $topic !== '' ? $topic : (defined('MQTT_TOPIC') ? MQTT_TOPIC : '/soilqi/request'),
+    ];
+}
+
 // Fim de config.php — sem tag de fecho para evitar output acidental de whitespace.

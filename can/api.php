@@ -346,12 +346,13 @@ try {
                 break;
             }
 
-            // Permitir override das credenciais MQTT vindas da app
-            $mqttHost  = !empty($body['mqtt_host'])  ? trim($body['mqtt_host'])       : MQTT_HOST;
-            $mqttPort  = !empty($body['mqtt_port'])  ? intval($body['mqtt_port'])      : MQTT_PORT;
-            $mqttUser  = !empty($body['mqtt_user'])  ? $body['mqtt_user']              : (MQTT_USER ?: null);
-            $mqttPass  = !empty($body['mqtt_pass'])  ? $body['mqtt_pass']              : (MQTT_PASS ?: null);
-            $topic     = !empty($body['mqtt_topic']) ? trim($body['mqtt_topic'])        : '/tlvt/can/in';
+            // Permitir override das credenciais MQTT vindas da app; fallback para BD/config
+            $_mc       = getMqttConfig();
+            $mqttHost  = !empty($body['mqtt_host'])  ? trim($body['mqtt_host'])  : $_mc['host'];
+            $mqttPort  = !empty($body['mqtt_port'])  ? intval($body['mqtt_port']): $_mc['port'];
+            $mqttUser  = !empty($body['mqtt_user'])  ? $body['mqtt_user']        : ($_mc['user'] ?: null);
+            $mqttPass  = !empty($body['mqtt_pass'])  ? $body['mqtt_pass']        : ($_mc['pass'] ?: null);
+            $topic     = !empty($body['mqtt_topic']) ? trim($body['mqtt_topic']) : '/tlvt/can/in';
 
             $raw     = buildCanRaw($pct);
             $payload = json_encode(['payload' => ['raw' => $raw]]);
@@ -376,10 +377,11 @@ try {
             $payload = !empty($body['payload'])   ? $body['payload']               : '';
             if (!$payload) { $response['message'] = 'Payload vazio.'; break; }
 
-            $mqttHost = !empty($body['mqtt_host']) ? trim($body['mqtt_host'])  : MQTT_HOST;
-            $mqttPort = !empty($body['mqtt_port']) ? intval($body['mqtt_port']): MQTT_PORT;
-            $mqttUser = !empty($body['mqtt_user']) ? $body['mqtt_user']        : (MQTT_USER ?: null);
-            $mqttPass = !empty($body['mqtt_pass']) ? $body['mqtt_pass']        : (MQTT_PASS ?: null);
+            $_mc2     = getMqttConfig();
+            $mqttHost = !empty($body['mqtt_host']) ? trim($body['mqtt_host'])  : $_mc2['host'];
+            $mqttPort = !empty($body['mqtt_port']) ? intval($body['mqtt_port']): $_mc2['port'];
+            $mqttUser = !empty($body['mqtt_user']) ? $body['mqtt_user']        : ($_mc2['user'] ?: null);
+            $mqttPass = !empty($body['mqtt_pass']) ? $body['mqtt_pass']        : ($_mc2['pass'] ?: null);
 
             require_once '../lib/MqttPublisher.php';
             $mqtt = new MqttPublisher(

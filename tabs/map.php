@@ -469,15 +469,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 $zonationTopic = defined('ZONATION_TOPIC') ? ZONATION_TOPIC : '/soilqi/zonation';
                 $siteUrl = defined('SITE_URL') ? rtrim(SITE_URL, '/') : '';
 
-                if (defined('MQTT_HOST') && MQTT_HOST !== '' && MQTT_HOST !== '{{MQTT_HOST}}') {
+                $_zmc = getMqttConfig();
+                if ($_zmc['host'] !== '' && $_zmc['host'] !== '{{MQTT_HOST}}') {
                     try {
                         require_once __DIR__ . '/../lib/MqttPublisher.php';
                         $mqtt = new MqttPublisher(
-                            MQTT_HOST,
-                            defined('MQTT_PORT') ? (int)MQTT_PORT : 1883,
+                            $_zmc['host'], $_zmc['port'],
                             'soilqi_zon_' . substr($requestId, 0, 8),
-                            defined('MQTT_USER') ? MQTT_USER : '',
-                            defined('MQTT_PASS') ? MQTT_PASS : ''
+                            $_zmc['user'], $_zmc['pass']
                         );
                         $payload = json_encode([
                             'request_id'   => $requestId,
@@ -493,7 +492,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                         $mqttError = $mqttEx->getMessage();
                     }
                 } else {
-                    $mqttError = 'MQTT não configurado — verifique config.php.';
+                    $mqttError = 'MQTT não configurado — configure em Admin → Configuração MQTT.';
                 }
 
                 $response['success']    = true;
@@ -658,15 +657,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                 $prescTopic = defined('PRESCRIPTION_TOPIC') ? PRESCRIPTION_TOPIC : '/soilqi/prescription';
                 $siteUrl    = defined('SITE_URL') ? rtrim(SITE_URL, '/') : '';
 
-                if (defined('MQTT_HOST') && MQTT_HOST !== '' && MQTT_HOST !== '{{MQTT_HOST}}') {
+                $_pmc = getMqttConfig();
+                if ($_pmc['host'] !== '' && $_pmc['host'] !== '{{MQTT_HOST}}') {
                     try {
                         require_once __DIR__ . '/../lib/MqttPublisher.php';
                         $mqtt = new MqttPublisher(
-                            MQTT_HOST,
-                            defined('MQTT_PORT') ? (int)MQTT_PORT : 1883,
+                            $_pmc['host'], $_pmc['port'],
                             'soilqi_presc_' . substr($requestId, 0, 8),
-                            defined('MQTT_USER') ? MQTT_USER : '',
-                            defined('MQTT_PASS') ? MQTT_PASS : ''
+                            $_pmc['user'], $_pmc['pass']
                         );
                         $mqtt->publish($prescTopic, json_encode([
                             'request_id'   => $requestId,
@@ -679,7 +677,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn) {
                         $mqttError = $mqttEx->getMessage();
                     }
                 } else {
-                    $mqttError = 'MQTT não configurado.';
+                    $mqttError = 'MQTT não configurado — configure em Admin → Configuração MQTT.';
                 }
 
                 $response['success']    = true;
