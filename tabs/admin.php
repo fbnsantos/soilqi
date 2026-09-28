@@ -468,7 +468,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn && $isAdmin) {
                         'detail' => $resolved ? "{$mqttHost} → {$ip}" : "Não foi possível resolver \"{$mqttHost}\"",
                     ];
 
-                    // 4 — Ligação TCP
+                    // 3b — Ligação TCP ao IP direto (bypassa DNS)
+                    $sockIp = @fsockopen($ip, $mqttPort, $ipErrno, $ipErrstr, 5);
+                    $tcpIpOk = (bool)$sockIp;
+                    if ($sockIp) fclose($sockIp);
+                    $diag[] = [
+                        'test'   => "Ligação TCP ao IP {$ip}:{$mqttPort}",
+                        'ok'     => $tcpIpOk,
+                        'detail' => $tcpIpOk ? 'OK via IP direto' : "Falhou: {$ipErrstr} ({$ipErrno})",
+                    ];
+
+                    // 4 — Ligação TCP por hostname
                     $sock = @fsockopen($mqttHost, $mqttPort, $tcpErrno, $tcpErrstr, 5);
                     $tcpOk = (bool)$sock;
                     $diag[] = [
