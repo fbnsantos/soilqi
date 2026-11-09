@@ -179,7 +179,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     exit;
 }
 
-// ── Helper para campos numéricos ─────────────────────────────────────────────
+// ── Idioma (PT/EN) ───────────────────────────────────────────────────────────
+// Prioridade: ?lang= → cookie soilqi_lang (definido pelo JS) → Accept-Language
+if (!defined('ROI_LANG')) {
+    $roiLang = $_GET['lang'] ?? ($_COOKIE['soilqi_lang'] ?? '');
+    if (!in_array($roiLang, ['pt', 'en'], true)) {
+        $al = strtolower($_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? '');
+        $roiLang = (strpos($al, 'en') === 0 || (strpos($al, 'en') !== false && strpos($al, 'pt') === false)) ? 'en' : 'pt';
+    }
+    define('ROI_LANG', $roiLang);
+}
+/** Texto bilingue: devolve PT ou EN conforme o idioma activo. */
+function roiL(string $pt, string $en): string { return ROI_LANG === 'en' ? $en : $pt; }
+
+// ── Helpers de formulário ────────────────────────────────────────────────────
 function roiField(string $key, string $label, string $unit = '', string $hint = '', string $step = 'any'): string
 {
     $h = $hint !== '' ? ' title="' . htmlspecialchars($hint) . '"' : '';
@@ -192,53 +205,70 @@ function roiOptionBlock(string $p, string $title, string $color): string
     ob_start(); ?>
     <div class="roi-opt" style="--oc:<?= $color ?>">
         <div class="roi-opt-h"><?= $title ?></div>
-        <label class="roi-f roi-f-wide"><span class="roi-f-l">Equipamento / solução</span>
+        <label class="roi-f roi-f-wide"><span class="roi-f-l"><?= roiL('Equipamento / solução', 'Equipment / solution') ?></span>
             <input type="text" data-k="<?= $p ?>.name" class="roi-in"></label>
-        <label class="roi-f roi-f-wide"><span class="roi-f-l">Modelo de aquisição</span>
+        <label class="roi-f roi-f-wide"><span class="roi-f-l"><?= roiL('Modelo de aquisição', 'Acquisition model') ?></span>
             <select data-k="<?= $p ?>.mode" class="roi-in">
-                <option value="own">Compra (propriedade)</option>
-                <option value="service">Serviço contratado / RaaS (€/ha)</option>
+                <option value="own"><?= roiL('Compra (propriedade)', 'Purchase (ownership)') ?></option>
+                <option value="service"><?= roiL('Serviço contratado / RaaS (€/ha)', 'Contracted service / RaaS (€/ha)') ?></option>
             </select></label>
 
-        <div class="roi-sub roi-own-only">Investimento</div>
+        <div class="roi-sub roi-own-only"><?= roiL('Investimento', 'Investment') ?></div>
         <div class="roi-grid roi-own-only">
-            <?= roiField("$p.investment", 'Investimento I₀', '€') ?>
-            <?= roiField("$p.alloc_pct", 'Imputação a esta operação', '%', 'Percentagem do custo de capital imputada a esta operação (ex.: o tractor também faz outras tarefas).') ?>
-            <?= roiField("$p.residual", 'Valor residual ano final', '€') ?>
-            <?= roiField("$p.useful_life", 'Vida útil', 'anos') ?>
-            <?= roiField("$p.replacement_cost", 'Substituição Rₜ', '€', 'Ex.: baterias ou componentes do implemento.') ?>
-            <?= roiField("$p.replacement_year", 'Ano da substituição', 'ano', 'Ano (1–horizonte) em que ocorre a substituição. 0 = nenhuma.', '1') ?>
+            <?= roiField("$p.investment", roiL('Investimento I₀', 'Investment I₀'), '€') ?>
+            <?= roiField("$p.alloc_pct", roiL('Imputação a esta operação', 'Share allocated to this operation'), '%',
+                roiL('Percentagem do custo de capital imputada a esta operação (ex.: o tractor também faz outras tarefas).',
+                     'Share of the capital cost allocated to this operation (e.g. the tractor also performs other tasks).')) ?>
+            <?= roiField("$p.residual", roiL('Valor residual ano final', 'Residual value, final year'), '€') ?>
+            <?= roiField("$p.useful_life", roiL('Vida útil', 'Useful life'), roiL('anos', 'years')) ?>
+            <?= roiField("$p.replacement_cost", roiL('Substituição Rₜ', 'Replacement Rₜ'), '€',
+                roiL('Ex.: baterias ou componentes do implemento.', 'E.g. batteries or implement components.')) ?>
+            <?= roiField("$p.replacement_year", roiL('Ano da substituição', 'Replacement year'), roiL('ano', 'year'),
+                roiL('Ano (1–horizonte) em que ocorre a substituição. 0 = nenhuma.', 'Year (1–horizon) of the replacement. 0 = none.'), '1') ?>
         </div>
 
-        <div class="roi-sub roi-svc-only">Serviço contratado</div>
+        <div class="roi-sub roi-svc-only"><?= roiL('Serviço contratado', 'Contracted service') ?></div>
         <div class="roi-grid roi-svc-only">
-            <?= roiField("$p.service_fee", 'Tarifa de serviço', '€/ha·op', 'Preço por hectare e por operação (inclui máquina, energia e manutenção).') ?>
-            <?= roiField("$p.service_fixed", 'Taxa fixa anual', '€/ano') ?>
+            <?= roiField("$p.service_fee", roiL('Tarifa de serviço', 'Service fee'), '€/ha·op',
+                roiL('Preço por hectare e por operação (inclui máquina, energia e manutenção).',
+                     'Price per hectare and per operation (includes machine, energy and maintenance).')) ?>
+            <?= roiField("$p.service_fixed", roiL('Taxa fixa anual', 'Fixed annual fee'), roiL('€/ano', '€/year')) ?>
         </div>
 
-        <div class="roi-sub">Operação</div>
+        <div class="roi-sub"><?= roiL('Operação', 'Operation') ?></div>
         <div class="roi-grid">
-            <?= roiField("$p.capacity", 'Capacidade efectiva P', 'ha/h', 'Inclui viragens, carregamento, reabastecimento e paragens.') ?>
-            <?= roiField("$p.hours_per_day", 'Horas úteis por dia', 'h/dia', 'Usado com a janela operacional para verificar se uma unidade chega.') ?>
-            <label class="roi-f"><span class="roi-f-l">Fonte de energia</span>
+            <?= roiField("$p.capacity", roiL('Capacidade efectiva P', 'Effective capacity P'), 'ha/h',
+                roiL('Inclui viragens, carregamento, reabastecimento e paragens.', 'Includes turning, charging, refilling and downtime.')) ?>
+            <?= roiField("$p.hours_per_day", roiL('Horas úteis por dia', 'Working hours per day'), roiL('h/dia', 'h/day'),
+                roiL('Usado com a janela operacional para verificar se uma unidade chega.',
+                     'Used with the operational window to check whether one unit is enough.')) ?>
+            <label class="roi-f"><span class="roi-f-l"><?= roiL('Fonte de energia', 'Energy source') ?></span>
                 <select data-k="<?= $p ?>.energy_type" class="roi-in">
-                    <option value="diesel">Gasóleo (L)</option>
-                    <option value="electric">Electricidade (kWh)</option>
-                    <option value="petrol">Gasolina (L)</option>
+                    <option value="diesel"><?= roiL('Gasóleo (L)', 'Diesel (L)') ?></option>
+                    <option value="electric"><?= roiL('Electricidade (kWh)', 'Electricity (kWh)') ?></option>
+                    <option value="petrol"><?= roiL('Gasolina (L)', 'Petrol (L)') ?></option>
                 </select></label>
-            <?= roiField("$p.consumption", 'Consumo EC', '<span class="roi-eu"></span>/h') ?>
-            <?= roiField("$p.energy_price", 'Preço energia', '€/<span class="roi-eu"></span>') ?>
-            <?= roiField("$p.ef", 'Factor emissão EF', 'kgCO₂e/<span class="roi-eu"></span>', 'Gasóleo 2,68 kg CO₂/L; electricidade 0,20 kg CO₂e/kWh (valores ilustrativos do guia).') ?>
+            <?= roiField("$p.consumption", roiL('Consumo EC', 'Consumption EC'), '<span class="roi-eu"></span>/h') ?>
+            <?= roiField("$p.energy_price", roiL('Preço energia', 'Energy price'), '€/<span class="roi-eu"></span>') ?>
+            <?= roiField("$p.ef", roiL('Factor emissão EF', 'Emission factor EF'), 'kgCO₂e/<span class="roi-eu"></span>',
+                roiL('Gasóleo 2,68 kg CO₂/L; electricidade 0,20 kg CO₂e/kWh (valores ilustrativos do guia).',
+                     'Diesel 2.68 kg CO₂/L; electricity 0.20 kg CO₂e/kWh (illustrative values from the guide).')) ?>
         </div>
 
-        <div class="roi-sub">Mão-de-obra e custos anuais</div>
+        <div class="roi-sub"><?= roiL('Mão-de-obra e custos anuais', 'Labour and annual costs') ?></div>
         <div class="roi-grid">
-            <?= roiField("$p.labour_ratio", 'Mão-de-obra / supervisão', 'h op./h máq.', 'Horas de operador por hora de máquina. Tractor ≈ 1,0; robô com supervisão ≈ 0,1–0,3.') ?>
-            <?= roiField("$p.labour_cost", 'Custo mão-de-obra', '€/h') ?>
-            <?= roiField("$p.maintenance", 'Manutenção', '€/ano') ?>
-            <?= roiField("$p.other", 'Outros (seguro, transporte…)', '€/ano') ?>
-            <?= roiField("$p.input_cost", 'Consumíveis úteis', '€/ha·op', 'Custo do produto efectivamente necessário por ha (pólen, fitofármaco, adubo…).') ?>
-            <?= roiField("$p.input_waste", 'Desperdício de consumíveis', '%', 'Custo real = consumíveis / (1 − desperdício). Cf. Pinheiro et al. (2026).') ?>
+            <?= roiField("$p.labour_ratio", roiL('Mão-de-obra / supervisão', 'Labour / supervision'), roiL('h op./h máq.', 'op. h/machine h'),
+                roiL('Horas de operador por hora de máquina. Tractor ≈ 1,0; robô com supervisão ≈ 0,1–0,3.',
+                     'Operator hours per machine hour. Tractor ≈ 1.0; supervised robot ≈ 0.1–0.3.')) ?>
+            <?= roiField("$p.labour_cost", roiL('Custo mão-de-obra', 'Labour cost'), '€/h') ?>
+            <?= roiField("$p.maintenance", roiL('Manutenção', 'Maintenance'), roiL('€/ano', '€/year')) ?>
+            <?= roiField("$p.other", roiL('Outros (seguro, transporte…)', 'Other (insurance, transport…)'), roiL('€/ano', '€/year')) ?>
+            <?= roiField("$p.input_cost", roiL('Consumíveis úteis', 'Useful inputs'), '€/ha·op',
+                roiL('Custo do produto efectivamente necessário por ha (pólen, fitofármaco, adubo…).',
+                     'Cost of the input actually required per ha (pollen, pesticide, fertiliser…).')) ?>
+            <?= roiField("$p.input_waste", roiL('Desperdício de consumíveis', 'Input waste'), '%',
+                roiL('Custo real = consumíveis / (1 − desperdício). Cf. Pinheiro et al. (2026).',
+                     'Actual cost = inputs / (1 − waste). Cf. Pinheiro et al. (2026).')) ?>
         </div>
     </div>
     <?php return ob_get_clean();
@@ -250,6 +280,9 @@ function roiOptionBlock(string $p, string $title, string $color): string
 .roi-top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:12px}
 .roi-top h2{margin:0;font-size:20px}
 .roi-top p{margin:2px 0 0;color:#6b7280;font-size:12px}
+.roi-lang{display:inline-flex;border:1px solid #d1d5db;border-radius:8px;overflow:hidden}
+.roi-lang a{padding:5px 11px;font-size:12px;font-weight:700;color:#4b5563;text-decoration:none;background:#fff}
+.roi-lang a.on{background:#4f46e5;color:#fff}
 .roi-tabs{display:flex;gap:4px;border-bottom:2px solid #e5e7eb;margin-bottom:14px;flex-wrap:wrap}
 .roi-tab{padding:8px 14px;border:none;background:none;cursor:pointer;font-weight:600;color:#6b7280;border-bottom:3px solid transparent;margin-bottom:-2px;font-size:13px}
 .roi-tab.on{color:#4f46e5;border-bottom-color:#4f46e5}
@@ -306,7 +339,7 @@ table.roi-t td.c{color:#b45309}table.roi-t td.r{color:#4f46e5}
 .roi-empty{color:#9ca3af;text-align:center;padding:24px}
 .roi-pill{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10px;font-weight:700}
 .roi-pill.g{background:#d1fae5;color:#065f46}.roi-pill.b{background:#fee2e2;color:#991b1b}.roi-pill.n{background:#f3f4f6;color:#4b5563}
-/* Apresentação */
+/* Apresentação / Presentation */
 .roi-slides{display:grid;gap:16px}
 .roi-slide{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:22px 26px;aspect-ratio:16/9;display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box}
 .roi-slide h4{margin:0 0 2px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#6366f1}
@@ -327,61 +360,72 @@ table.roi-t td.c{color:#b45309}table.roi-t td.r{color:#4f46e5}
 }
 </style>
 
-<div class="roi-wrap" id="roi-app">
+<script>window.ROI_LANG = <?= json_encode(ROI_LANG) ?>;</script>
+
+<div class="roi-wrap" id="roi-app" lang="<?= ROI_LANG ?>">
     <div class="roi-top">
         <div>
-            <h2>💶 Calculadora ROI — Robô vs. Máquina Convencional</h2>
-            <p>TCO descontado, break-even, sensibilidade e emissões operacionais. Metodologia: guia prático FCUP 2026/27 e Pinheiro et al. (2026), <i>Agricultural Systems</i> 231, 104541.</p>
+            <h2>💶 <?= roiL('Calculadora ROI — Robô vs. Máquina Convencional', 'ROI Calculator — Robot vs. Conventional Machinery') ?></h2>
+            <p><?= roiL('TCO descontado, break-even, sensibilidade e emissões operacionais. Metodologia: guia prático FCUP 2026/27 e Pinheiro et al. (2026), <i>Agricultural Systems</i> 231, 104541.',
+                        'Discounted TCO, break-even, sensitivity and operational emissions. Method: FCUP 2026/27 practical assignment guide and Pinheiro et al. (2026), <i>Agricultural Systems</i> 231, 104541.') ?></p>
+        </div>
+        <div class="roi-lang roi-noprint" title="<?= roiL('Idioma', 'Language') ?>">
+            <a href="?tab=roi&amp;lang=pt" class="<?= ROI_LANG === 'pt' ? 'on' : '' ?>">PT</a>
+            <a href="?tab=roi&amp;lang=en" class="<?= ROI_LANG === 'en' ? 'on' : '' ?>">EN</a>
         </div>
     </div>
 
     <div class="roi-tabs roi-noprint">
-        <button class="roi-tab on" data-sec="calc">🧮 Calculadora</button>
-        <button class="roi-tab" data-sec="sens">📈 Break-even &amp; Sensibilidade</button>
-        <button class="roi-tab" data-sec="saved">💾 Simulações guardadas <span id="roi-saved-count" class="roi-pill n">0</span></button>
-        <button class="roi-tab" data-sec="pres">🎞️ Apresentação</button>
+        <button class="roi-tab on" data-sec="calc">🧮 <?= roiL('Calculadora', 'Calculator') ?></button>
+        <button class="roi-tab" data-sec="sens">📈 <?= roiL('Break-even &amp; Sensibilidade', 'Break-even &amp; Sensitivity') ?></button>
+        <button class="roi-tab" data-sec="saved">💾 <?= roiL('Simulações guardadas', 'Saved simulations') ?> <span id="roi-saved-count" class="roi-pill n">0</span></button>
+        <button class="roi-tab" data-sec="pres">🎞️ <?= roiL('Apresentação', 'Presentation') ?></button>
     </div>
 
-    <!-- Barra de simulação -->
+    <!-- Barra de simulação / Simulation bar -->
     <div class="roi-bar roi-noprint">
-        <input type="text" id="roi-name" placeholder="Nome da simulação" style="flex:1;min-width:180px">
-        <input type="text" id="roi-group" placeholder="Grupo / projecto (opcional)" style="width:190px">
+        <input type="text" id="roi-name" placeholder="<?= roiL('Nome da simulação', 'Simulation name') ?>" style="flex:1;min-width:180px">
+        <input type="text" id="roi-group" placeholder="<?= roiL('Grupo / projecto (opcional)', 'Group / project (optional)') ?>" style="width:190px">
         <span id="roi-status" style="font-size:11px;color:#6b7280"></span>
-        <select id="roi-preset" class="roi-btn" title="Carregar exemplo">
-            <option value="">📂 Exemplos…</option>
-            <option value="vineyard">Gestão de vegetação em vinha</option>
-            <option value="spraying">Pulverização em pomar</option>
-            <option value="kiwi">Polinização de kiwi (Pinheiro et al., 2026)</option>
+        <select id="roi-preset" class="roi-btn" title="<?= roiL('Carregar exemplo', 'Load example') ?>">
+            <option value="">📂 <?= roiL('Exemplos…', 'Examples…') ?></option>
+            <option value="vineyard"><?= roiL('Gestão de vegetação em vinha', 'Vineyard vegetation management') ?></option>
+            <option value="spraying"><?= roiL('Pulverização em pomar', 'Orchard spraying') ?></option>
+            <option value="kiwi"><?= roiL('Polinização de kiwi (Pinheiro et al., 2026)', 'Kiwifruit pollination (Pinheiro et al., 2026)') ?></option>
         </select>
-        <button class="roi-btn" id="roi-new">＋ Nova</button>
-        <button class="roi-btn" id="roi-saveas">⧉ Guardar cópia</button>
-        <button class="roi-btn pri" id="roi-save">💾 Guardar</button>
+        <button class="roi-btn" id="roi-new">＋ <?= roiL('Nova', 'New') ?></button>
+        <button class="roi-btn" id="roi-saveas">⧉ <?= roiL('Guardar cópia', 'Save copy') ?></button>
+        <button class="roi-btn pri" id="roi-save">💾 <?= roiL('Guardar', 'Save') ?></button>
     </div>
 
-    <!-- ── Secção Calculadora ── -->
+    <!-- ── Calculadora / Calculator ── -->
     <section data-sec="calc">
         <div class="roi-cols">
             <div class="roi-card roi-inputs" id="roi-form">
-                <h3>1 · Cenário e pressupostos</h3>
+                <h3>1 · <?= roiL('Cenário e pressupostos', 'Scenario and assumptions') ?></h3>
                 <div class="roi-grid">
-                    <label class="roi-f"><span class="roi-f-l">Cultura</span><input type="text" data-k="scenario.crop" class="roi-in"></label>
-                    <label class="roi-f"><span class="roi-f-l">Operação</span><input type="text" data-k="scenario.operation" class="roi-in"></label>
-                    <?= roiField('scenario.area', 'Área A', 'ha') ?>
-                    <?= roiField('scenario.ops_per_year', 'Operações por ano N', 'nº') ?>
-                    <label class="roi-f"><span class="roi-f-l">Unidade funcional</span><input type="text" data-k="scenario.func_unit" class="roi-in" placeholder="ha tratado"></label>
-                    <?= roiField('scenario.window_days', 'Janela operacional', 'dias/op.', 'Dias disponíveis para cada operação (0 = sem restrição). Ex.: polinização de kiwi = 7 dias.') ?>
-                    <?= roiField('scenario.discount_rate', 'Taxa de desconto r', '%') ?>
-                    <?= roiField('scenario.horizon', 'Horizonte', 'anos', '', '1') ?>
-                    <?= roiField('robot.extra_benefit', 'Benefício adicional do robô', '€/ano', 'Ganhos não incluídos nos custos (produtividade, qualidade, menor compactação…). Entra no VAL/ROI, não no TCO.') ?>
-                    <label class="roi-f" title="Se a janela operacional não chegar, multiplica o nº de unidades (investimento, manutenção, residual)."><span class="roi-f-l">Escalar nº de unidades</span>
-                        <select data-k="scenario.scale_units" class="roi-in"><option value="1">Sim</option><option value="0">Não</option></select></label>
-                    <label class="roi-f roi-f-wide"><span class="roi-f-l">Fontes e pressupostos (indique dados medidos vs. estimados)</span>
+                    <label class="roi-f"><span class="roi-f-l"><?= roiL('Cultura', 'Crop') ?></span><input type="text" data-k="scenario.crop" class="roi-in"></label>
+                    <label class="roi-f"><span class="roi-f-l"><?= roiL('Operação', 'Operation') ?></span><input type="text" data-k="scenario.operation" class="roi-in"></label>
+                    <?= roiField('scenario.area', roiL('Área A', 'Area A'), 'ha') ?>
+                    <?= roiField('scenario.ops_per_year', roiL('Operações por ano N', 'Operations per year N'), roiL('nº', 'no.')) ?>
+                    <label class="roi-f"><span class="roi-f-l"><?= roiL('Unidade funcional', 'Functional unit') ?></span><input type="text" data-k="scenario.func_unit" class="roi-in" placeholder="<?= roiL('ha tratado', 'ha treated') ?>"></label>
+                    <?= roiField('scenario.window_days', roiL('Janela operacional', 'Operational window'), roiL('dias/op.', 'days/op.'),
+                        roiL('Dias disponíveis para cada operação (0 = sem restrição). Ex.: polinização de kiwi = 7 dias.',
+                             'Days available for each operation (0 = no constraint). E.g. kiwifruit pollination = 7 days.')) ?>
+                    <?= roiField('scenario.discount_rate', roiL('Taxa de desconto r', 'Discount rate r'), '%') ?>
+                    <?= roiField('scenario.horizon', roiL('Horizonte', 'Horizon'), roiL('anos', 'years'), '', '1') ?>
+                    <?= roiField('robot.extra_benefit', roiL('Benefício adicional do robô', 'Additional robot benefit'), roiL('€/ano', '€/year'),
+                        roiL('Ganhos não incluídos nos custos (produtividade, qualidade, menor compactação…). Entra no VAL/ROI, não no TCO.',
+                             'Gains not captured in costs (yield, quality, less compaction…). Included in NPV/ROI, not in TCO.')) ?>
+                    <label class="roi-f" title="<?= roiL('Se a janela operacional não chegar, multiplica o nº de unidades (investimento, manutenção, residual).', 'If the operational window is too short, multiplies the number of units (investment, maintenance, residual).') ?>"><span class="roi-f-l"><?= roiL('Escalar nº de unidades', 'Scale number of units') ?></span>
+                        <select data-k="scenario.scale_units" class="roi-in"><option value="1"><?= roiL('Sim', 'Yes') ?></option><option value="0"><?= roiL('Não', 'No') ?></option></select></label>
+                    <label class="roi-f roi-f-wide"><span class="roi-f-l"><?= roiL('Fontes e pressupostos (indique dados medidos vs. estimados)', 'Sources and assumptions (flag measured vs. estimated data)') ?></span>
                         <textarea data-k="scenario.sources" class="roi-in" rows="3"></textarea></label>
                 </div>
 
-                <h3 style="margin-top:14px">2 · Alternativas</h3>
-                <?= roiOptionBlock('conv',  '🚜 Convencional', '#b45309') ?>
-                <?= roiOptionBlock('robot', '🤖 Robô',         '#4f46e5') ?>
+                <h3 style="margin-top:14px">2 · <?= roiL('Alternativas', 'Alternatives') ?></h3>
+                <?= roiOptionBlock('conv',  '🚜 ' . roiL('Convencional', 'Conventional'), '#b45309') ?>
+                <?= roiOptionBlock('robot', '🤖 ' . roiL('Robô', 'Robot'), '#4f46e5') ?>
             </div>
 
             <div>
@@ -390,25 +434,25 @@ table.roi-t td.c{color:#b45309}table.roi-t td.r{color:#4f46e5}
                 <div class="roi-kpis" id="roi-kpis"></div>
 
                 <div class="roi-card">
-                    <div class="roi-card-h"><h3>Comparação técnica e económica (ano típico)</h3></div>
+                    <div class="roi-card-h"><h3><?= roiL('Comparação técnica e económica (ano típico)', 'Technical and economic comparison (typical year)') ?></h3></div>
                     <div class="roi-scroll"><table class="roi-t" id="roi-table"></table></div>
                 </div>
 
                 <div class="roi-charts">
                     <div class="roi-card">
-                        <div class="roi-card-h"><h3>Custo anual por componente</h3><button class="roi-dl" data-chart="breakdown">⬇ PNG</button></div>
+                        <div class="roi-card-h"><h3><?= roiL('Custo anual por componente', 'Annual cost by component') ?></h3><button class="roi-dl" data-chart="breakdown">⬇ PNG</button></div>
                         <div class="roi-chart-box"><canvas id="roi-ch-breakdown"></canvas></div>
                     </div>
                     <div class="roi-card">
-                        <div class="roi-card-h"><h3>Custo acumulado descontado (TCO)</h3><button class="roi-dl" data-chart="cumulative">⬇ PNG</button></div>
+                        <div class="roi-card-h"><h3><?= roiL('Custo acumulado descontado (TCO)', 'Cumulative discounted cost (TCO)') ?></h3><button class="roi-dl" data-chart="cumulative">⬇ PNG</button></div>
                         <div class="roi-chart-box"><canvas id="roi-ch-cumulative"></canvas></div>
                     </div>
                     <div class="roi-card">
-                        <div class="roi-card-h"><h3>Emissões operacionais</h3><button class="roi-dl" data-chart="emissions">⬇ PNG</button></div>
+                        <div class="roi-card-h"><h3><?= roiL('Emissões operacionais', 'Operational emissions') ?></h3><button class="roi-dl" data-chart="emissions">⬇ PNG</button></div>
                         <div class="roi-chart-box"><canvas id="roi-ch-emissions"></canvas></div>
                     </div>
                     <div class="roi-card">
-                        <div class="roi-card-h"><h3>Fluxo incremental (robô − conv.)</h3><button class="roi-dl" data-chart="cashflow">⬇ PNG</button></div>
+                        <div class="roi-card-h"><h3><?= roiL('Fluxo incremental (robô − conv.)', 'Incremental cash flow (robot − conv.)') ?></h3><button class="roi-dl" data-chart="cashflow">⬇ PNG</button></div>
                         <div class="roi-chart-box"><canvas id="roi-ch-cashflow"></canvas></div>
                     </div>
                 </div>
@@ -416,56 +460,59 @@ table.roi-t td.c{color:#b45309}table.roi-t td.r{color:#4f46e5}
         </div>
     </section>
 
-    <!-- ── Secção Break-even & Sensibilidade ── -->
+    <!-- ── Break-even & Sensibilidade / Sensitivity ── -->
     <section data-sec="sens" style="display:none">
         <div class="roi-kpis" id="roi-be-kpis"></div>
         <div class="roi-charts">
             <div class="roi-card">
-                <div class="roi-card-h"><h3>Custo por unidade funcional vs. área</h3><button class="roi-dl" data-chart="area">⬇ PNG</button></div>
+                <div class="roi-card-h"><h3><?= roiL('Custo por unidade funcional vs. área', 'Cost per functional unit vs. area') ?></h3><button class="roi-dl" data-chart="area">⬇ PNG</button></div>
                 <div class="roi-chart-box" style="height:320px"><canvas id="roi-ch-area"></canvas></div>
-                <p style="font-size:11px;color:#6b7280;margin:6px 0 0">TCO descontado ÷ trabalho descontado (€/ha·op), como nas curvas de Pinheiro et al. (2026). O cruzamento é o break-even A*.</p>
+                <p style="font-size:11px;color:#6b7280;margin:6px 0 0"><?= roiL('TCO descontado ÷ trabalho descontado (€/ha·op), como nas curvas de Pinheiro et al. (2026). O cruzamento é o break-even A*.',
+                    'Discounted TCO ÷ discounted work (€/ha·op), as in the curves of Pinheiro et al. (2026). The crossing point is the break-even A*.') ?></p>
             </div>
             <div class="roi-card">
-                <div class="roi-card-h"><h3>Sensibilidade — Δ VAL da adopção do robô</h3><button class="roi-dl" data-chart="tornado">⬇ PNG</button></div>
+                <div class="roi-card-h"><h3><?= roiL('Sensibilidade — Δ VAL da adopção do robô', 'Sensitivity — Δ NPV of robot adoption') ?></h3><button class="roi-dl" data-chart="tornado">⬇ PNG</button></div>
                 <div class="roi-chart-box" style="height:320px"><canvas id="roi-ch-tornado"></canvas></div>
-                <p style="font-size:11px;color:#6b7280;margin:6px 0 0">VAL = TCO<sub>conv</sub> − TCO<sub>robô</sub> + benefícios descontados. Positivo favorece o robô.</p>
+                <p style="font-size:11px;color:#6b7280;margin:6px 0 0"><?= roiL('VAL = TCO<sub>conv</sub> − TCO<sub>robô</sub> + benefícios descontados. Positivo favorece o robô.',
+                    'NPV = TCO<sub>conv</sub> − TCO<sub>robot</sub> + discounted benefits. Positive favours the robot.') ?></p>
             </div>
         </div>
         <div class="roi-card">
-            <div class="roi-card-h"><h3>Cenários de sensibilidade</h3>
-                <span style="font-size:11px;color:#6b7280">Variação personalizada: <input type="number" id="roi-sens-pct" value="20" style="width:52px;padding:2px 4px"> %</span></div>
+            <div class="roi-card-h"><h3><?= roiL('Cenários de sensibilidade', 'Sensitivity scenarios') ?></h3>
+                <span style="font-size:11px;color:#6b7280"><?= roiL('Variação do tornado', 'Tornado variation') ?>: <input type="number" id="roi-sens-pct" value="20" style="width:52px;padding:2px 4px"> %</span></div>
             <div class="roi-scroll"><table class="roi-t" id="roi-sens-table"></table></div>
         </div>
     </section>
 
-    <!-- ── Secção Simulações guardadas ── -->
+    <!-- ── Simulações guardadas / Saved simulations ── -->
     <section data-sec="saved" style="display:none">
         <div class="roi-bar">
-            <input type="text" id="roi-filter" placeholder="Filtrar por nome ou grupo…" style="flex:1;min-width:160px">
-            <button class="roi-btn" id="roi-sel-all">☑ Seleccionar todas</button>
-            <button class="roi-btn" id="roi-exp-csv">⬇ CSV (macro-dados)</button>
-            <button class="roi-btn" id="roi-exp-json">⬇ JSON completo</button>
-            <button class="roi-btn pri" id="roi-cmp-pres">🎞️ Comparar na apresentação</button>
+            <input type="text" id="roi-filter" placeholder="<?= roiL('Filtrar por nome ou grupo…', 'Filter by name or group…') ?>" style="flex:1;min-width:160px">
+            <button class="roi-btn" id="roi-sel-all">☑ <?= roiL('Seleccionar todas', 'Select all') ?></button>
+            <button class="roi-btn" id="roi-exp-csv">⬇ <?= roiL('CSV (macro-dados)', 'CSV (key indicators)') ?></button>
+            <button class="roi-btn" id="roi-exp-json">⬇ <?= roiL('JSON completo', 'Full JSON') ?></button>
+            <button class="roi-btn pri" id="roi-cmp-pres">🎞️ <?= roiL('Comparar na apresentação', 'Compare in presentation') ?></button>
         </div>
         <div class="roi-card">
             <div class="roi-scroll"><table class="roi-t" id="roi-saved-table"></table></div>
         </div>
         <div class="roi-card" id="roi-cmp-card" style="display:none">
-            <div class="roi-card-h"><h3>Comparação de simulações seleccionadas</h3><button class="roi-dl" data-chart="compare">⬇ PNG</button></div>
+            <div class="roi-card-h"><h3><?= roiL('Comparação de simulações seleccionadas', 'Comparison of selected simulations') ?></h3><button class="roi-dl" data-chart="compare">⬇ PNG</button></div>
             <div class="roi-chart-box" style="height:300px"><canvas id="roi-ch-compare"></canvas></div>
         </div>
     </section>
 
-    <!-- ── Secção Apresentação ── -->
+    <!-- ── Apresentação / Presentation ── -->
     <section data-sec="pres" style="display:none">
         <div class="roi-bar roi-noprint">
-            <span style="font-size:12px;color:#4b5563">4 diapositivos (estrutura do guia: Tarefa &amp; Robô · Técnico &amp; Económico · Ambiental · Recomendação). Use <b>Imprimir / PDF</b> em formato paisagem.</span>
+            <span style="font-size:12px;color:#4b5563"><?= roiL('4 diapositivos (estrutura do guia: Tarefa &amp; Robô · Técnico &amp; Económico · Ambiental · Recomendação). Use <b>Imprimir / PDF</b> em formato paisagem.',
+                '4 slides (guide structure: Task &amp; Robot · Technical &amp; Economic · Environmental · Recommendation). Use <b>Print / PDF</b> in landscape.') ?></span>
             <span style="flex:1"></span>
-            <button class="roi-btn" id="roi-pres-md">⬇ Resumo (Markdown)</button>
-            <button class="roi-btn pri" id="roi-pres-print-btn">🖨️ Imprimir / PDF</button>
+            <button class="roi-btn" id="roi-pres-md">⬇ <?= roiL('Resumo (Markdown)', 'Summary (Markdown)') ?></button>
+            <button class="roi-btn pri" id="roi-pres-print-btn">🖨️ <?= roiL('Imprimir / PDF', 'Print / PDF') ?></button>
         </div>
-        <label class="roi-f roi-noprint" style="margin-bottom:10px"><span class="roi-f-l">Recomendação final (texto livre, aparece no diapositivo 4)</span>
-            <textarea id="roi-reco" rows="3" placeholder="Ex.: Recomenda-se a adopção a partir de X ha, ou via RaaS…"></textarea></label>
+        <label class="roi-f roi-noprint" style="margin-bottom:10px"><span class="roi-f-l"><?= roiL('Recomendação final (texto livre, aparece no diapositivo 4)', 'Final recommendation (free text, shown on slide 4)') ?></span>
+            <textarea id="roi-reco" rows="3" placeholder="<?= roiL('Ex.: Recomenda-se a adopção a partir de X ha, ou via RaaS…', 'E.g. Adoption is recommended above X ha, or via RaaS…') ?>"></textarea></label>
         <div id="roi-pres-print" class="roi-slides"></div>
     </section>
 </div>
