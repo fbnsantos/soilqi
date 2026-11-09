@@ -57,6 +57,13 @@ $availableTabs = [
         'requiresAuth'  => true,
         'requiresAdmin' => false
     ],
+    'roi' => [
+        'title' => 'Calculadora ROI',
+        'icon'  => '💶',
+        'file'  => 'tabs/roi.php',
+        'requiresAuth'  => true,
+        'requiresAdmin' => false
+    ],
     'sharing' => [
         'title' => 'Partilha',
         'icon'  => '🤝',
@@ -602,6 +609,11 @@ if (!$isLoggedIn) {
         const activeTab = '<?php echo $activeTab; ?>';
     </script>
     
+    <?php if ($activeTab === 'roi'): ?>
+    <!-- Chart.js — gráficos da Calculadora ROI -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <?php endif; ?>
+
     <!-- Load tab-specific JavaScript if exists -->
     <?php
     $tabJsFile = 'assets/js/tabs/' . $activeTab . '.js';
