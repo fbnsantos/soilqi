@@ -1035,8 +1035,127 @@ function onInput() {
     clearTimeout(_t); _t = setTimeout(recalc, 180);
 }
 
+// ── Ajuda por campo (ícone "?") / Per-field help ("?" icon) ─────────────────
+// Chave = data-k sem o prefixo conv./robot. / Key = data-k without the conv./robot. prefix
+const HELP = {
+    'scenario.crop': L('Cultura onde a operação é feita (ex.: vinha, pomar de kiwi). Só serve para identificar a simulação.',
+        'Crop where the operation takes place (e.g. vineyard, kiwifruit orchard). Used only to identify the simulation.'),
+    'scenario.operation': L('Tarefa agrícola que está a ser comparada (ex.: pulverização, monda, polinização).',
+        'Agricultural task being compared (e.g. spraying, weeding, pollination).'),
+    'scenario.area': L('Área A (ha) onde a operação é feita em cada passagem. Com N define o trabalho anual Q = A × N.',
+        'Area A (ha) covered in each pass. Together with N it defines the annual work Q = A × N.'),
+    'scenario.ops_per_year': L('Número de vezes N que a operação é repetida por ano (ex.: 6 tratamentos). Horas anuais H = A·N / P.',
+        'Number of times N the operation is repeated per year (e.g. 6 treatments). Annual hours H = A·N / P.'),
+    'scenario.func_unit': L('Unidade em que se exprimem custo e emissões por unidade (ex.: ha tratado, kg colhido). Por omissão, ha × operação.',
+        'Unit used to express cost and emissions per unit (e.g. ha treated, kg harvested). Default is ha × operation.'),
+    'scenario.window_days': L('Dias disponíveis para fazer a operação em toda a área (ex.: 7 dias na polinização). Com as horas úteis/dia verifica se uma máquina chega. 0 = sem limite.',
+        'Days available to complete the operation over the whole area (e.g. 7 days for pollination). With working hours/day it checks whether one machine is enough. 0 = no limit.'),
+    'scenario.discount_rate': L('Taxa r usada para descontar custos futuros para o presente (TCO e VAL). O guia usa 5 %.',
+        'Rate r used to discount future costs to present value (TCO and NPV). The guide uses 5%.'),
+    'scenario.horizon': L('Número de anos T da análise (o guia usa 10 anos). O valor residual é recuperado no último ano.',
+        'Number of years T in the analysis (the guide uses 10 years). The residual value is recovered in the final year.'),
+    'robot.extra_benefit': L('Ganho anual extra do robô que não é custo evitado (ex.: mais produção ou qualidade). Entra no VAL/ROI, não no TCO. Justifique a fonte.',
+        'Extra yearly gain from the robot that is not an avoided cost (e.g. higher yield or quality). Added to NPV/ROI, not to TCO. Justify the source.'),
+    'scenario.scale_units': L('Se a janela operacional não chegar para uma unidade, multiplica o nº de unidades (investimento, manutenção e valor residual).',
+        'If one unit cannot finish within the operational window, multiplies the number of units (investment, maintenance and residual value).'),
+    'scenario.sources': L('Indique a origem de cada valor (catálogo, artigo, entrevista, medição) e assinale os dados estimados. Aparece na apresentação.',
+        'State where each value comes from (catalogue, paper, interview, measurement) and flag estimated data. Shown in the presentation.'),
+    'name': L('Nome da máquina ou solução (ex.: tractor + pulverizador, robô X). Aparece nos gráficos e diapositivos.',
+        'Name of the machine or solution (e.g. tractor + sprayer, robot X). Shown in charts and slides.'),
+    'mode': L('Compra: paga o investimento e todos os custos de operação. Serviço/RaaS: paga uma tarifa por ha a um prestador, sem investimento.',
+        'Purchase: you pay the investment and all running costs. Service/RaaS: you pay a per-ha fee to a provider, with no investment.'),
+    'investment': L('Preço de compra I₀ no ano 0 (máquina + implemento + instalação). Para várias unidades é multiplicado automaticamente.',
+        'Purchase price I₀ in year 0 (machine + implement + set-up). Multiplied automatically when several units are needed.'),
+    'alloc_pct': L('Parte do custo de capital (investimento, manutenção, valor residual) imputada a esta operação. Ex.: 40 % se o tractor também faz outras tarefas.',
+        'Share of the capital cost (investment, maintenance, residual value) allocated to this operation. E.g. 40% if the tractor also does other tasks.'),
+    'residual': L('Valor de revenda Vr da máquina no fim do horizonte. É descontado e subtraído ao TCO.',
+        'Resale value Vr of the machine at the end of the horizon. It is discounted and subtracted from the TCO.'),
+    'useful_life': L('Anos que a máquina dura. Se for inferior ao horizonte, defina um custo de substituição (aparece um aviso).',
+        'Years the machine lasts. If shorter than the horizon, set a replacement cost (a warning is shown).'),
+    'replacement_cost': L('Custo Rₜ de substituir uma peça importante durante o horizonte (ex.: baterias, implemento). Ocorre uma vez, no ano indicado.',
+        'Cost Rₜ of replacing a major part during the horizon (e.g. batteries, implement). Paid once, in the year given.'),
+    'replacement_year': L('Ano (1 a horizonte) em que é paga a substituição. 0 = nenhuma substituição.',
+        'Year (1 to horizon) in which the replacement is paid. 0 = no replacement.'),
+    'service_fee': L('Preço cobrado pelo prestador por hectare e por operação. Inclui máquina, energia e manutenção.',
+        'Price charged by the provider per hectare and per operation. Includes machine, energy and maintenance.'),
+    'service_fixed': L('Valor fixo pago por ano ao prestador, independente da área (ex.: assinatura, deslocação).',
+        'Fixed amount paid to the provider each year, regardless of area (e.g. subscription, travel).'),
+    'capacity': L('Capacidade efectiva P: hectares feitos por hora de trabalho real, incluindo viragens, carregamentos, reabastecimentos e paragens.',
+        'Effective capacity P: hectares covered per hour of real work, including turning, charging, refilling and stops.'),
+    'hours_per_day': L('Horas por dia em que a máquina pode trabalhar (um robô pode trabalhar de noite). Usado com a janela operacional.',
+        'Hours per day the machine can work (a robot may work at night). Used with the operational window.'),
+    'energy_type': L('Tipo de energia. Define a unidade do consumo (L ou kWh) e o factor de emissão sugerido.',
+        'Energy type. Sets the consumption unit (L or kWh) and the suggested emission factor.'),
+    'consumption': L('Consumo de energia EC por hora de trabalho (L/h ou kWh/h). Energia anual = H × EC.',
+        'Energy consumption EC per working hour (L/h or kWh/h). Annual energy = H × EC.'),
+    'energy_price': L('Preço de cada litro ou kWh, sem IVA recuperável.',
+        'Price per litre or kWh, excluding recoverable VAT.'),
+    'ef': L('Factor de emissão EF: kg de CO₂ por unidade de energia. Gasóleo 2,68 kg CO₂/L; electricidade 0,20 kg CO₂e/kWh. Emissões E = H × EC × EF.',
+        'Emission factor EF: kg of CO₂ per unit of energy. Diesel 2.68 kg CO₂/L; electricity 0.20 kg CO₂e/kWh. Emissions E = H × EC × EF.'),
+    'labour_ratio': L('Horas de pessoa por cada hora de máquina. Tractor ≈ 1,0; robô com supervisão ≈ 0,1–0,3 (raramente 0).',
+        'Person-hours per machine hour. Tractor ≈ 1.0; supervised robot ≈ 0.1–0.3 (rarely 0).'),
+    'labour_cost': L('Custo total por hora do operador ou supervisor (salário + encargos).',
+        'Total hourly cost of the operator or supervisor (wage + social charges).'),
+    'maintenance': L('Custo anual para manter o equipamento a funcionar: revisões, peças de desgaste, reparações, software. Multiplicado pela imputação.',
+        'Annual cost to keep the equipment running: servicing, wear parts, repairs, software. Multiplied by the allocation share.'),
+    'other': L('Outros custos anuais: seguro, transporte, armazenamento, licenças, comunicações.',
+        'Other annual costs: insurance, transport, storage, licences, connectivity.'),
+    'input_cost': L('Custo por ha e por operação do produto realmente necessário (pólen, fitofármaco, adubo…). Deixe 0 se for igual nas duas opções.',
+        'Cost per ha and per operation of the input actually needed (pollen, pesticide, fertiliser…). Leave 0 if the same for both options.'),
+    'input_waste': L('Percentagem do produto perdida (deriva, sobreposição). Custo real = consumíveis / (1 − desperdício). Cf. Pinheiro et al. (2026).',
+        'Share of the input that is lost (drift, overlap). Actual cost = inputs / (1 − waste). Cf. Pinheiro et al. (2026).'),
+    'reco': L('A sua conclusão: adoptar ou não, a partir de que área, com compra ou serviço, e que dados faltam. Aparece no diapositivo 4.',
+        'Your conclusion: adopt or not, above which area, by purchase or service, and what data is missing. Shown on slide 4.'),
+};
+
+function attachHelp() {
+    const tip = document.createElement('div');
+    tip.className = 'roi-tip'; tip.setAttribute('role', 'tooltip'); tip.hidden = true;
+    document.body.appendChild(tip);
+    let pinned = null;
+    const show = (icon) => {
+        tip.textContent = icon.dataset.help; tip.hidden = false;
+        const r = icon.getBoundingClientRect(), w = Math.min(300, window.innerWidth - 16);
+        tip.style.maxWidth = w + 'px';
+        const tw = tip.offsetWidth, th = tip.offsetHeight;
+        const left = Math.max(8, Math.min(r.left + r.width / 2 - tw / 2, window.innerWidth - tw - 8));
+        const top = r.top - th - 8 >= 8 ? r.top - th - 8 : r.bottom + 8;
+        tip.style.left = left + 'px'; tip.style.top = top + 'px';
+    };
+    const hide = () => { tip.hidden = true; pinned = null; };
+
+    $$('#roi-app label.roi-f').forEach(lab => {
+        const ctl = lab.querySelector('[data-k], #roi-reco');
+        const span = lab.querySelector('.roi-f-l');
+        if (!ctl || !span) return;
+        const k = ctl.id === 'roi-reco' ? 'reco' : ctl.dataset.k;
+        const text = HELP[k] || HELP[k.replace(/^(conv|robot)\./, '')] || lab.title;
+        if (!text) return;
+        lab.removeAttribute('title');
+        const ic = document.createElement('span');
+        ic.className = 'roi-help'; ic.textContent = '?'; ic.tabIndex = 0;
+        ic.dataset.help = text; ic.setAttribute('aria-label', text); ic.setAttribute('role', 'button');
+        span.appendChild(ic);
+    });
+
+    const app = $('#roi-app');
+    app.addEventListener('mouseover', e => { const i = e.target.closest('.roi-help'); if (i && !pinned) show(i); });
+    app.addEventListener('mouseout', e => { if (e.target.closest('.roi-help') && !pinned) tip.hidden = true; });
+    app.addEventListener('focusin', e => { const i = e.target.closest('.roi-help'); if (i) show(i); });
+    app.addEventListener('focusout', e => { if (e.target.closest('.roi-help') && !pinned) tip.hidden = true; });
+    // Clique/toque fixa a ajuda (e não foca o campo) / Click/tap pins the help (and does not focus the field)
+    document.addEventListener('click', e => {
+        const i = e.target.closest('.roi-help');
+        if (i) { e.preventDefault(); e.stopPropagation(); if (pinned === i) hide(); else { pinned = i; show(i); } return; }
+        if (pinned) hide();
+    }, true);
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
+    window.addEventListener('scroll', hide, true);
+}
+
 function init() {
     if (!$('#roi-app')) return;
+    attachHelp();
 
     // Memorizar idioma escolhido / Remember the chosen language
     try { document.cookie = `soilqi_lang=${LANG}; path=/; max-age=31536000; SameSite=Lax`; } catch (e) { /* ignore */ }

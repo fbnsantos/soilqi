@@ -304,6 +304,10 @@ function roiOptionBlock(string $p, string $title, string $color): string
 .roi-f{display:flex;flex-direction:column;gap:2px;font-size:11px;color:#4b5563}
 .roi-f-wide{grid-column:1/-1;margin-bottom:6px}
 .roi-f-l em{font-style:normal;color:#9ca3af}
+.roi-help{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;margin-left:4px;border-radius:50%;background:#e0e7ff;color:#4338ca;font-size:10px;font-weight:700;font-style:normal;line-height:1;cursor:help;vertical-align:1px;user-select:none}
+.roi-help:hover,.roi-help:focus{background:#4338ca;color:#fff;outline:none}
+.roi-tip{position:fixed;z-index:10000;max-width:300px;padding:8px 10px;border-radius:8px;background:#1f2937;color:#f9fafb;font-size:12px;line-height:1.4;box-shadow:0 6px 20px rgba(0,0,0,.25);pointer-events:none}
+@media print{.roi-help,.roi-tip{display:none!important}}
 .roi-f input,.roi-f select,.roi-f textarea{padding:5px 7px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;width:100%;box-sizing:border-box;font-family:inherit}
 .roi-f input:focus,.roi-f select:focus{outline:2px solid #c7d2fe;border-color:#818cf8}
 .roi-opt{border-left:4px solid var(--oc);padding:8px 0 8px 10px;margin-bottom:12px}
