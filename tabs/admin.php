@@ -377,6 +377,78 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn && $isAdmin) {
                 }, $filenames));
                 break;
 
+            // ── SEO e Indexação ──────────────────────────────────────────────
+            case 'get_seo_settings':
+                $response['success']  = true;
+                $response['settings'] = seoSettings(true);
+                $response['files']    = seoFilesStatus();
+                break;
+
+            case 'save_seo_settings':
+                $errors = [];
+                foreach (array_keys(SEO_DEFAULTS) as $k) {
+                    if (in_array($k, ['seo_indexnow_key', 'seo_files_generated_at'], true) || !array_key_exists($k, $_POST)) {
+                        continue;
+                    }
+                    $v = trim((string) $_POST[$k]);
+                    if ($k === 'seo_site_url' && $v !== '' && !preg_match('#^https?://[^\s/]+$#i', rtrim($v, '/'))) {
+                        $errors[] = 'URL do site inválido (ex.: https://soilqi.com).'; continue;
+                    }
+                    if ($k === 'seo_ga_id' && $v !== '' && !preg_match('/^G-[A-Z0-9]+$/', $v)) {
+                        $errors[] = 'ID do Google Analytics inválido (formato G-XXXXXXX).'; continue;
+                    }
+                    if (in_array($k, ['seo_allow_indexing', 'seo_indexnow_enabled'], true)) {
+                        $v = $v === '1' ? '1' : '0';
+                    }
+                    if (in_array($k, ['seo_google_verification', 'seo_bing_verification'], true)) {
+                        // Aceita a meta tag inteira colada e extrai só o content
+                        if (preg_match('/content=["\']([^"\']+)["\']/i', $v, $mm)) $v = $mm[1];
+                        $v = preg_replace('/[^A-Za-z0-9_\-]/', '', $v);
+                    }
+                    if ($k === 'seo_site_url') $v = rtrim($v, '/');
+                    setSystemSetting($k, function_exists('mb_substr') ? mb_substr($v, 0, 5000) : substr($v, 0, 5000));
+                }
+                seoSettings(true);
+                $written = seoWriteFiles();   // regenerar logo os ficheiros
+                $failed  = array_keys(array_filter($written, fn($w) => !$w['ok']));
+                $response['success'] = !$errors;
+                $response['message'] = $errors ? implode(' ', $errors)
+                    : ('Definições SEO guardadas.' . ($failed
+                        ? ' ⚠️ Não foi possível gravar: ' . implode(', ', $failed) . ' (permissões da pasta).'
+                        : ' Ficheiros robots.txt, sitemap.xml e llms.txt regenerados.'));
+                $response['files'] = seoFilesStatus();
+                break;
+
+            case 'seo_generate_files':
+                $written = seoWriteFiles();
+                $failed  = array_filter($written, fn($w) => !$w['ok']);
+                $response['success'] = !$failed;
+                $response['message'] = $failed
+                    ? 'Falhou a gravação de: ' . implode(', ', array_keys($failed)) . '. Verifique as permissões de escrita na raiz do site.'
+                    : 'Ficheiros gerados: ' . implode(', ', array_keys($written)) . '.';
+                $response['files'] = seoFilesStatus();
+                break;
+
+            case 'seo_preview_file':
+                $name  = (string) ($_POST['file'] ?? '');
+                $files = seoBuildFiles();
+                if (!isset($files[$name])) { $response['message'] = 'Ficheiro desconhecido.'; break; }
+                $response['success'] = true;
+                $response['content'] = $files[$name];
+                break;
+
+            case 'seo_indexnow_ping':
+                [$ok, $msg] = seoIndexNowPing();
+                $response['success'] = $ok;
+                $response['message'] = $msg;
+                break;
+
+            // ── Visitantes ───────────────────────────────────────────────────
+            case 'get_visitor_stats':
+                $response['success'] = true;
+                $response['report']  = visReport((int) ($_POST['days'] ?? 30));
+                break;
+
             case 'save_mqtt_settings':
                 $allowed = ['mqtt_host','mqtt_port','mqtt_user','mqtt_pass','mqtt_topic'];
                 $saved   = [];
@@ -589,10 +661,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isLoggedIn && $isAdmin) {
                 }
                 break;
         }
-    } catch (PDOException $e) {
+    } catch (Throwable $e) {
         $response['message'] = 'Erro no sistema: ' . $e->getMessage();
     }
-    
+
     echo json_encode($response);
     exit;
 }
@@ -655,8 +727,73 @@ try {
     </div>
 </div>
 
+<style>
+.vs-range{display:flex;gap:4px;flex-wrap:wrap}
+.vs-range .btn.on{background:#2d6a4f;color:#fff;border-color:#2d6a4f}
+.vs-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:14px 0}
+.vs-tile{background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px}
+.vs-tile b{display:block;font-size:24px;color:#1a3a2a;font-variant-numeric:tabular-nums}
+.vs-tile span{display:block;font-size:12px;color:#374151}
+.vs-tile small{display:block;font-size:11px;color:#9ca3af;margin-top:2px}
+.vs-chart{display:flex;gap:8px;height:160px;margin-top:6px}
+.vs-yaxis{display:flex;flex-direction:column;justify-content:space-between;font-size:11px;color:#9ca3af;text-align:right;min-width:28px}
+.vs-bars{flex:1;display:flex;align-items:flex-end;gap:2px;border-bottom:1px solid #d1d5db;border-left:1px solid #d1d5db;padding:0 2px;position:relative}
+.vs-bar{flex:1;height:100%;display:flex;align-items:flex-end;position:relative;outline:none}
+.vs-fill{width:100%;background:#2d6a4f;border-radius:2px 2px 0 0;min-height:0}
+.vs-bar:hover .vs-fill,.vs-bar:focus .vs-fill{background:#40916c}
+.vs-tip{display:none;position:absolute;bottom:calc(100% + 4px);left:50%;transform:translateX(-50%);background:#1f2937;color:#fff;font-size:11px;padding:5px 8px;border-radius:6px;white-space:nowrap;z-index:5;pointer-events:none}
+.vs-bar:hover .vs-tip,.vs-bar:focus .vs-tip{display:block}
+.vs-xaxis{display:flex;justify-content:space-between;font-size:11px;color:#9ca3af;margin:4px 0 0 36px}
+.vs-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-top:16px}
+.vs-card{border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px}
+.vs-card h4{margin:0 0 8px;font-size:13px;color:#1a3a2a}
+.vs-card table{width:100%;border-collapse:collapse;font-size:12px}
+.vs-card th{font-weight:600;color:#9ca3af;font-size:11px;text-align:right;padding:2px 4px}
+.vs-card td{padding:4px;vertical-align:top;border-top:1px solid #f3f4f6}
+.vs-card td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;width:1%}
+.vs-lbl{word-break:break-all}
+.vs-meter{height:4px;background:#f3f4f6;border-radius:2px;margin-top:3px}
+.vs-meter span{display:block;height:100%;background:#95d5b2;border-radius:2px}
+.vs-muted{color:#9ca3af}
+.seo-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.seo-grid .full{grid-column:1/-1}
+.seo-f label{font-size:12px;font-weight:700;color:#374151;display:block;margin-bottom:5px}
+.seo-f label small{font-weight:400;color:#9ca3af;margin-left:4px}
+.seo-f input[type=text],.seo-f input[type=url],.seo-f textarea{width:100%;padding:9px 12px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;box-sizing:border-box;font-family:inherit}
+.seo-f textarea{font-size:13px;resize:vertical}
+.seo-count{font-size:11px;color:#9ca3af;text-align:right;margin-top:2px}
+.seo-count.bad{color:#b45309}
+.seo-h{font-size:13px;font-weight:700;color:#1a3a2a;margin:18px 0 10px;padding-top:14px;border-top:1px solid #f3f4f6}
+.seo-serp{border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;background:#fff;max-width:620px;font-family:arial,sans-serif}
+.seo-serp .u{font-size:12px;color:#4d5156}
+.seo-serp .t{font-size:18px;color:#1a0dab;margin:2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.seo-serp .d{font-size:13px;color:#4d5156;line-height:1.5}
+.seo-files td,.seo-files th{padding:6px 8px;font-size:13px;text-align:left;border-bottom:1px solid #f3f4f6}
+.seo-pre{max-height:320px;overflow:auto;background:#0f172a;color:#e2e8f0;font-size:12px;padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all;margin-top:10px}
+@media (max-width:700px){.seo-grid{grid-template-columns:1fr}}
+</style>
+
 <!-- Painel de gestão -->
 <div class="admin-panels">
+    <!-- Monitorização de Visitantes -->
+    <div class="section">
+        <div class="section-title">
+            <h3>📈 Visitantes</h3>
+            <div class="vs-range" id="vs-range">
+                <button class="btn btn-secondary btn-sm" data-days="7">7 dias</button>
+                <button class="btn btn-secondary btn-sm on" data-days="30">30 dias</button>
+                <button class="btn btn-secondary btn-sm" data-days="90">90 dias</button>
+                <button class="btn btn-secondary btn-sm" data-days="365">12 meses</button>
+            </div>
+        </div>
+        <p style="color:#6b7280;font-size:14px;margin-bottom:0;">
+            Contagem feita pelo próprio site: sem cookies, sem serviços externos e sem guardar IPs.
+            Robôs e as visitas de administradores não contam; as visitas de utilizadores com sessão contam,
+            mas não se guarda quem são. Os dados com mais de 13 meses são apagados automaticamente.
+        </p>
+        <div id="vs-body"><div class="vs-muted" style="padding:20px 0;">A carregar…</div></div>
+    </div>
+
     <!-- Gestão de Utilizadores -->
     <div class="section">
         <div class="section-title">
@@ -820,6 +957,96 @@ try {
                 <button class="btn btn-primary btn-sm" onclick="addLandingVideo()" style="margin-bottom:1px;">+ Adicionar vídeo</button>
             </div>
         </div>
+    </div>
+
+    <!-- SEO e Indexação -->
+    <div class="section" id="seo-section">
+        <div class="section-title">
+            <h3>🔎 SEO e Indexação</h3>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="btn btn-secondary btn-sm" onclick="generateSeoFiles()">🛠️ Gerar ficheiros</button>
+                <button class="btn btn-primary btn-sm" onclick="saveSeoSettings()">💾 Guardar e gerar</button>
+            </div>
+        </div>
+        <p style="color:#6b7280;font-size:14px;margin-bottom:16px;">
+            Controla o que os motores de pesquisa (Google, Bing…) e os assistentes de IA veem da página pública do SoilQI.
+            As páginas internas exigem sessão e não são indexadas. Ao guardar, os ficheiros
+            <code>robots.txt</code>, <code>sitemap.xml</code> e <code>llms.txt</code> são regenerados na raiz do site.
+        </p>
+
+        <div class="seo-grid">
+            <div class="seo-f"><label>URL do site <small>sem barra final</small></label>
+                <input type="url" data-seo="seo_site_url" placeholder="https://soilqi.com"></div>
+            <div class="seo-f"><label>Nome do site</label>
+                <input type="text" data-seo="seo_site_name" placeholder="SoilQI"></div>
+            <div class="seo-f full" style="display:flex;gap:24px;flex-wrap:wrap;">
+                <label style="display:flex;align-items:center;gap:8px;font-weight:600;cursor:pointer;">
+                    <input type="checkbox" data-seo="seo_allow_indexing"> Permitir indexação pelos motores de pesquisa
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;font-weight:600;cursor:pointer;">
+                    <input type="checkbox" data-seo="seo_indexnow_enabled"> Usar IndexNow (Bing, Yandex, Seznam…)
+                </label>
+            </div>
+        </div>
+
+        <div class="seo-h">🇵🇹 Português</div>
+        <div class="seo-grid">
+            <div class="seo-f full"><label>Título <small>ideal 30–60 caracteres; vazio = título da Página de Entrada</small></label>
+                <input type="text" data-seo="seo_title_pt" data-max="60"><div class="seo-count"></div></div>
+            <div class="seo-f full"><label>Descrição <small>ideal 70–160 caracteres</small></label>
+                <textarea rows="2" data-seo="seo_desc_pt" data-max="160"></textarea><div class="seo-count"></div></div>
+            <div class="full"><div class="seo-serp" id="seo-serp-pt"></div></div>
+        </div>
+
+        <div class="seo-h">🇬🇧 English</div>
+        <div class="seo-grid">
+            <div class="seo-f full"><label>Title <small>30–60 characters; empty = landing-page title</small></label>
+                <input type="text" data-seo="seo_title_en" data-max="60"><div class="seo-count"></div></div>
+            <div class="seo-f full"><label>Description <small>70–160 characters</small></label>
+                <textarea rows="2" data-seo="seo_desc_en" data-max="160"></textarea><div class="seo-count"></div></div>
+            <div class="full"><div class="seo-serp" id="seo-serp-en"></div></div>
+        </div>
+
+        <div class="seo-h">Partilha e dados estruturados</div>
+        <div class="seo-grid">
+            <div class="seo-f full"><label>Palavras-chave <small>separadas por vírgulas (pouco peso no Google, usadas no llms.txt)</small></label>
+                <input type="text" data-seo="seo_keywords"></div>
+            <div class="seo-f"><label>Autor</label><input type="text" data-seo="seo_author"></div>
+            <div class="seo-f"><label>Imagem de partilha <small>caminho ou URL, 1200×630</small></label>
+                <input type="text" data-seo="seo_og_image" placeholder="/assets/img/og-image.png"></div>
+            <div class="seo-f"><label>Organização</label><input type="text" data-seo="seo_org_name"></div>
+            <div class="seo-f"><label>URL da organização</label><input type="url" data-seo="seo_org_url"></div>
+        </div>
+
+        <div class="seo-h">Verificação e análise</div>
+        <div class="seo-grid">
+            <div class="seo-f"><label>Google Search Console <small>código da meta tag (pode colar a tag inteira)</small></label>
+                <input type="text" data-seo="seo_google_verification" placeholder="google-site-verification"></div>
+            <div class="seo-f"><label>Bing Webmaster Tools <small>código msvalidate.01</small></label>
+                <input type="text" data-seo="seo_bing_verification"></div>
+            <div class="seo-f"><label>Google Analytics 4 <small>opcional, G-XXXXXXX; usa cookies</small></label>
+                <input type="text" data-seo="seo_ga_id" placeholder="G-…"></div>
+        </div>
+
+        <div class="seo-h">Ficheiros de indexação</div>
+        <div class="seo-grid">
+            <div class="seo-f"><label>URLs públicos adicionais <small>um por linha, entram no sitemap e no llms.txt</small></label>
+                <textarea rows="3" data-seo="seo_extra_urls" placeholder="/assets/docs/guia.pdf&#10;https://soilqi.com/outra-pagina.php"></textarea></div>
+            <div class="seo-f"><label>Regras extra do robots.txt <small>uma por linha</small></label>
+                <textarea rows="3" data-seo="seo_robots_extra" placeholder="Disallow: /uploads/privado/"></textarea></div>
+        </div>
+        <table class="seo-files" style="width:100%;border-collapse:collapse;margin-top:14px;">
+            <thead><tr><th>Ficheiro</th><th>Estado</th><th>Atualizado</th><th></th></tr></thead>
+            <tbody id="seo-files-tbody"><tr><td colspan="4" style="color:#9ca3af;">A carregar…</td></tr></tbody>
+        </table>
+        <pre class="seo-pre" id="seo-preview" style="display:none;"></pre>
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <button class="btn btn-secondary btn-sm" onclick="pingIndexNow()">📣 Avisar IndexNow</button>
+            <a class="btn btn-secondary btn-sm" href="https://search.google.com/search-console" target="_blank" rel="noopener">Google Search Console ↗</a>
+            <a class="btn btn-secondary btn-sm" href="https://www.bing.com/webmasters" target="_blank" rel="noopener">Bing Webmaster Tools ↗</a>
+            <a class="btn btn-secondary btn-sm" href="https://search.google.com/test/rich-results" target="_blank" rel="noopener">Teste de dados estruturados ↗</a>
+        </div>
+        <div id="seo-status" style="margin-top:10px;font-size:13px;color:#6b7280;"></div>
     </div>
 
     <!-- Parâmetros de Campo -->

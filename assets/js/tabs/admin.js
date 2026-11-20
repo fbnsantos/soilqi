@@ -569,6 +569,8 @@ document.addEventListener('DOMContentLoaded', function() {
         loadAdminParams();
         loadLandingEditor();
         loadMqttSettings();
+        loadSeoSettings();
+        initVisitorStats();
 
         // Atalhos de teclado para o SQL editor
         const sqlQuery = document.getElementById('sql-query');
@@ -908,4 +910,210 @@ function escHtmlAdmin(s) {
     return String(s || '')
         .replace(/&/g,'&amp;').replace(/</g,'&lt;')
         .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+// ══════════════════════════════════════════════════════════════════════════
+// SEO e Indexação
+// ══════════════════════════════════════════════════════════════════════════
+function adminPost(action, extra) {
+    const fd = new FormData();
+    fd.append('action', action);
+    Object.entries(extra || {}).forEach(([k, v]) => fd.append(k, v));
+    return fetch('?tab=admin', { method: 'POST', body: fd }).then(r => r.json());
+}
+
+function seoStatus(msg, ok) {
+    const el = document.getElementById('seo-status');
+    if (!el) return;
+    el.style.color = ok === undefined ? '#6b7280' : (ok ? '#166534' : '#991b1b');
+    el.textContent = msg;
+}
+
+function seoFields() { return document.querySelectorAll('#seo-section [data-seo]'); }
+
+function seoUpdateCounts() {
+    document.querySelectorAll('#seo-section [data-max]').forEach(el => {
+        const c = el.parentElement.querySelector('.seo-count');
+        if (!c) return;
+        const n = el.value.trim().length, max = +el.dataset.max, min = max === 60 ? 30 : 70;
+        c.textContent = n ? `${n} / ${max}` : '';
+        c.classList.toggle('bad', n > 0 && (n > max || n < min));
+    });
+    ['pt', 'en'].forEach(l => {
+        const box = document.getElementById('seo-serp-' + l);
+        if (!box) return;
+        const v = k => (document.querySelector(`#seo-section [data-seo="${k}"]`) || {}).value || '';
+        const base = (v('seo_site_url') || 'https://soilqi.com').replace(/\/+$/, '');
+        const title = v('seo_title_' + l).trim() || (l === 'pt' ? '(título da Página de Entrada)' : '(landing-page title)');
+        const desc = v('seo_desc_' + l).trim();
+        box.innerHTML = `<div class="u">${escHtmlAdmin(base.replace(/^https?:\/\//, ''))} › index.php${l === 'en' ? '?lang=en' : ''}</div>`
+            + `<div class="t">${escHtmlAdmin(title)}</div>`
+            + `<div class="d">${escHtmlAdmin(desc.length > 160 ? desc.slice(0, 157) + '…' : desc)}</div>`;
+    });
+}
+
+function renderSeoFiles(files) {
+    const tb = document.getElementById('seo-files-tbody');
+    if (!tb) return;
+    tb.innerHTML = (files || []).map(f => {
+        const label = /^[a-f0-9]{32}\.txt$/.test(f.name) ? `${f.name} <span style="color:#9ca3af">(chave IndexNow)</span>` : f.name;
+        const state = f.exists ? `✅ ${Number(f.bytes).toLocaleString('pt-PT')} bytes` : '<span style="color:#b45309">⚠️ não existe</span>';
+        return `<tr><td><code>${label}</code></td><td>${state}</td><td>${f.modified || '—'}</td>
+            <td style="text-align:right;white-space:nowrap;">
+              <button class="btn btn-secondary btn-sm" onclick="previewSeoFile('${f.name}')">👁️ Pré-visualizar</button>
+              ${f.exists ? `<a class="btn btn-secondary btn-sm" href="${escHtmlAdmin(f.url)}" target="_blank" rel="noopener">Abrir ↗</a>` : ''}
+            </td></tr>`;
+    }).join('');
+}
+
+function loadSeoSettings() {
+    const sec = document.getElementById('seo-section');
+    if (!sec) return;
+    sec.addEventListener('input', seoUpdateCounts);
+    adminPost('get_seo_settings').then(data => {
+        if (!data.success) { seoStatus('❌ ' + (data.message || 'Erro ao carregar.'), false); return; }
+        seoFields().forEach(el => {
+            const v = data.settings[el.dataset.seo] ?? '';
+            if (el.type === 'checkbox') el.checked = v === '1'; else el.value = v;
+        });
+        renderSeoFiles(data.files);
+        seoUpdateCounts();
+        if (data.settings.seo_files_generated_at) seoStatus('Ficheiros gerados pela última vez em ' + data.settings.seo_files_generated_at + '.');
+    }).catch(() => seoStatus('❌ Erro de rede.', false));
+}
+
+function saveSeoSettings() {
+    const extra = {};
+    seoFields().forEach(el => { extra[el.dataset.seo] = el.type === 'checkbox' ? (el.checked ? '1' : '0') : el.value; });
+    if (extra.seo_allow_indexing === '0' && !confirm('A indexação vai ficar bloqueada: o robots.txt passa a "Disallow: /" e as páginas ficam "noindex". Continuar?')) return;
+    seoStatus('⏳ A guardar…');
+    adminPost('save_seo_settings', extra).then(data => {
+        seoStatus((data.success ? '✅ ' : '❌ ') + (data.message || ''), data.success);
+        if (data.files) renderSeoFiles(data.files);
+    }).catch(() => seoStatus('❌ Erro de rede.', false));
+}
+
+function generateSeoFiles() {
+    seoStatus('⏳ A gerar ficheiros…');
+    adminPost('seo_generate_files').then(data => {
+        seoStatus((data.success ? '✅ ' : '❌ ') + (data.message || ''), data.success);
+        if (data.files) renderSeoFiles(data.files);
+    }).catch(() => seoStatus('❌ Erro de rede.', false));
+}
+
+function previewSeoFile(name) {
+    const pre = document.getElementById('seo-preview');
+    if (pre.style.display !== 'none' && pre.dataset.file === name) { pre.style.display = 'none'; return; }
+    adminPost('seo_preview_file', { file: name }).then(data => {
+        if (!data.success) { seoStatus('❌ ' + (data.message || 'Erro.'), false); return; }
+        pre.dataset.file = name;
+        pre.textContent = data.content;
+        pre.style.display = 'block';
+    }).catch(() => seoStatus('❌ Erro de rede.', false));
+}
+
+function pingIndexNow() {
+    seoStatus('⏳ A contactar o IndexNow…');
+    adminPost('seo_indexnow_ping').then(data => {
+        seoStatus((data.success ? '✅ ' : '❌ ') + (data.message || ''), data.success);
+    }).catch(() => seoStatus('❌ Erro de rede.', false));
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Visitantes
+// ══════════════════════════════════════════════════════════════════════════
+const VS_COUNTRY = (typeof Intl !== 'undefined' && Intl.DisplayNames) ? new Intl.DisplayNames(['pt-PT'], { type: 'region' }) : null;
+const VS_LANG = (typeof Intl !== 'undefined' && Intl.DisplayNames) ? new Intl.DisplayNames(['pt-PT'], { type: 'language' }) : null;
+const vsN = v => Number(v || 0).toLocaleString('pt-PT');
+
+function initVisitorStats() {
+    const range = document.getElementById('vs-range');
+    if (!range) return;
+    range.addEventListener('click', e => {
+        const b = e.target.closest('[data-days]');
+        if (!b) return;
+        range.querySelectorAll('[data-days]').forEach(x => x.classList.toggle('on', x === b));
+        loadVisitorStats(+b.dataset.days);
+    });
+    loadVisitorStats(30);
+}
+
+function loadVisitorStats(days) {
+    const body = document.getElementById('vs-body');
+    body.style.opacity = '.5';
+    adminPost('get_visitor_stats', { days }).then(data => {
+        body.style.opacity = '';
+        if (!data.success) { body.innerHTML = `<p style="color:#991b1b">❌ ${escHtmlAdmin(data.message || 'Erro.')}</p>`; return; }
+        renderVisitorStats(data.report);
+    }).catch(() => { body.style.opacity = ''; body.innerHTML = '<p style="color:#991b1b">❌ Erro de rede.</p>'; });
+}
+
+function vsChange(now, prev, period) {
+    if (!prev) return now ? 'sem dados no período anterior' : '';
+    const pct = Math.round((now - prev) / prev * 100);
+    return `${pct > 0 ? '+' : pct < 0 ? '−' : ''}${Math.abs(pct)}% vs. ${period} anteriores`;
+}
+
+function vsList(title, rows, opts) {
+    opts = opts || {};
+    const visitors = opts.visitors !== false;
+    if (!rows || !rows.length) {
+        return `<div class="vs-card"><h4>${title}</h4><p class="vs-muted" style="font-size:12px;margin:0;">${opts.empty || 'Sem dados neste período.'}</p></div>`;
+    }
+    const top = Math.max(1, ...rows.map(r => +r.views));
+    return `<div class="vs-card"><h4>${title}</h4><table>
+        <thead><tr><th></th><th>Vis.</th>${visitors ? '<th>Visitantes</th>' : ''}</tr></thead><tbody>`
+        + rows.map(r => `<tr><td><div class="vs-lbl">${opts.label ? opts.label(r) : escHtmlAdmin(r.label)}</div>
+            <div class="vs-meter"><span style="width:${(r.views / top * 100).toFixed(1)}%"></span></div></td>
+            <td class="n">${vsN(r.views)}</td>${visitors ? `<td class="n vs-muted">${vsN(r.visitors)}</td>` : ''}</tr>`).join('')
+        + '</tbody></table></div>';
+}
+
+function renderVisitorStats(r) {
+    const period = r.days === 365 ? '12 meses' : r.days + ' dias';
+    const fmtDay = d => { const p = d.split('-'); return `${+p[2]}/${+p[1]}`; };
+    // Mais de 90 dias: barras por semana, para não ficarem finas demais
+    let bars = [], unit = 'dia';
+    if (r.days > 90) {
+        unit = 'semana';
+        for (let i = 0; i < r.series.length; i += 7) {
+            const w = r.series.slice(i, i + 7);
+            bars.push({ label: fmtDay(w[0].day) + '–' + fmtDay(w[w.length - 1].day),
+                views: w.reduce((a, x) => a + x.views, 0), visitors: w.reduce((a, x) => a + x.visitors, 0) });
+        }
+    } else {
+        bars = r.series.map(d => ({ label: fmtDay(d.day), views: d.views, visitors: d.visitors }));
+    }
+    const max = Math.max(1, ...bars.map(b => b.views));
+    const country = c => { if (c === '?') return 'Desconhecido'; try { return VS_COUNTRY ? (VS_COUNTRY.of(c) || c) : c; } catch (e) { return c; } };
+    const lang = l => { if (l === '?') return 'Desconhecido'; try { return VS_LANG ? (VS_LANG.of(l) || l) : l; } catch (e) { return l; } };
+
+    document.getElementById('vs-body').innerHTML = `
+        <div class="vs-tiles">
+            <div class="vs-tile"><b>${vsN(r.views)}</b><span>visualizações</span><small>${vsChange(r.views, r.prev_views, period)}</small></div>
+            <div class="vs-tile"><b>${vsN(r.visitors)}</b><span>visitantes únicos <span class="vs-muted" style="display:inline">(soma diária)</span></span><small>${vsChange(r.visitors, r.prev_visitors, period)}</small></div>
+            <div class="vs-tile"><b>${vsN(r.entries)}</b><span>entradas no site</span><small>vindas de fora ou diretas</small></div>
+            <div class="vs-tile"><b>${r.visitors ? (r.views / r.visitors).toLocaleString('pt-PT', { maximumFractionDigits: 1 }) : '0'}</b><span>páginas por visitante</span></div>
+            <div class="vs-tile"><b>${vsN(r.today_views)}</b><span>visualizações hoje</span><small>${vsN(r.today_visitors)} visitantes</small></div>
+        </div>
+        <div style="font-size:13px;font-weight:700;color:#1a3a2a;">Visualizações por ${unit}</div>
+        ${r.views ? '' : '<p class="vs-muted" style="font-size:12px;">Ainda não há visitas registadas neste período. As visitas começam a contar a partir de agora.</p>'}
+        <div class="vs-chart" role="img" aria-label="Gráfico de barras: visualizações por ${unit}, máximo ${vsN(max)}">
+            <div class="vs-yaxis"><span>${vsN(max)}</span><span>0</span></div>
+            <div class="vs-bars">${bars.map(b => `<div class="vs-bar" tabindex="0">
+                <span class="vs-fill" style="height:${b.views ? Math.max(1.5, b.views / max * 100).toFixed(1) : 0}%"></span>
+                <span class="vs-tip"><strong>${b.label}</strong><br>${vsN(b.views)} visualizações<br>${vsN(b.visitors)} visitantes</span></div>`).join('')}</div>
+        </div>
+        <div class="vs-xaxis"><span>${bars[0].label}</span><span>${bars[bars.length - 1].label}</span></div>
+        <div class="vs-grid">
+            ${vsList('Páginas mais vistas', r.pages, { label: x => `<a href="${escHtmlAdmin(x.label.replace(/^\//, ''))}" target="_blank" rel="noopener" style="color:#2d6a4f">${escHtmlAdmin(x.label)}</a>` })}
+            ${vsList('Como chegam ao site', r.channels)}
+            ${vsList('Sites de origem', r.sources, { empty: 'Ainda sem visitas vindas de outros sites.' })}
+            ${vsList('Público', r.audience)}
+            ${vsList('Países', r.countries, { label: x => escHtmlAdmin(country(x.label)), empty: 'Sem dados.' })}
+            ${vsList('Idioma do navegador', r.languages, { label: x => escHtmlAdmin(lang(x.label)) })}
+            ${vsList('Dispositivos', r.devices)}
+            ${vsList('Sistemas operativos', r.os)}
+            ${vsList('Navegadores', r.browsers)}
+            ${vsList('Robôs e assistentes de IA (pedidos)', r.bots, { visitors: false, empty: 'Nenhum robô registado neste período.' })}
+        </div>`;
 }

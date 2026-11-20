@@ -1,1 +1,7 @@
 config.php
+
+# Gerados por Administração → SEO e Indexação (lib/seo.php)
+/robots.txt
+/sitemap.xml
+/llms.txt
+/[0-9a-f]*.txt
