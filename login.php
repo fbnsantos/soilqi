@@ -169,7 +169,7 @@ $otherLangLabel = $browserLang === 'pt' ? '🇬🇧 English' : '🇵🇹 Portugu
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- SEO: gerido em Administração → SEO e Indexação (lib/seo.php) -->
     <?= seoHead($browserLang, $lc['title'] ?? '') ?>
-    <link rel="stylesheet" href="assets/css/login.css">
+    <link rel="stylesheet" href="<?= assetUrl('assets/css/login.css') ?>">
     <style>
         /* ── Landing layout ── */
         body { background: #f8fafc; margin: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
@@ -441,6 +441,6 @@ $otherLangLabel = $browserLang === 'pt' ? '🇬🇧 English' : '🇵🇹 Portugu
 
 </div>
 
-<script src="assets/js/login.js"></script>
+<script src="<?= assetUrl('assets/js/login.js') ?>"></script>
 </body>
 </html>

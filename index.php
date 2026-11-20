@@ -186,7 +186,7 @@ if (!$isLoggedIn) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- SEO: gerido em Administração → SEO e Indexação (lib/seo.php) -->
     <?= seoHead($browserLang, $lc['title'] ?? '') ?>
-    <link rel="stylesheet" href="assets/css/login.css">
+    <link rel="stylesheet" href="<?= assetUrl('assets/css/login.css') ?>">
     <style>
         body { background: #f8fafc; margin: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
         .landing-wrap { min-height: 100vh; display: grid; grid-template-columns: 420px 1fr; grid-template-rows: auto 1fr auto; }
@@ -282,7 +282,7 @@ if (!$isLoggedIn) {
     </div>
     <div class="landing-footer"><?= htmlspecialchars(SITE_NAME) ?> v<?= SITE_VERSION ?> &mdash; Universidade do Porto</div>
 </div>
-<script src="assets/js/login.js"></script>
+<script src="<?= assetUrl('assets/js/login.js') ?>"></script>
 </body>
 </html>
     <?php
@@ -302,7 +302,7 @@ if (!$isLoggedIn) {
     <!-- Leaflet Draw CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="assets/css/style.css">
+    <link rel="stylesheet" href="<?= assetUrl('assets/css/style.css') ?>">
 </head>
 <body>
     <!-- API Key Modal (overlay) -->
@@ -552,7 +552,7 @@ if (!$isLoggedIn) {
     <?php
     $tabJsFile = 'assets/js/tabs/' . $activeTab . '.js';
     if (file_exists($tabJsFile)): ?>
-        <script src="<?php echo $tabJsFile; ?>"></script>
+        <script src="<?= assetUrl($tabJsFile) ?>"></script>
     <?php endif; ?>
 
     <?php if ($activeTab === 'map'): ?>
@@ -561,7 +561,7 @@ if (!$isLoggedIn) {
     <?php endif; ?>
     
     <!-- Main JS -->
-    <script src="assets/js/app.js"></script>
+    <script src="<?= assetUrl('assets/js/app.js') ?>"></script>
 
     <!-- Nav dropdown toggle -->
     <script>

@@ -569,8 +569,10 @@ document.addEventListener('DOMContentLoaded', function() {
         loadAdminParams();
         loadLandingEditor();
         loadMqttSettings();
-        loadSeoSettings();
-        initVisitorStats();
+        // Cada secção arranca isolada: um erro numa não impede as outras
+        [loadSeoSettings, initVisitorStats].forEach(fn => {
+            try { fn(); } catch (e) { console.error(fn.name, e); }
+        });
 
         // Atalhos de teclado para o SQL editor
         const sqlQuery = document.getElementById('sql-query');
@@ -1044,7 +1046,11 @@ function loadVisitorStats(days) {
         body.style.opacity = '';
         if (!data.success) { body.innerHTML = `<p style="color:#991b1b">❌ ${escHtmlAdmin(data.message || 'Erro.')}</p>`; return; }
         renderVisitorStats(data.report);
-    }).catch(() => { body.style.opacity = ''; body.innerHTML = '<p style="color:#991b1b">❌ Erro de rede.</p>'; });
+    }).catch(e => {
+        body.style.opacity = '';
+        console.error('Visitantes:', e);
+        body.innerHTML = `<p style="color:#991b1b">❌ Não foi possível carregar as estatísticas: ${escHtmlAdmin(e && e.message || e)}</p>`;
+    });
 }
 
 function vsChange(now, prev, period) {

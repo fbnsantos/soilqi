@@ -55,6 +55,17 @@ function seoSettings(bool $refresh = false): array
     return $cache = $s;
 }
 
+/**
+ * URL de um ficheiro estático com a data de modificação como versão (?v=…).
+ * O .htaccess manda guardar .js/.css em cache 30 dias ("immutable"): sem isto,
+ * os browsers continuam a usar a versão antiga depois de um deploy.
+ */
+function assetUrl(string $path): string
+{
+    $file = dirname(__DIR__) . '/' . ltrim($path, '/');
+    return htmlspecialchars($path . (is_file($file) ? '?v=' . filemtime($file) : ''), ENT_QUOTES, 'UTF-8');
+}
+
 function seo(string $key): string
 {
     return seoSettings()[$key] ?? '';
